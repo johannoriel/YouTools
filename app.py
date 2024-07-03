@@ -1,4 +1,5 @@
 import os
+import json
 import streamlit as st
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -10,11 +11,23 @@ load_dotenv()
 # Récupérer la clé API depuis les variables d'environnement
 API_KEY = os.getenv("YOUTUBE_API_KEY")
 
+# Nom du fichier de configuration
+CONFIG_FILE = "config.json"
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_config(config):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f)
+
 def get_channel_videos(channel_id):
     youtube = build('youtube', 'v3', developerKey=API_KEY)
     
     try:
-        # Obtenir l'ID de la playlist "uploads" de la chaîne
         channel_response = youtube.channels().list(
             part='contentDetails',
             id=channel_id
@@ -22,7 +35,6 @@ def get_channel_videos(channel_id):
         
         uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
         
-        # Obtenir les 5 dernières vidéos de la playlist
         playlist_response = youtube.playlistItems().list(
             part='snippet',
             playlistId=uploads_playlist_id,
@@ -48,22 +60,25 @@ def main():
     
     st.title("YouTube Channel Dashboard")
     
-    # Vérifier si la clé API est définie
     if not API_KEY:
         st.error("La clé API YouTube n'est pas définie. Veuillez vérifier votre fichier .env")
         return
     
+    # Charger la configuration
+    config = load_config()
+    
     # Onglet Configuration
     with st.expander("Configuration"):
-        channel_id = st.text_input("ID de la chaîne YouTube")
+        channel_id = st.text_input("ID de la chaîne YouTube", value=config.get('channel_id', ''))
         if st.button("Sauvegarder"):
-            st.session_state.channel_id = channel_id
+            config['channel_id'] = channel_id
+            save_config(config)
             st.success("ID de la chaîne sauvegardé !")
     
     # Onglet Liste des vidéos
-    if 'channel_id' in st.session_state:
+    if config.get('channel_id'):
         st.header("5 dernières vidéos")
-        videos = get_channel_videos(st.session_state.channel_id)
+        videos = get_channel_videos(config['channel_id'])
         
         for video in videos:
             col1, col2 = st.columns([1, 3])
