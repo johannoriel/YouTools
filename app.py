@@ -13,7 +13,7 @@ load_dotenv()
 
 # Récupérer la clé API depuis les variables d'environnement
 API_KEY = os.getenv("YOUTUBE_API_KEY")
-LLM_KEY = os.getenv("LLMAPI_KEY")
+LLM_KEY = os.getenv("LLM_API_KEY")
 DEFAULT_MODEL = "ollama-dolphin"
 
 # Nom du fichier de configuration
@@ -99,7 +99,7 @@ def get_transcript(video_id, language):
 def get_available_models(llm_url, llm_key):
     try:
         headers = {'Authorization': f'Bearer {llm_key}'}
-        response = requests.get(f"{llm_url}/v1/models", headers=headers)
+        response = requests.get(f"{llm_url}/models", headers=headers)
         response.raise_for_status()
         models = response.json()['data']
         return [model['id'] for model in models]
