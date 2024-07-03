@@ -2,3 +2,4 @@ streamlit
 google-api-python-client
 python-dotenv
 youtube_transcript_api
+litellm[proxy]
