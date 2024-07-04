@@ -3,3 +3,4 @@
 .python-version
 config.json
 .llm-config.yml
+.tests
