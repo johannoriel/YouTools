@@ -172,7 +172,6 @@ def remove_silence(input_file, threshold, duration, videos_dir):
     output_filename = f"outfile_{input_filename}"
     output_file = os.path.join(videos_dir, output_filename)
     ffmpeg_command = f"ffmpeg -i '{input_file}' -hide_banner -af silencedetect=n={threshold}dB:d={duration} -f null - 2>&1 | python '{remsi_path}' > '{output_sh_path}'"
-    
     try:
         # Exécuter la commande ffmpeg
         subprocess.run(ffmpeg_command, shell=True, check=True, cwd=current_dir)
@@ -219,7 +218,6 @@ def get_credentials():
 
 # Fonction pour uploader la vidéo sur YouTube
 def upload_video(filename, title, description, category, keywords, privacy_status):
-    print("Uploading video...")
     credentials = get_credentials()
     youtube = build('youtube', 'v3', credentials=credentials)
     
@@ -244,14 +242,16 @@ def upload_video(filename, title, description, category, keywords, privacy_statu
     )
 
     response = None
-    st.progress_bar = st.progress(0)  # Initialiser la barre de progression
+    progress_bar = st.progress(0)
     while response is None:
         status, response = request.next_chunk()
         if status:
-            st.progress_bar.progress(int(status.progress() * 100))
+            progress = int(status.progress() * 100)
+            progress_bar.progress(progress)
+            st.write(f"Progression : {progress}%")
 
     st.success(f"Upload terminé ! ID de la vidéo : {response['id']}")
-    st.progress_bar.empty()  # Effacer la barre de progression après la fin de l'upload
+    return response['id']
 
 
 ###################################################
