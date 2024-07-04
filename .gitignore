@@ -4,3 +4,5 @@
 config.json
 .llm-config.yml
 .tests
+client_secret.json
+token.json

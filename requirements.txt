@@ -3,3 +3,6 @@ google-api-python-client
 python-dotenv
 youtube_transcript_api
 litellm[proxy]
+google-auth-oauthlib 
+google-auth-httplib2 
+google-api-python-client

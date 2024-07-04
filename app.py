@@ -9,6 +9,11 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
 import subprocess
 from datetime import datetime
+from googleapiclient.http import MediaFileUpload
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
@@ -20,7 +25,7 @@ DEFAULT_MODEL = "ollama-dolphin"
 
 # Nom du fichier de configuration
 CONFIG_FILE = "config.json"
-
+SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -139,15 +144,20 @@ def process_with_llm(prompt, sysprompt, transcript, llm_url, llm_model, llm_key)
 
 def list_video_files(directory):
     video_files = []
+    outfile_videos = []
     for file in os.listdir(directory):
-        if file.lower().endswith(('.mkv', '.mp4')) and not file.startswith('outfile'):
+        if file.lower().endswith(('.mkv', '.mp4')):
             full_path = os.path.join(directory, file)
             mod_time = os.path.getmtime(full_path)
-            video_files.append((file, full_path, mod_time))
+            if file.startswith('outfile_'):
+                outfile_videos.append((file, full_path, mod_time))
+            else:
+                video_files.append((file, full_path, mod_time))
     
     # Trier par date de modification, la plus récente en premier
     video_files.sort(key=lambda x: x[2], reverse=True)
-    return video_files
+    outfile_videos.sort(key=lambda x: x[2], reverse=True)
+    return video_files, outfile_videos
 
 def remove_silence(input_file, threshold, duration, videos_dir):
     # Obtenir le chemin absolu du script actuel (app.py)
@@ -185,6 +195,64 @@ def remove_silence(input_file, threshold, duration, videos_dir):
         return f"Erreur lors de l'exécution de la commande : {str(e)}"
     except Exception as e:
         return f"Une erreur inattendue s'est produite : {str(e)}"
+
+# Fonction pour obtenir les identifiants OAuth
+def get_credentials():
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'client_secret.json', SCOPES)
+            os.environ['BROWSER'] = '/snap/bin/chromium'
+            creds = flow.run_local_server(port=0)
+        
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    
+    return creds
+
+
+# Fonction pour uploader la vidéo sur YouTube
+def upload_video(filename, title, description, category, keywords, privacy_status):
+    print("Uploading video...")
+    credentials = get_credentials()
+    youtube = build('youtube', 'v3', credentials=credentials)
+    
+    body = {
+        'snippet': {
+            'title': title,
+            'description': description,
+            'tags': keywords,
+            'categoryId': category
+        },
+        'status': {
+            'privacyStatus': privacy_status
+        }
+    }
+
+    media = MediaFileUpload(filename, resumable=True)
+    
+    request = youtube.videos().insert(
+        part=','.join(body.keys()),
+        body=body,
+        media_body=media
+    )
+
+    response = None
+    st.progress_bar = st.progress(0)  # Initialiser la barre de progression
+    while response is None:
+        status, response = request.next_chunk()
+        if status:
+            st.progress_bar.progress(int(status.progress() * 100))
+
+    st.success(f"Upload terminé ! ID de la vidéo : {response['id']}")
+    st.progress_bar.empty()  # Effacer la barre de progression après la fin de l'upload
+
 
 ###################################################
 
@@ -261,6 +329,7 @@ def main():
                     if st.button("Transcript", key=f"transcript_{video['video_id']}"):
                         transcript, lang = get_transcript(video['video_id'], config['language'])
                         st.session_state.transcript = transcript
+                        st.session_state.title = video['title']
                         st.session_state.transcript_lang = lang
                         st.session_state.show_transcript = True
                         st.session_state.current_video_id = video['video_id']
@@ -285,8 +354,14 @@ def main():
                     mime="text/plain"
                 )
             with col3:
+                prompt = config['llm_prompt']
+                with st.popover("Correction du prompt"):
+                    st.markdown("Voules vous changer le prompt ?")
+                    prompt = st.text_input("Nouveau prompt", prompt)
                 if st.button("Traiter avec LLM"):
-                    llm_response = process_with_llm(config['llm_prompt'], config['llm_prompt'], st.session_state.transcript, config['llm_url'], config['llm_model'], config['llm_key'])
+                    video_content = f"# {st.session_state.title} \n {st.session_state.transcript}"
+                    print(f"Debug prompt: {prompt}")
+                    llm_response = process_with_llm(prompt, config['llm_sys_prompt'], video_content, config['llm_url'], config['llm_model'], config['llm_key'])
                     st.session_state.llm_response = llm_response
                     st.session_state.show_llm_response = True
                     
@@ -310,8 +385,10 @@ def main():
     # Nouvel onglet pour le retrait des silences
     with tab3:
         st.header("Retrait des silences")
-        video_files = list_video_files(config['work_directory'])
+        video_files, outfile_videos = list_video_files(config['work_directory'])
         
+        # Section pour les vidéos originales
+        st.subheader("Vidéos originales")
         for file, full_path, _ in video_files:
             col1, col2 = st.columns([3, 1])
             with col1:
@@ -320,10 +397,54 @@ def main():
                 if st.button("Retirer les silences", key=f"remove_silence_{file}"):
                     with st.spinner(f"Traitement de {file} en cours..."):
                         result = remove_silence(full_path, config['silence_threshold'], config['silence_duration'], config['work_directory'])
-                    if result.startswith("Erreur"):
+                    if result.startswith("Erreur") or result.startswith("Une erreur"):
                         st.error(result)
                     else:
                         st.success(f"Traitement terminé. Fichier de sortie : {result}")
-            
+                        st.experimental_rerun()  # Recharger la page pour afficher le nouveau fichier outfile_
+        
+        # Section pour les vidéos traitées (outfile_)
+        if outfile_videos:
+            st.subheader("Vidéos traitées")
+            for index, (file, full_path, _) in enumerate(outfile_videos):
+                st.write(file)
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.video(full_path)     
+                
+                # Créer une clé unique pour chaque vidéo
+                video_key = f"video_{index}"
+                
+                # Bouton pour téléverser
+                if st.button("Téléverser sur YouTube", key=f"upload_button_{video_key}"):
+                    # Stocker l'état d'affichage du formulaire dans session_state
+                    st.session_state[f"show_form_{video_key}"] = True
+                
+                # Vérifier si le formulaire doit être affiché
+                if st.session_state.get(f"show_form_{video_key}", False):
+                    with st.expander("Détails de la vidéo", expanded=True):
+                        title = st.text_input("Titre de la vidéo", value=file, key=f"title_{video_key}")
+                        description = st.text_area("Description de la vidéo", key=f"description_{video_key}")
+                        category = st.selectbox("Catégorie", ["22", "25", "27", "28"], format_func=lambda x: {
+                            "22": "People & Blogs",
+                            "25": "News & Politics",
+                            "27": "Education",
+                            "28": "Science & Technology"
+                        }[x], key=f"category_{video_key}") # https://mixedanalytics.com/blog/list-of-youtube-video-category-ids/
+                        keywords = st.text_input("Mots-clés (séparés par des virgules)", key=f"keywords_{video_key}")
+                        privacy_status = st.selectbox("Statut de confidentialité", 
+                                                      ["public", "private", "unlisted"],
+                                                      key=f"privacy_{video_key}")
+                        
+                        if st.button("Confirmer le téléversement", key=f"confirm_upload_{video_key}"):
+                            st.write("Début du téléversement...")  # Debug
+                            upload_video(full_path, title, description, category, keywords.split(','), privacy_status)
+                            st.write("Fin du téléversement.")  # Debug
+                            # Réinitialiser l'état d'affichage du formulaire
+                            st.session_state[f"show_form_{video_key}"] = False
+                            st.experimental_rerun()
+
+
 if __name__ == "__main__":
     main()
