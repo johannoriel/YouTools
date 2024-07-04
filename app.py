@@ -2,12 +2,14 @@ import os
 import json
 import streamlit as st
 import requests
+import re
+import subprocess
+from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from dotenv import load_dotenv
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
-import subprocess
 from datetime import datetime
 from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import Flow
@@ -25,7 +27,7 @@ DEFAULT_MODEL = "ollama-dolphin"
 
 # Nom du fichier de configuration
 CONFIG_FILE = "config.json"
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
+SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube']
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -253,6 +255,61 @@ def upload_video(filename, title, description, category, keywords, privacy_statu
     st.success(f"Upload terminé ! ID de la vidéo : {response['id']}")
     return response['id']
 
+###################################################
+# Vidéos temporaires
+
+def list_videos(youtube, channel_id):
+    # Obtention de la playlist ID pour les uploads de la chaîne
+    request = youtube.channels().list(part='contentDetails', id=channel_id)
+    response = request.execute()
+    playlist_id = response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+    
+    # Liste des vidéos de la playlist d'uploads
+    videos = []
+    next_page_token = None
+    while True:
+        request = youtube.playlistItems().list(part='snippet,status', playlistId=playlist_id, maxResults=50, pageToken=next_page_token)
+        response = request.execute()
+        videos += response['items']
+        next_page_token = response.get('nextPageToken')
+        if next_page_token is None:
+            break
+    return videos
+
+def update_video_privacy(youtube, video_id, privacy_status='unlisted'):
+    request_body = {
+        'id': video_id,
+        'status': {
+            'privacyStatus': privacy_status
+        }
+    }
+    request = youtube.videos().update(
+        part='status',
+        body=request_body
+    )
+    response = request.execute()
+    return response
+
+def check_video_expiration(video):
+    title = video['snippet']['title']
+    published_at = datetime.strptime(video['snippet']['publishedAt'], '%Y-%m-%dT%H:%M:%SZ')
+    match = re.match(r'\[(\d+)j\]', title)
+    
+    if match:
+        days = int(match.group(1))
+        delta_days = (datetime.utcnow() - published_at).days
+        days_left = days - delta_days
+        return {
+            'title': title,
+            'video_id': video['snippet']['resourceId']['videoId'],
+            'published_at': published_at,
+            'expiration_days': days,
+            'days_left': days_left,
+            'is_expired': days_left <= 0,
+            'privacy_status': video['status']['privacyStatus']
+        }
+    return None
+
 
 ###################################################
 
@@ -269,7 +326,7 @@ def main():
     config = load_config()
     
     # Onglets
-    tab1, tab2, tab3 = st.tabs(["Configuration", "Résumé des vidéos", "Retrait des silences"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Configuration", "Résumé des vidéos", "Retrait des silences", "Gestion des vidéos temporaires"])
     
     # Onglet Configuration
     with tab1:
@@ -444,6 +501,43 @@ def main():
                             # Réinitialiser l'état d'affichage du formulaire
                             st.session_state[f"show_form_{video_key}"] = False
                             st.experimental_rerun()
+
+    with tab4:
+        st.header("Gestion des vidéos temporaires")
+        
+        if 'channel_id' in config and config['channel_id']:
+            credentials = get_credentials()
+            youtube = build('youtube', 'v3', credentials=credentials)
+            
+            videos = list_videos(youtube, config['channel_id'])
+            temp_videos = [check_video_expiration(video) for video in videos if check_video_expiration(video)]
+            
+            if temp_videos:
+                for video in temp_videos:
+                    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                    with col1:
+                        st.write(video['title'])
+                    with col2:
+                        st.write(f"Publié le: {video['published_at'].strftime('%Y-%m-%d')}")
+                    with col3:
+                        if video['is_expired']:
+                            st.write(f"Expiré depuis {abs(video['days_left'])} jours")
+                        else:
+                            st.write(f"Expire dans {video['days_left']} jours")
+                    with col4:
+                        st.write(f"Statut: {video['privacy_status']}")
+                
+                if st.button("Dépublier les vidéos en dépassement"):
+                    expired_videos = [video for video in temp_videos if video['is_expired'] and video['privacy_status'] == 'public']
+                    for video in expired_videos:
+                        update_video_privacy(youtube, video['video_id'])
+                    st.success(f"{len(expired_videos)} vidéos ont été dépubliées.")
+                    st.experimental_rerun()
+            else:
+                st.info("Aucune vidéo temporaire trouvée.")
+        else:
+            st.warning("Veuillez configurer l'ID de la chaîne dans l'onglet Configuration.")
+
 
 
 if __name__ == "__main__":
