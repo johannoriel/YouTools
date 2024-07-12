@@ -114,9 +114,7 @@ class RecentvideosPlugin(Plugin):
                         prompt, 
                         llm_config.get('llm_sys_prompt', ''), 
                         video_content, 
-                        llm_config.get('llm_url', ''), 
-                        llm_config.get('llm_model', ''), 
-                        config.get('llm_key', '')
+                        llm_config.get('llm_model', '')
                     )
                     st.session_state.llm_response = llm_response
                     st.session_state.show_llm_response = True

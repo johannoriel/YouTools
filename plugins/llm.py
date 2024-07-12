@@ -1,11 +1,20 @@
 from app import Plugin
 import streamlit as st
-import requests
+import yaml
+from litellm import completion, model_list
+from typing import List, Dict
 
 DEFAULT_MODEL = "ollama-qwen2"
 
 class LlmPlugin(Plugin):
-        
+    def __init__(self, name: str, plugin_manager):
+        super().__init__(name, plugin_manager)
+        self.config = self.load_llm_config()
+
+    def load_llm_config(self) -> Dict:
+        with open('.llm-config.yml', 'r') as file:
+            return yaml.safe_load(file)
+
     def get_config_fields(self):
         return {
             "llm_prompt": {
@@ -18,27 +27,16 @@ class LlmPlugin(Plugin):
                 "label": "Prompt système pour le LLM",
                 "default": "Tu es un assistant YouTuber qui écrit du contenu viral. Tu exécute les instructions fidèlement. Tu réponds en français sauf si on te demande de traduire explicitement en anglais."
             },
-            "llm_url": {
-                "type": "text",
-                "label": "URL du LLM",
-                "default": "http://localhost:4000"
-            },
             "llm_model": {
                 "type": "select",
                 "label": "Modèle LLM",
                 "options": [("none", DEFAULT_MODEL)],
-                "default": "ollama-dolphin"
-            },
-            "llm_key": {
-                "type": "text",
-                "label": "Clé d'API du LLM",
-                "default": ""
+                "default": "ollama-qwen2"
             }
         }
 
     def get_config_ui(self, config):
         updated_config = {}
-        #updated_config['separator_llm'] = st.header('LLM')
         for field, params in self.get_config_fields().items():
             if params['type'] == 'textarea':
                 updated_config[field] = st.text_area(
@@ -46,50 +44,44 @@ class LlmPlugin(Plugin):
                     value=config.get(field, params['default'])
                 )
             elif params['label'] == 'Modèle LLM':
-                if 'llm_url' in config and 'llm_key' in config :
-                    available_models = self.get_available_models(config['llm_url'], config['llm_key'])
-                    updated_config[field] = st.selectbox(
-                        params['label'],
-                        options=available_models,
-                        index=available_models.index(config.get('llm_model', DEFAULT_MODEL))
-                    )
-                else: 
-                    updated_config[field] = st.text_input(params['label'],value= DEFAULT_MODEL)
-            else:
-                updated_config[field] = st.text_input(
+                available_models = self.get_available_models()
+                updated_config[field] = st.selectbox(
                     params['label'],
-                    value=config.get(field, params['default']),
-                    type="password" if field == "llm_key" else "default"
+                    options=available_models,
+                    index=available_models.index(config.get('llm_model', DEFAULT_MODEL))
                 )
         return updated_config
 
-    def get_available_models(self, llm_url, llm_key):
+    def get_available_models(self) -> List[str]:
         try:
-            headers = {'Authorization': f'Bearer {llm_key}'}
-            response = requests.get(f"{llm_url}/models", headers=headers)
-            response.raise_for_status()
-            models = response.json()['data']
-            return [model['id'] for model in models]
-        except requests.RequestException as e:
+            models = model_list()
+            return [model['model_name'] for model in models]
+        except Exception as e:
             st.error(f"Erreur lors de la récupération des modèles : {str(e)}")
             return []
 
-    def process_with_llm(self, prompt, sysprompt, transcript, llm_url, llm_model, llm_key):
+    def process_with_llm(self, prompt: str, sysprompt: str, transcript: str, llm_model: str) -> str:
         try:
-            headers = {'Authorization': f'Bearer {llm_key}'}
-            response = requests.post(
-                f"{llm_url}/chat/completions", headers=headers,
-                json={
-                    "model": llm_model,
-                    "messages": [
-                        {"role": "system", "content": sysprompt},
-                        {"role": "user", "content": f"{prompt} : \n {transcript}"}
-                    ]
-                }
+            # Chercher les paramètres correspondant au modèle sélectionné
+            model_config = next((model for model in self.config['model_list'] if model['model_name'] == llm_model), None)
+            
+            if not model_config:
+                raise ValueError(f"Configuration non trouvée pour le modèle {llm_model}")
+            
+            # Utiliser les paramètres spécifiés dans litellm_params
+            litellm_params = model_config['litellm_params']
+            
+            response = completion(
+                model=litellm_params['model'],
+                messages=[
+                    {"role": "system", "content": sysprompt},
+                    {"role": "user", "content": f"{prompt} : \n {transcript}"}
+                ],
+                api_base=litellm_params['api_base'],
+                **litellm_params.get('additional_params', {})  # Pour tout autre paramètre supplémentaire
             )
-            response.raise_for_status()
-            return response.json()['choices'][0]['message']['content']
-        except requests.RequestException as e:
+            return response['choices'][0]['message']['content']
+        except Exception as e:
             return f"Erreur lors de l'appel au LLM : {str(e)}"
 
     def run(self, config):

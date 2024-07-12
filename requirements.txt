@@ -2,7 +2,7 @@ streamlit
 google-api-python-client
 python-dotenv
 youtube_transcript_api
-litellm[proxy]
+litellm
 google-auth-oauthlib 
 google-auth-httplib2 
 google-api-python-client
