@@ -8,8 +8,9 @@ from typing import List, Dict, Any
 CONFIG_FILE = "config.json"
     
 class Plugin:
-    def __init__(self, name: str):
+    def __init__(self, name, plugin_manager):
         self.name = name
+        self.plugin_manager = plugin_manager
 
     def get_config_fields(self) -> Dict[str, Any]:
         """Retourne les champs de configuration du plugin."""
@@ -45,7 +46,11 @@ class PluginManager:
                 module_name = filename[:-3]
                 module = importlib.import_module(f'plugins.{module_name}')
                 plugin_class = getattr(module, f'{module_name.capitalize()}Plugin')
-                self.plugins[module_name] = plugin_class(module_name)
+                self.plugins[module_name] = plugin_class(module_name, self)
+
+    def get_plugin(self, plugin_name: str) -> Plugin:
+        """Récupère un plugin spécifique."""
+        return self.plugins.get(plugin_name)
 
     def get_all_config_ui(self, config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """Récupère toutes les interfaces utilisateur de configuration de tous les plugins."""

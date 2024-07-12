@@ -4,6 +4,9 @@ import streamlit as st
 from app import Plugin, list_video_files
 
 class TrimsilencesPlugin(Plugin):
+    def __init__(self, name: str, plugin_manager):
+        super().__init__(name, plugin_manager)
+        
     def get_config_fields(self):
         return {
             "silence_threshold": {
@@ -20,7 +23,7 @@ class TrimsilencesPlugin(Plugin):
 
     def get_config_ui(self, config):
         updated_config = {}
-        updated_config['separator_trimsilences'] = st.header('Retirer les silences')
+        #updated_config['separator_trimsilences'] = st.header('Retirer les silences')
         updated_config["silence_threshold"] = st.slider(
             "Seuil de silence (dB)",
             min_value=-60,

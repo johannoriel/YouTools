@@ -11,8 +11,9 @@ import datetime
 import re
 
 class TempvideosPlugin(Plugin):
-    def __init__(self, name):
-        super().__init__(name)
+        
+    def __init__(self, name: str, plugin_manager):
+        super().__init__(name, plugin_manager)
         self.SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 
     def get_tabs(self):

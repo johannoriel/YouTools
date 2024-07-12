@@ -2,6 +2,7 @@ from app import Plugin
 import streamlit as st
 
 class CommonPlugin(Plugin):
+        
     def get_config_fields(self):
         return {
             "channel_id": {
@@ -24,7 +25,7 @@ class CommonPlugin(Plugin):
 
     def get_config_ui(self, config):
         updated_config = {}
-        updated_config['separator_common'] = st.header('Common')
+        #updated_config['separator_common'] = st.header('Common')
         for field, params in self.get_config_fields().items():
             if params['type'] == 'select':
                 updated_config[field] = st.selectbox(

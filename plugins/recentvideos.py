@@ -6,71 +6,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
-import requests
-
-DEFAULT_MODEL = "ollama-qwen2"
 
 class RecentvideosPlugin(Plugin):
-    def get_config_fields(self):
-        return {
-            "llm_prompt": {
-                "type": "textarea",
-                "label": "Prompt pour le LLM",
-                "default": "Résume les grandes lignes du transcript, sous forme de liste à puce, sans commenter"
-            },
-            "llm_sys_prompt": {
-                "type": "textarea",
-                "label": "Prompt système pour le LLM",
-                "default": "Tu es un assistant YouTuber qui écrit du contenu viral. Tu exécute les instructions fidèlement. Tu réponds en français sauf si on te demande de traduire explicitement en anglais."
-            },
-            "llm_url": {
-                "type": "text",
-                "label": "URL du LLM",
-                "default": "http://localhost:4000"
-            },
-            "llm_model": {
-                "type": "select",
-                "label": "Modèle LLM",
-                "options": [("none", DEFAULT_MODEL)],
-                "default": "ollama-dolphin"
-            },
-            "llm_key": {
-                "type": "text",
-                "label": "Clé d'API du LLM",
-                "default": ""
-            }
-        }
-
-    def get_config_ui(self, config):
-        updated_config = {}
-        updated_config['separator_recentevideos'] = st.header('Vidéos récentes')
-        for field, params in self.get_config_fields().items():
-            if params['label'] == 'Langue préférée pour les transcriptions':
-                updated_config[field] = st.selectbox(
-                    params['label'],
-                    options=[option[0] for option in params['options']],
-                    format_func=lambda x: dict(params['options'])[x],
-                    index=[option[0] for option in params['options']].index(config.get(field, params['default']))
-                )
-            elif params['type'] == 'textarea':
-                updated_config[field] = st.text_area(
-                    params['label'],
-                    value=config.get(field, params['default'])
-                )
-            elif params['label'] == 'Modèle LLM':
-                available_models = self.get_available_models(config['llm_url'], config['llm_key'])
-                updated_config[field] = st.selectbox(
-                    params['label'],
-                    options=available_models,
-                    index=available_models.index(config.get('llm_model', DEFAULT_MODEL))
-                )
-            else:
-                updated_config[field] = st.text_input(
-                    params['label'],
-                    value=config.get(field, params['default']),
-                    type="password" if field == "llm_key" else "default"
-                )
-        return updated_config
 
     def get_tabs(self):
         return [{"name": "Résumé des vidéos", "plugin": "recentvideos"}]
@@ -122,35 +59,6 @@ class RecentvideosPlugin(Plugin):
         full_transcript = " ".join([entry['text'] for entry in transcript])
         
         return full_transcript, language
-        
-    def get_available_models(self, llm_url, llm_key):
-        try:
-            headers = {'Authorization': f'Bearer {llm_key}'}
-            response = requests.get(f"{llm_url}/models", headers=headers)
-            response.raise_for_status()
-            models = response.json()['data']
-            return [model['id'] for model in models]
-        except requests.RequestException as e:
-            st.error(f"Erreur lors de la récupération des modèles : {str(e)}")
-            return []    
-
-    def process_with_llm(self, prompt, sysprompt, transcript, llm_url, llm_model, llm_key):
-        try:
-            headers = {'Authorization': f'Bearer {llm_key}'}
-            response = requests.post(
-                f"{llm_url}/chat/completions", headers=headers,
-                json={
-                    "model": llm_model,
-                    "messages": [
-                        {"role": "system", "content": sysprompt},
-                        {"role": "user", "content": f"{prompt} : \n {transcript}"}
-                    ]
-                }
-            )
-            response.raise_for_status()
-            return response.json()['choices'][0]['message']['content']
-        except requests.RequestException as e:
-            return f"Erreur lors de l'appel au LLM : {str(e)}"
 
     def run(self, config):
         st.header("5 dernières vidéos")
@@ -194,19 +102,21 @@ class RecentvideosPlugin(Plugin):
                     mime="text/plain"
                 )
             with col3:
-                prompt = config['recentvideos']['llm_prompt']
+                llm_plugin = self.plugin_manager.get_plugin('llm')
+                llm_config = config.get('llm', {})
+                prompt = llm_config.get('llm_prompt', '')
                 with st.popover("Correction du prompt"):
                     st.markdown("Voulez-vous changer le prompt ?")
                     prompt = st.text_input("Nouveau prompt", prompt)
                 if st.button("Traiter avec LLM"):
                     video_content = f"# {st.session_state.title} \n {st.session_state.transcript}"
-                    llm_response = self.process_with_llm(
+                    llm_response = llm_plugin.process_with_llm(
                         prompt, 
-                        config['recentvideos']['llm_sys_prompt'], 
+                        llm_config.get('llm_sys_prompt', ''), 
                         video_content, 
-                        config['recentvideos']['llm_url'], 
-                        config['recentvideos']['llm_model'], 
-                        config['llm_key']
+                        llm_config.get('llm_url', ''), 
+                        llm_config.get('llm_model', ''), 
+                        config.get('llm_key', '')
                     )
                     st.session_state.llm_response = llm_response
                     st.session_state.show_llm_response = True
