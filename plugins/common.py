@@ -14,10 +14,17 @@ class CommonPlugin(Plugin):
                 "label": "Répertoire de travail",
                 "default": "/home/joriel/Vidéos"
             },            
+            "language": {
+                "type": "select",
+                "label": "Langue préférée pour les transcriptions",
+                "options": [("fr", "Français"), ("en", "Anglais")],
+                "default": "fr"
+            },
         }
 
     def get_config_ui(self, config):
         updated_config = {}
+        updated_config['separator_common'] = st.header('Common')
         for field, params in self.get_config_fields().items():
             if params['type'] == 'select':
                 updated_config[field] = st.selectbox(

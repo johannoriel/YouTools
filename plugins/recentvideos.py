@@ -13,12 +13,6 @@ DEFAULT_MODEL = "ollama-qwen2"
 class RecentvideosPlugin(Plugin):
     def get_config_fields(self):
         return {
-            "language2": {
-                "type": "select",
-                "label": "Langue préférée pour les transcriptions",
-                "options": [("fr", "Français"), ("en", "Anglais")],
-                "default": "fr"
-            },
             "llm_prompt": {
                 "type": "textarea",
                 "label": "Prompt pour le LLM",
@@ -49,6 +43,7 @@ class RecentvideosPlugin(Plugin):
 
     def get_config_ui(self, config):
         updated_config = {}
+        updated_config['separator_recentevideos'] = st.header('Vidéos récentes')
         for field, params in self.get_config_fields().items():
             if params['label'] == 'Langue préférée pour les transcriptions':
                 updated_config[field] = st.selectbox(
@@ -172,7 +167,7 @@ class RecentvideosPlugin(Plugin):
                     st.markdown(f"[Voir la vidéo](https://www.youtube.com/watch?v={video['video_id']})")
                 with col3:
                     if st.button("Transcript", key=f"transcript_{video['video_id']}"):
-                        transcript, lang = self.get_transcript(video['video_id'], config['recentvideos']['language'])
+                        transcript, lang = self.get_transcript(video['video_id'], config['common']['language'])
                         st.session_state.transcript = transcript
                         st.session_state.title = video['title']
                         st.session_state.transcript_lang = lang

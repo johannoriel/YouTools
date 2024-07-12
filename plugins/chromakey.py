@@ -15,6 +15,7 @@ class ChromakeyPlugin(Plugin):
 
     def get_config_ui(self, config):
         updated_config = {}
+        updated_config['separator_chromakey'] = st.header('Chroma Key')
         updated_config["background_directory"] = st.text_input(
             "Répertoire des vidéos de fond",
             value=config.get("background_directory", "/home/joriel/Vidéos/Backgrounds")

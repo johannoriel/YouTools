@@ -20,6 +20,7 @@ class TrimsilencesPlugin(Plugin):
 
     def get_config_ui(self, config):
         updated_config = {}
+        updated_config['separator_trimsilences'] = st.header('Retirer les silences')
         updated_config["silence_threshold"] = st.slider(
             "Seuil de silence (dB)",
             min_value=-60,
