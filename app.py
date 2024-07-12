@@ -16,14 +16,28 @@ class Plugin:
         """Retourne les champs de configuration du plugin."""
         return {}
 
-    def get_config_ui(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        """Génère l'interface utilisateur pour la configuration du plugin."""
+    def get_config_ui(self, config):
+        """Génère une interface par défaut. Si le champ commance par 'pass' il sera considéré password" """
         updated_config = {}
-        for field_name, field_info in self.get_config_fields().items():
-            updated_config[field_name] = st.text_input(
-                field_info['label'],
-                value=config.get(field_name, field_info.get('default', ''))
-            )
+        for field, params in self.get_config_fields().items():
+            if params['type'] == 'select':
+                updated_config[field] = st.selectbox(
+                    params['label'],
+                    options=[option[0] for option in params['options']],
+                    format_func=lambda x: dict(params['options'])[x],
+                    index=[option[0] for option in params['options']].index(config.get(field, params['default']))
+                )
+            elif params['type'] == 'textarea':
+                updated_config[field] = st.text_area(
+                    params['label'],
+                    value=config.get(field, params['default'])
+                )
+            else:
+                updated_config[field] = st.text_input(
+                    params['label'],
+                    value=config.get(field, params['default']),
+                    type="password" if field.startswith("pass") else "default"
+                )        
         return updated_config
 
     def get_tabs(self) -> List[Dict[str, Any]]:

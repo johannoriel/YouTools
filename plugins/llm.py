@@ -54,11 +54,10 @@ class LlmPlugin(Plugin):
 
     def get_available_models(self) -> List[str]:
         try:
-            models = model_list()
-            return [model['model_name'] for model in models]
+            return [model['model_name'] for model in self.config['model_list']]
         except Exception as e:
             st.error(f"Erreur lors de la récupération des modèles : {str(e)}")
-            return []
+            return [DEFAULT_MODEL]
 
     def process_with_llm(self, prompt: str, sysprompt: str, transcript: str, llm_model: str) -> str:
         try:

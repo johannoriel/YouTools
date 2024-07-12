@@ -23,30 +23,6 @@ class CommonPlugin(Plugin):
             },
         }
 
-    def get_config_ui(self, config):
-        updated_config = {}
-        #updated_config['separator_common'] = st.header('Common')
-        for field, params in self.get_config_fields().items():
-            if params['type'] == 'select':
-                updated_config[field] = st.selectbox(
-                    params['label'],
-                    options=[option[0] for option in params['options']],
-                    format_func=lambda x: dict(params['options'])[x],
-                    index=[option[0] for option in params['options']].index(config.get(field, params['default']))
-                )
-            elif params['type'] == 'textarea':
-                updated_config[field] = st.text_area(
-                    params['label'],
-                    value=config.get(field, params['default'])
-                )
-            else:
-                updated_config[field] = st.text_input(
-                    params['label'],
-                    value=config.get(field, params['default']),
-                    type="password" if field == "?" else "default"
-                )        
-        return updated_config
-
     def get_tabs(self):
         return [{"name": "Commun", "plugin": "common"}]
 

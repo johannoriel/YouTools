@@ -10,7 +10,7 @@ from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvai
 class RecentvideosPlugin(Plugin):
 
     def get_tabs(self):
-        return [{"name": "Résumé des vidéos", "plugin": "recentvideos"}]
+        return [{"name": "5 dernières vidéos Youtube", "plugin": "recentvideos"}]
 
     def get_channel_videos(self, channel_id, api_key):
         youtube = build('youtube', 'v3', developerKey=api_key)
