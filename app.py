@@ -136,6 +136,7 @@ def main():
             if tab['name'] == selected_tab:
                 plugin_manager.run_plugin(tab['plugin'], config)
                 break
+                
 from dotenv import load_dotenv
 load_dotenv()
 API_KEY = os.getenv("YOUTUBE_API_KEY")
