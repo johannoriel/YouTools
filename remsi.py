@@ -38,4 +38,4 @@ input_filename = os.path.basename(inputFile)
 output_filename = f"outfile_{input_filename}"
 output_file = os.path.join(videos_dir, output_filename)
 
-print("ffmpeg -i", inputFile, vfilter, afilter, output_file)
+print("ffmpeg -y -i", inputFile, vfilter, afilter, output_file)

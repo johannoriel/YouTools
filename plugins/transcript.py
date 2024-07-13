@@ -107,7 +107,7 @@ class TranscriptPlugin(Plugin):
             try:
                 result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
                 print("Sortie STDOUT:", result.stdout)
-                print("Sortie STDERR:", result.stderr)
+                #print("Sortie STDERR:", result.stderr)
             except subprocess.CalledProcessError as e:
                 print("Erreur lors de l'exécution de ffmpeg:")
                 print(e.stderr)  # Affiche le message d'erreur de ffmpeg
@@ -130,7 +130,7 @@ class TranscriptPlugin(Plugin):
             try:
                 result = subprocess.run(whisper_command, check=True, capture_output=True, text=True)
                 print("Sortie STDOUT:", result.stdout)
-                print("Sortie STDERR:", result.stderr)
+                #print("Sortie STDERR:", result.stderr)
             except subprocess.CalledProcessError as e:
                 print("Erreur lors de l'exécution de whisper:")
                 print(e.stderr)  # Affiche le message d'erreur de whisper

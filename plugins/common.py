@@ -18,7 +18,6 @@ translations["fr"].update({
 
 class CommonPlugin(Plugin):
     def get_config_fields(self):
-        global lang
         return {
             "channel_id": {
                 "type": "text",
@@ -42,7 +41,6 @@ class CommonPlugin(Plugin):
         return [{"name": "Commun", "plugin": "common"}]
 
     def run(self, config):
-        global lang
         st.header("Common Plugin")
         st.write(f"Channel: {config['common']['channel_id']}")
         st.write(f"{t('work_directory')}: {config['common']['work_directory']}")
@@ -52,6 +50,8 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.exceptions import RefreshError
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 def get_credentials():
     creds = None
@@ -115,7 +115,7 @@ def upload_video(filename, title, description, category, keywords, privacy_statu
             progress_bar.progress(progress)
             st.write(f"Progression : {progress}%")
 
-    st.success(f"t('upload_finished') : {response['id']}")
+    st.success(t('upload_finished')+f" : {response['id']}")
     return response['id']
 
 def list_video_files(directory):
@@ -138,3 +138,7 @@ def list_video_files(directory):
     chroma_videos.sort(key=lambda x: x[2], reverse=True)
     return video_files, outfile_videos, chroma_videos
 
+def remove_quotes(s):
+    if s.startswith('"') and s.endswith('"'):
+        return s[1:-1]
+    return s

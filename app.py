@@ -139,6 +139,10 @@ def main():
         st.header(t("configurations"))
         all_config_ui = plugin_manager.get_all_config_ui(config)
 
+        for plugin_name, ui_config in all_config_ui.items():
+            with st.expander(f"{t('configurations')} {plugin_name}"):
+                config[plugin_name] = ui_config
+                
         if st.button(t("save_button")):
             save_config(config)
             st.success(t("success_message"))

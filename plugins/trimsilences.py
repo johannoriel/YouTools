@@ -79,7 +79,8 @@ class TrimsilencesPlugin(Plugin):
         input_filename = os.path.basename(input_file)
         output_filename = f"outfile_{input_filename}"
         output_file = os.path.join(videos_dir, output_filename)
-        ffmpeg_command = f"ffmpeg -i '{input_file}' -hide_banner -af silencedetect=n={threshold}dB:d={duration} -f null - 2>&1 | python '{remsi_path}' > '{output_sh_path}'"
+        ffmpeg_command = f"ffmpeg -i '{input_file}' -hide_banner -y -af silencedetect=n={threshold}dB:d={duration} -f null - 2>&1 | python '{remsi_path}' > '{output_sh_path}'"
+        print(ffmpeg_command)
         try:
             subprocess.run(ffmpeg_command, shell=True, check=True, cwd=current_dir)
             
