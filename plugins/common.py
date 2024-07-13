@@ -7,11 +7,13 @@ translations["en"].update({
     "channel_id": "YouTube Channel ID",
     "work_directory": "Work Directory",
     "preferred_language": "Preferred Language for Transcriptions",
+    "upload_finished": "Upload finished ! ID of the video",
 })
 translations["fr"].update({
     "channel_id": "ID de la chaîne YouTube",
     "work_directory": "Répertoire de travail",
     "preferred_language": "Langue préférée pour les transcriptions",
+    "upload_finished": "Upload terminé ! ID de la vidéo",
 })
 
 class CommonPlugin(Plugin):
@@ -78,3 +80,41 @@ def get_credentials():
             token.write(creds.to_json())
     
     return creds
+    
+# Fonction pour uploader la vidéo sur YouTube
+def upload_video(filename, title, description, category, keywords, privacy_status):
+    credentials = get_credentials()
+    youtube = build('youtube', 'v3', credentials=credentials)
+    
+    body = {
+        'snippet': {
+            'title': title,
+            'description': description,
+            'tags': keywords,
+            'categoryId': category
+        },
+        'status': {
+            'privacyStatus': privacy_status
+        }
+    }
+
+    media = MediaFileUpload(filename, resumable=True)
+    
+    request = youtube.videos().insert(
+        part=','.join(body.keys()),
+        body=body,
+        media_body=media
+    )
+
+    response = None
+    progress_bar = st.progress(0)
+    while response is None:
+        status, response = request.next_chunk()
+        if status:
+            progress = int(status.progress() * 100)
+            progress_bar.progress(progress)
+            st.write(f"Progression : {progress}%")
+
+    st.success(f"t('upload_finished') : {response['id']}")
+    return response['id']
+
