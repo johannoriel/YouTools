@@ -2,6 +2,7 @@
 YouTube tools to automate video creation
 
 ## .llm-config.yml
+```
 model_list: 
   - model_name: groq1
     litellm_params:
@@ -15,14 +16,20 @@ model_list:
 
 general_settings: 
   master_key: sk-xxxxx
+```
 
 ## .env
+```
 YOUTUBE_API_KEY=xxxxxxx
 LLM_API_KEY=sk-xxxxx
-
+```
 ## Install with pyenv
+```
 pyenv install 3.10
 pyenv virtualenv 3.10 .venv
 pyenv local .venv
- 
+pip install -r requirements.txt
+./start.sh
+```
+
 

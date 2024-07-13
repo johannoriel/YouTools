@@ -5,6 +5,8 @@ from plugins.common import list_video_files, upload_video, remove_quotes
 from plugins.trimsilences import TrimsilencesPlugin
 from plugins.transcript import TranscriptPlugin
 from plugins.ragllm import RagllmPlugin
+from plugins.chromakey import ChromakeyPlugin
+from chromakey_background import replace_background
 import os
 
 # Ajout des traductions spécifiques à ce plugin
@@ -25,6 +27,9 @@ translations["en"].update({
     "directpublish_upload": "Uploading...",
     "publish_signature": "Signature to add in video description",
     "publish_signature_default": "",
+    "directpublish_replace_green_screen": "Replace green screen background",
+    "directpublish_select_background": "Select a background video",
+    "directpublish_replacing_background": "Replacing green screen background...",
 })
 
 translations["fr"].update({
@@ -44,6 +49,9 @@ translations["fr"].update({
     "directpublish_upload": "Téléversement...",
     "publish_signature": "Signature à ajouter à la description de la vidéo",
     "publish_signature_default": "",
+    "directpublish_replace_green_screen": "Remplacer le fond vert",
+    "directpublish_select_background": "Sélectionner une vidéo de fond",
+    "directpublish_replacing_background": "Remplacement du fond vert...",    
 })
 
 class DirectpublishPlugin(Plugin):
@@ -52,6 +60,8 @@ class DirectpublishPlugin(Plugin):
         self.trimsilences_plugin = self.plugin_manager.get_plugin('trimsilences')
         self.transcript_plugin = self.plugin_manager.get_plugin('transcript')
         self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
+        self.chromakey_plugin = self.plugin_manager.get_plugin('chromakey')
+
 
     def get_config_fields(self):
         return {
@@ -84,6 +94,14 @@ class DirectpublishPlugin(Plugin):
 
         # Option pour retirer les silences
         remove_silences = st.checkbox(t("directpublish_remove_silences"))
+        replace_green_screen = st.checkbox(t("directpublish_replace_green_screen"))
+
+        # Sélection du fond si le remplacement du fond vert est activé
+        background_video = None
+        if replace_green_screen:
+            background_directory = config['chromakey']['background_directory']
+            background_files = [f for f in os.listdir(background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+            background_video = st.selectbox(t("directpublish_select_background"), background_files)
 
         # Sélection de la catégorie
         categories = {
@@ -131,11 +149,13 @@ class DirectpublishPlugin(Plugin):
         if st.button(t("directpublish_publish_button")):
             with st.spinner(t("directpublish_processing")):
                 try:
+                    video_to_process = selected_video_path
+
                     # 1. Retirer les silences si demandé
-                    st.text(t("directpublish_silence_trim"))
                     if remove_silences:
+                        st.text(t("directpublish_silence_trim"))
                         result = self.trimsilences_plugin.remove_silence(
-                            selected_video_path,
+                            video_to_process,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],
                             work_directory
@@ -144,10 +164,17 @@ class DirectpublishPlugin(Plugin):
                             st.error(result)
                             return
                         video_to_process = result
-                    else:
-                        video_to_process = selected_video_path
 
-                    # 2. Transcrire la vidéo
+                    # 2. Remplacer le fond vert si demandé
+                    if replace_green_screen and background_video:
+                        st.text(t("directpublish_replacing_background"))
+                        background_path = os.path.join(config['chromakey']['background_directory'], background_video)
+                        result_filename = f"chroma_{os.path.basename(video_to_process)}"
+                        result_path = os.path.join(work_directory, result_filename)
+                        replace_background(video_to_process, background_path, result_path)
+                        video_to_process = result_path
+
+                    # 3. Transcrire la vidéo
                     st.text(t("directpublish_generating_transcription"))
                     transcript = self.transcript_plugin.transcribe_video(
                         video_to_process,
@@ -158,7 +185,7 @@ class DirectpublishPlugin(Plugin):
                         config['common']['language']
                     )
 
-                    # 3. Générer un résumé du transcript
+                    # 4. Générer un résumé du transcript
                     st.text(t("directpublish_generating_description"))
                     summary_prompt = "Résume les grandes lignes du transcript, sous forme de liste à puce, sans commenter, pour écrire une introduction au sujet, sans parler du contexte ou de l'auteur. Décrit uniquement."
                     description = self.ragllm_plugin.process_with_llm(
@@ -169,7 +196,7 @@ class DirectpublishPlugin(Plugin):
                     ) + config['directpublish']['signature']
                     st.code(description)
 
-                    # 4. Générer un titre pour la vidéo
+                    # 5. Générer un titre pour la vidéo
                     st.text(t("directpublish_generating_title"))
                     title_prompt = f"Génère un titre accrocheur pour une vidéo YouTube basée sur ce résumé, sans dépasser 100 caractères, sans commenter, juste le titre, sans guillemets."
                     title = remove_quotes(self.ragllm_plugin.process_with_llm(
@@ -180,7 +207,7 @@ class DirectpublishPlugin(Plugin):
                     ))
                     st.code(title)
 
-                    # 5. Uploader la vidéo sur YouTube
+                    # 6. Uploader la vidéo sur YouTube
                     st.text(t("directpublish_upload"))
                     video_id = upload_video(
                         video_to_process,

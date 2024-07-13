@@ -138,17 +138,26 @@ class RagllmPlugin(Plugin):
                 if field == 'llm_model':
                     provider = config.get('provider', 'ollama')
                     models = self.get_available_models(provider)
+                    try:
+                        default_index = models.index(config.get(field, params['default']))
+                    except ValueError:
+                        default_index = 0
                     updated_config[field] = st.selectbox(
                         params['label'],
                         options=models,
-                        index=models.index(config.get(field, params['default']))
+                        index=default_index
                     )
                 else:
+                    options_list = [option[0] for option in params['options']]
+                    try:
+                        default_index = options_list.index(config.get(field, params['default']))
+                    except ValueError:
+                        default_index = 0
                     updated_config[field] = st.selectbox(
                         params['label'],
-                        options=[option[0] for option in params['options']],
+                        options=options_list,
                         format_func=lambda x: dict(params['options'])[x],
-                        index=[option[0] for option in params['options']].index(config.get(field, params['default']))
+                        index=default_index
                     )
             elif params['type'] == 'textarea':
                 updated_config[field] = st.text_area(
@@ -167,6 +176,7 @@ class RagllmPlugin(Plugin):
                     value=config.get(field, params['default'])
                 )
         return updated_config
+
 
     def get_available_models(self, provider: str) -> List[str]:
         if provider == 'ollama':
