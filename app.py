@@ -3,6 +3,8 @@ import json
 import importlib
 import streamlit as st
 from typing import List, Dict, Any
+from dotenv import load_dotenv
+
 
 # Constantes
 CONFIG_FILE = "config.json"
@@ -70,7 +72,8 @@ class PluginManager:
         """Récupère toutes les interfaces utilisateur de configuration de tous les plugins."""
         all_ui = {}
         for plugin_name, plugin in self.plugins.items():
-            all_ui[plugin_name] = plugin.get_config_ui(config.get(plugin_name, {}))
+             with st.expander(f"Configuration {plugin_name}"):
+                all_ui[plugin_name] = plugin.get_config_ui(config.get(plugin_name, {}))
         return all_ui
 
     def get_all_tabs(self) -> List[Dict[str, Any]]:
@@ -130,6 +133,10 @@ def main():
     # Chargement de la configuration
     config = load_config()
 
+    load_dotenv()
+    API_KEY = os.getenv("YOUTUBE_API_KEY")
+    LLM_KEY = os.getenv("LLM_API_KEY")
+
     config['api_key'] = API_KEY
     config['llm_key'] = LLM_KEY
 
@@ -138,12 +145,8 @@ def main():
     selected_tab = st.sidebar.radio("Navigation", tabs)
 
     if selected_tab == "Configuration":
-        st.header("Configuration")
+        st.header("Configurations")
         all_config_ui = plugin_manager.get_all_config_ui(config)
-
-        for plugin_name, ui_config in all_config_ui.items():
-            with st.expander(f"Configuration {plugin_name}"):
-                config[plugin_name] = ui_config
 
         if st.button("Sauvegarder la configuration"):
             save_config(config)
@@ -155,11 +158,6 @@ def main():
             if tab['name'] == selected_tab:
                 plugin_manager.run_plugin(tab['plugin'], config)
                 break
-                
-from dotenv import load_dotenv
-load_dotenv()
-API_KEY = os.getenv("YOUTUBE_API_KEY")
-LLM_KEY = os.getenv("LLM_API_KEY")
 
 if __name__ == "__main__":
     main()
