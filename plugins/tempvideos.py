@@ -1,6 +1,7 @@
 from global_vars import translations, t
 import streamlit as st
 from app import Plugin
+from plugins.common import get_credentials
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -39,41 +40,9 @@ translations["fr"].update({
 })
 
 class TempvideosPlugin(Plugin):
-        
-    def __init__(self, name: str, plugin_manager):
-        super().__init__(name, plugin_manager)
-        self.SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 
     def get_tabs(self):
         return [{"name": t("temp_videos_tab"), "plugin": "tempvideos"}]
-
-    def get_credentials(self):
-        creds = None
-        os.environ['BROWSER'] = '/snap/bin/chromium'
-        if os.path.exists('token.json'):
-            try:
-                creds = Credentials.from_authorized_user_file('token.json', self.SCOPES)
-            except:
-                os.remove('token.json')
-                creds = None
-        
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                except RefreshError:
-                    os.remove('token.json')
-                    creds = None
-            
-            if not creds:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    'client_secret.json', self.SCOPES)
-                creds = flow.run_local_server(port=0)
-            
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
-        
-        return creds
 
     def list_videos(self, youtube, channel_id):
         request = youtube.channels().list(part='contentDetails', id=channel_id)
@@ -130,7 +99,7 @@ class TempvideosPlugin(Plugin):
         
         channel_id = config['common'].get('channel_id')
         if channel_id:
-            credentials = self.get_credentials()
+            credentials = get_credentials()
             youtube = build('youtube', 'v3', credentials=credentials)
             
             videos = self.list_videos(youtube, channel_id)
