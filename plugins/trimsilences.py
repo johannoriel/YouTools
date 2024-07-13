@@ -2,7 +2,8 @@ from global_vars import translations, t
 import os
 import subprocess
 import streamlit as st
-from app import Plugin, list_video_files
+from app import Plugin
+from plugins.common import list_video_files
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({

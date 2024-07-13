@@ -100,28 +100,7 @@ def load_config() -> Dict[str, Any]:
 def save_config(config: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
-        
-def list_video_files(directory):
-    video_files = []
-    outfile_videos = []
-    chroma_videos = []
-    for file in os.listdir(directory):
-        if file.lower().endswith(('.mkv', '.mp4')):
-            full_path = os.path.join(directory, file)
-            mod_time = os.path.getmtime(full_path)
-            if file.startswith('outfile_'):
-                outfile_videos.append((file, full_path, mod_time))
-            elif file.startswith('chroma_'):
-                chroma_videos.append((file, full_path, mod_time))
-            else:
-                video_files.append((file, full_path, mod_time))
-    
-    video_files.sort(key=lambda x: x[2], reverse=True)
-    outfile_videos.sort(key=lambda x: x[2], reverse=True)
-    chroma_videos.sort(key=lambda x: x[2], reverse=True)
-    return video_files, outfile_videos, chroma_videos
-
-    
+           
 def main():
     st.set_page_config(page_title="YoutTools", layout="wide")
 
