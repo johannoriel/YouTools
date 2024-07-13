@@ -129,7 +129,7 @@ def main():
     
     if new_lang != st.session_state.lang:
         st.session_state.lang = new_lang
-        st.experimental_rerun()
+        st.rerun()
 
     # Gestion de l'onglet sélectionné
     if 'selected_tab_id' not in st.session_state:
@@ -142,7 +142,7 @@ def main():
     
     if new_selected_tab_id != st.session_state.selected_tab_id:
         st.session_state.selected_tab_id = new_selected_tab_id
-        st.experimental_rerun()
+        st.rerun()
 
     if st.session_state.selected_tab_id == "configurations":
         st.header(t("configurations"))
