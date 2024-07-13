@@ -103,12 +103,7 @@ def save_config(config: Dict[str, Any]):
            
 def main():
     st.set_page_config(page_title="YoutTools", layout="wide")
-
-    lang = st.sidebar.selectbox("Choose your language / Choisissez votre langue", options=["en", "fr"], key="lang_selector")
-    set_lang(lang)
-
     st.title(t("page_title"))
-
     # Initialisation du gestionnaire de plugins
     plugin_manager = PluginManager()
     plugin_manager.load_plugins()
@@ -126,16 +121,30 @@ def main():
     # Création des onglets avec des identifiants uniques
     tabs = [{"id": "configurations", "name": t("configurations")}] + [{"id": tab['plugin'], "name": tab['name']} for tab in plugin_manager.get_all_tabs()]
 
-    # Stocker l'onglet sélectionné dans st.session_state
+    # Gestion de la langue
+    if 'lang' not in st.session_state:
+        st.session_state.lang = "en"
+
+    new_lang = st.sidebar.selectbox("Choose your language / Choisissez votre langue", options=["en", "fr"], index=["en", "fr"].index(st.session_state.lang), key="lang_selector")
+    
+    if new_lang != st.session_state.lang:
+        st.session_state.lang = new_lang
+        st.experimental_rerun()
+
+    # Gestion de l'onglet sélectionné
     if 'selected_tab_id' not in st.session_state:
-        st.session_state.selected_tab_id = "configurations"
+        st.session_state.selected_tab_id = "directpublish"
 
-    # Définir l'onglet sélectionné en utilisant l'identifiant unique
-    selected_tab = st.sidebar.radio(t("navigation"), [tab["name"] for tab in tabs], index=[tab["id"] for tab in tabs].index(st.session_state.selected_tab_id))
-    selected_tab_id = next(tab["id"] for tab in tabs if tab["name"] == selected_tab)
-    st.session_state.selected_tab_id = selected_tab_id
+    selected_tab_index = [tab["id"] for tab in tabs].index(st.session_state.selected_tab_id)
+    selected_tab = st.sidebar.radio(t("navigation"), [tab["name"] for tab in tabs], index=selected_tab_index, key="tab_selector")
+    
+    new_selected_tab_id = next(tab["id"] for tab in tabs if tab["name"] == selected_tab)
+    
+    if new_selected_tab_id != st.session_state.selected_tab_id:
+        st.session_state.selected_tab_id = new_selected_tab_id
+        st.experimental_rerun()
 
-    if selected_tab_id == "configurations":
+    if st.session_state.selected_tab_id == "configurations":
         st.header(t("configurations"))
         all_config_ui = plugin_manager.get_all_config_ui(config)
 
@@ -150,10 +159,9 @@ def main():
     else:
         # Exécution du plugin correspondant à l'onglet sélectionné
         for tab in plugin_manager.get_all_tabs():
-            if tab['plugin'] == selected_tab_id:
+            if tab['plugin'] == st.session_state.selected_tab_id:
                 plugin_manager.run_plugin(tab['plugin'], config)
                 break
 
 if __name__ == "__main__":
     main()
-
