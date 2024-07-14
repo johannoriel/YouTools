@@ -242,14 +242,18 @@ class RagllmPlugin(Plugin):
         # Initialiser rag_text avec la valeur de session_state si elle existe, sinon utiliser une chaîne vide
         if 'rag_text' not in st.session_state:
             st.session_state.rag_text = ""
+        if 'rag_question' not in st.session_state:
+            st.session_state.rag_question = "Question"
 
-        rag_text = st.text_area(t("rag_enter_text"), height=200, value=st.session_state.rag_text)
-        user_prompt = st.text_area(t("rag_enter_question"), "résume")
+        rag_text = st.text_area(t("rag_enter_text"), height=200, value=st.session_state.rag_text, key="rag_text_key")
+        user_prompt = st.text_area(t("rag_enter_question"), value=st.session_state.rag_question, key="rag_prompt_key")
+        st.session_state.rag_text = rag_text  # Mettre à jour la valeur dans session_state
+        st.session_state.rag_question = user_prompt
 
-        if st.button(t("rag_button_get_answer")):
+        if st.button(t("rag_button_get_answer"), key="get_answer_button"):
+
             with st.spinner(t("rag_processing")):
                 if rag_text:
-                    st.session_state.rag_text = rag_text  # Mettre à jour la valeur dans session_state
                     self.process_rag_text(rag_text, config['ragllm']['chunk_size'], config['ragllm']['embedder'])
                     st.success(t("rag_success_text_processed"))
                 else:

@@ -30,6 +30,8 @@ translations["en"].update({
     "directpublish_replace_green_screen": "Replace green screen background",
     "directpublish_select_background": "Select a background video",
     "directpublish_replacing_background": "Replacing green screen background...",
+    "directpublish_preprompt": "Change prompt is you wish (be specific):",
+    "directpublish_title_generator" : "Generate a catchy title for a YouTube video based on this summary, not exceeding 100 characters, without commenting, just the title, without quotation marks.",
 })
 
 translations["fr"].update({
@@ -52,6 +54,8 @@ translations["fr"].update({
     "directpublish_replace_green_screen": "Remplacer le fond vert",
     "directpublish_select_background": "Sélectionner une vidéo de fond",
     "directpublish_replacing_background": "Remplacement du fond vert...",
+    "directpublish_preprompt": "Modifiez le prompt si besoin (rajoutez des éléments spécifiques):",
+    "directpublish_title_generator" : "Génère un titre accrocheur pour une vidéo YouTube basée sur ce résumé, sans dépasser 100 caractères, sans commenter, juste le titre, sans guillemets.",
 })
 
 class DirectpublishPlugin(Plugin):
@@ -146,6 +150,12 @@ class DirectpublishPlugin(Plugin):
             format_func=lambda x: categories[x]
         )
 
+        if 'rag_question' not in st.session_state:
+            st.session_state.rag_question = config['llm']['llm_prompt']
+
+        user_prompt = st.text_area(t("directpublish_preprompt"), value=st.session_state.rag_question, key="rag_prompt_key")
+        st.session_state.rag_question = user_prompt
+
         if st.button(t("directpublish_publish_button")):
             with st.spinner(t("directpublish_processing")):
                 try:
@@ -191,9 +201,8 @@ class DirectpublishPlugin(Plugin):
 
                     # 4. Générer un résumé du transcript
                     st.text(t("directpublish_generating_description"))
-                    summary_prompt = "Résume les grandes lignes du transcript, sous forme de liste à puce, sans commenter, pour écrire une introduction au sujet, sans parler du contexte ou de l'auteur. Décrit uniquement."
                     description = self.ragllm_plugin.process_with_llm(
-                        summary_prompt,
+                        directpublish_preprompt,
                         config['ragllm']['llm_sys_prompt'],
                         transcript,
                         config['ragllm']['llm_model']
@@ -202,7 +211,7 @@ class DirectpublishPlugin(Plugin):
 
                     # 5. Générer un titre pour la vidéo
                     st.text(t("directpublish_generating_title"))
-                    title_prompt = f"Génère un titre accrocheur pour une vidéo YouTube basée sur ce résumé, sans dépasser 100 caractères, sans commenter, juste le titre, sans guillemets."
+                    title_prompt = t("directpublish_title_generator")
                     title = remove_quotes(self.ragllm_plugin.process_with_llm(
                         title_prompt,
                         config['ragllm']['llm_sys_prompt'],
