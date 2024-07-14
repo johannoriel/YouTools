@@ -1,5 +1,6 @@
 from global_vars import translations, t
-from app import Plugin, list_video_files
+from app import Plugin
+from plugins.common import list_video_files
 import streamlit as st
 import os
 from chromakey_background import replace_background
@@ -51,24 +52,24 @@ class ChromakeyPlugin(Plugin):
 
     def run(self, config):
         st.header(t("chromakey_title"))
-        
+
         work_directory = config['common']['work_directory']
         background_directory = config['chromakey']['background_directory']
-        
+
         original_files, trimed_files, _ = list_video_files(work_directory)
         video_files = original_files + trimed_files
         background_files = [f for f in os.listdir(background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
-        
+
         selected_video = st.selectbox(t("chromakey_select_video_label"), [file for file, _, _ in video_files])
         selected_background = st.selectbox(t("chromakey_select_background_label"), background_files)
-        
+
         if st.button(t("chromakey_apply_button")):
             if selected_video and selected_background:
                 video_path = os.path.join(work_directory, selected_video)
                 background_path = os.path.join(background_directory, selected_background)
                 result_filename = f"chroma_{selected_video.replace('outfile_', '')}"
                 result_path = os.path.join(work_directory, result_filename)
-                
+
                 with st.spinner(t("chromakey_processing_spinner")):
                     try:
                         replace_background(video_path, background_path, result_path)
@@ -78,4 +79,3 @@ class ChromakeyPlugin(Plugin):
                         st.error(f"{t('chromakey_error_message')}{str(e)}")
             else:
                 st.warning(t("chromakey_warning_message"))
-
