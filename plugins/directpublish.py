@@ -32,6 +32,7 @@ translations["en"].update({
     "directpublish_replacing_background": "Replacing green screen background...",
     "directpublish_preprompt": "Change prompt is you wish (be specific):",
     "directpublish_title_generator" : "Generate a catchy title for a YouTube video based on this summary, not exceeding 100 characters, without commenting, just the title, without quotation marks.",
+    "directpublish_tag_generator" : "Generate a comma list of keywords describing the subject, without any comment or adding, just a raw list of comma seaparated keywords",
     "directpublish_addings" : "Add any text to your description (will not be modified)",
 })
 
@@ -57,6 +58,7 @@ translations["fr"].update({
     "directpublish_replacing_background": "Remplacement du fond vert...",
     "directpublish_preprompt": "Modifiez le prompt si besoin (rajoutez des éléments spécifiques):",
     "directpublish_title_generator" : "Génère un titre accrocheur pour une vidéo YouTube basée sur ce résumé, sans dépasser 100 caractères, sans commenter, juste le titre, sans guillemets.",
+    "directpublish_tag_generator" : "Génère une liste de mots-clés décrivant le sujet, sans commentaire ni ajout, juste une liste brute séparée par des virgules",
     "directpublish_addings" : "Rajoutez du texte à votre description (ne sera pas modifié)"
 })
 
@@ -223,19 +225,29 @@ class DirectpublishPlugin(Plugin):
                     title = remove_quotes(self.ragllm_plugin.process_with_llm(
                         title_prompt,
                         config['ragllm']['llm_sys_prompt'],
-                        f"{description}\n\n{addings}\n{signature}",
+                        transcript,
                         config['ragllm']['llm_model']
                     ))
                     st.code(title)
+
+                    # 5. Générer un titre pour la vidéo
+                    tag_prompt = t("directpublish_tag_generator")
+                    tags = remove_quotes(self.ragllm_plugin.process_with_llm(
+                        tag_prompt,
+                        config['ragllm']['llm_sys_prompt'],
+                        transcript,
+                        config['ragllm']['llm_model']
+                    ))
+                    st.code(tags)
 
                     # 6. Uploader la vidéo sur YouTube
                     st.text(t("directpublish_upload"))
                     video_id = upload_video(
                         video_to_process,
                         title,
-                        description,
+                        f"{description}\n\n{addings}\n{signature}",
                         selected_category,
-                        [],  # keywords (optionnel)
+                        tags.split(','),  # keywords (optionnel)
                         "unlisted"
                     )
 
