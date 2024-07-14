@@ -1,5 +1,6 @@
 from global_vars import translations, t
 from app import Plugin
+from plugins.common import list_all_video_files
 import streamlit as st
 import os
 import subprocess
@@ -78,16 +79,6 @@ class TranscriptPlugin(Plugin):
     def get_tabs(self):
         return [{"name": t("transcript_tab"), "plugin": "transcript"}]
 
-    def list_video_files(self, directory):
-        video_files = []
-        for file in os.listdir(directory):
-            if file.lower().endswith(('.mp4', '.mkv', '.avi', '.mov')):
-                full_path = os.path.join(directory, file)
-                mod_time = os.path.getmtime(full_path)
-                video_files.append((file, full_path, mod_time))
-        video_files.sort(key=lambda x: x[2], reverse=True)
-        return video_files
-
     def transcribe_video(self, video_path, output_format, whisper_path, whisper_model, ffmpeg_path, lang):
         print("Exécuté par l'utilisateur :", getpass.getuser())
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
@@ -135,10 +126,10 @@ class TranscriptPlugin(Plugin):
                 print("Erreur lors de l'exécution de whisper:")
                 print(e.stderr)  # Affiche le message d'erreur de whisper
             print('done')
-            
+
             with open(output_file, 'r') as f:
                 transcript = f.read()
-                
+
             os.remove(output_file)
             #os.remove(temp_audio_path)
 
@@ -157,34 +148,34 @@ class TranscriptPlugin(Plugin):
 
     def run(self, config):
         st.header(t("transcript_header"))
-        
+
         work_directory = os.path.expanduser(config['common']['work_directory'])
         whisper_path = os.path.expanduser(config['transcript']['whisper_path'])
         whisper_model = config['transcript']['whisper_model']
         ffmpeg_path = config['transcript']['ffmpeg_path']
-        
-        videos = self.list_video_files(work_directory)
-        
+
+        videos = list_all_video_files(work_directory)
+
         if not videos:
             st.info(f"{t('transcript_no_videos')} {work_directory}")
             return
-        
+
         selected_video = st.selectbox(t("transcript_select_video"), options=[v[0] for v in videos])
         selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
-        
+
         output_format = st.radio(t("transcript_output_format"), ["txt", "srt"])
-        
+
         if st.button(t("transcript_transcribe_button")):
             with st.spinner(t("transcript_transcribing")):
                 transcript = self.transcribe_video(selected_video_path, output_format, whisper_path, whisper_model, ffmpeg_path, config['common']['language'])
                 st.session_state.transcript = transcript
                 st.session_state.show_transcript = True
                 st.session_state.show_llm_response = False
-            
+
         if st.session_state.get('show_transcript', False):
             st.success(t("transcript_transcription_done"))
             st.text_area(t("transcript_content"), st.session_state.transcript, height=300)
-            
+
             col1, col2 = st.columns(2)
             with col1:
                 if st.button(t("transcript_copy_button")):
@@ -197,39 +188,38 @@ class TranscriptPlugin(Plugin):
                     file_name=f"transcript_{os.path.splitext(selected_video)[0]}.{output_format}",
                     mime="text/plain"
                 )
-            
+
             # Résumé avec LLM
             llm_plugin = self.plugin_manager.get_plugin('llm')
             llm_config = config.get('llm', {})
             prompt = llm_config.get('llm_prompt', '')
-            
+
             with st.expander(t("transcript_summary_with_llm")):
                 with st.form("llm_form"):
                     st.markdown(t("transcript_summary_with_llm"))
                     custom_prompt = st.text_input(t("transcript_custom_prompt"), prompt)
                     submit_button = st.form_submit_button(t("transcript_summary_button"))
-                
+
                 if submit_button:
                     video_content = f"# {selected_video} \n {st.session_state.transcript}"
                     llm_response = llm_plugin.process_with_llm(
-                        custom_prompt or prompt, 
-                        llm_config.get('llm_sys_prompt', ''), 
-                        video_content, 
+                        custom_prompt or prompt,
+                        llm_config.get('llm_sys_prompt', ''),
+                        video_content,
                         llm_config.get('llm_model', '')
                     )
                     st.text_area(t("transcript_llm_summary"), llm_response, height=200)
                     st.session_state.llm_response = llm_response
                     st.session_state.show_llm_response = True
-                    
+
                 if st.session_state.get('show_llm_response', False):
                     if st.button(t("transcript_llm_copy_button")):
                         st.code(st.session_state.llm_response)
                         st.success(t("transcript_llm_copy_success"))
-                    
+
                     st.download_button(
                         label=t("transcript_llm_download_button"),
                         data=st.session_state.llm_response,
                         file_name=f"llm_summary_{os.path.splitext(selected_video)[0]}.txt",
                         mime="text/plain"
                     )
-

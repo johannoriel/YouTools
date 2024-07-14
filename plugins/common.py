@@ -28,7 +28,7 @@ class CommonPlugin(Plugin):
                 "type": "text",
                 "label": t("work_directory"),
                 "default": "/home/joriel/Vidéos"
-            },            
+            },
             "language": {
                 "type": "select",
                 "label": t("preferred_language"),
@@ -62,7 +62,7 @@ def get_credentials():
         except:
             os.remove('token.json')
             creds = None
-    
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
@@ -70,22 +70,22 @@ def get_credentials():
             except RefreshError:
                 os.remove('token.json')
                 creds = None
-        
+
         if not creds:
             flow = InstalledAppFlow.from_client_secrets_file(
                 'client_secret.json', self.SCOPES)
             creds = flow.run_local_server(port=0)
-        
+
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
-    
+
     return creds
-    
+
 # Fonction pour uploader la vidéo sur YouTube
 def upload_video(filename, title, description, category, keywords, privacy_status):
     credentials = get_credentials()
     youtube = build('youtube', 'v3', credentials=credentials)
-    
+
     body = {
         'snippet': {
             'title': title,
@@ -99,7 +99,7 @@ def upload_video(filename, title, description, category, keywords, privacy_statu
     }
 
     media = MediaFileUpload(filename, resumable=True)
-    
+
     request = youtube.videos().insert(
         part=','.join(body.keys()),
         body=body,
@@ -132,11 +132,15 @@ def list_video_files(directory):
                 chroma_videos.append((file, full_path, mod_time))
             else:
                 video_files.append((file, full_path, mod_time))
-    
+
     video_files.sort(key=lambda x: x[2], reverse=True)
     outfile_videos.sort(key=lambda x: x[2], reverse=True)
     chroma_videos.sort(key=lambda x: x[2], reverse=True)
     return video_files, outfile_videos, chroma_videos
+
+def list_all_video_files(directory):
+    l1, l2, l3 = list_video_files(directory)
+    return l1+l2+l3
 
 def remove_quotes(s):
     if s.startswith('"') and s.endswith('"'):

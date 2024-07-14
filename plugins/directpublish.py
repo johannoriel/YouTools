@@ -1,7 +1,7 @@
 from global_vars import translations, t
 from app import Plugin
 import streamlit as st
-from plugins.common import list_video_files, upload_video, remove_quotes
+from plugins.common import list_video_files, upload_video, remove_quotes, list_all_video_files
 from plugins.trimsilences import TrimsilencesPlugin
 from plugins.transcript import TranscriptPlugin
 from plugins.ragllm import RagllmPlugin
@@ -51,7 +51,7 @@ translations["fr"].update({
     "publish_signature_default": "",
     "directpublish_replace_green_screen": "Remplacer le fond vert",
     "directpublish_select_background": "Sélectionner une vidéo de fond",
-    "directpublish_replacing_background": "Remplacement du fond vert...",    
+    "directpublish_replacing_background": "Remplacement du fond vert...",
 })
 
 class DirectpublishPlugin(Plugin):
@@ -70,7 +70,7 @@ class DirectpublishPlugin(Plugin):
                 "label": t("publish_signature"),
                 "default": t("publish_signature_default")
             },
-        }            
+        }
 
     def get_tabs(self):
         return [{"name": t("directpublish_tab"), "plugin": "directpublish"}]
@@ -80,7 +80,7 @@ class DirectpublishPlugin(Plugin):
 
         # Sélection de la vidéo
         work_directory = config['common']['work_directory']
-        video_files, _, _ = list_video_files(work_directory)
+        video_files = list_all_video_files(work_directory)
         if not video_files:
             st.warning(t("transcript_no_videos"))
             return
@@ -164,6 +164,7 @@ class DirectpublishPlugin(Plugin):
                             st.error(result)
                             return
                         video_to_process = result
+                        st.text(video_to_process)
 
                     # 2. Remplacer le fond vert si demandé
                     if replace_green_screen and background_video:
@@ -173,6 +174,7 @@ class DirectpublishPlugin(Plugin):
                         result_path = os.path.join(work_directory, result_filename)
                         replace_background(video_to_process, background_path, result_path)
                         video_to_process = result_path
+                        st.text(video_to_process)
 
                     # 3. Transcrire la vidéo
                     st.text(t("directpublish_generating_transcription"))
@@ -184,6 +186,7 @@ class DirectpublishPlugin(Plugin):
                         config['transcript']['ffmpeg_path'],
                         config['common']['language']
                     )
+                    st.code(transcript)
 
                     # 4. Générer un résumé du transcript
                     st.text(t("directpublish_generating_description"))
