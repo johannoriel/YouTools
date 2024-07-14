@@ -49,7 +49,7 @@ class Plugin:
                     params['label'],
                     value=config.get(field, params['default']),
                     type="password" if field.startswith("pass") else "default"
-                )        
+                )
         return updated_config
 
     def get_tabs(self) -> List[Dict[str, Any]]:
@@ -100,7 +100,7 @@ def load_config() -> Dict[str, Any]:
 def save_config(config: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
-           
+
 def main():
     st.set_page_config(page_title="YoutTools", layout="wide")
     st.title(t("page_title"))
@@ -123,10 +123,10 @@ def main():
 
     # Gestion de la langue
     if 'lang' not in st.session_state:
-        st.session_state.lang = "en"
+        st.session_state.lang = "fr"
 
     new_lang = st.sidebar.selectbox("Choose your language / Choisissez votre langue", options=["en", "fr"], index=["en", "fr"].index(st.session_state.lang), key="lang_selector")
-    
+
     if new_lang != st.session_state.lang:
         st.session_state.lang = new_lang
         st.rerun()
@@ -137,9 +137,9 @@ def main():
 
     selected_tab_index = [tab["id"] for tab in tabs].index(st.session_state.selected_tab_id)
     selected_tab = st.sidebar.radio(t("navigation"), [tab["name"] for tab in tabs], index=selected_tab_index, key="tab_selector")
-    
+
     new_selected_tab_id = next(tab["id"] for tab in tabs if tab["name"] == selected_tab)
-    
+
     if new_selected_tab_id != st.session_state.selected_tab_id:
         st.session_state.selected_tab_id = new_selected_tab_id
         st.rerun()
@@ -151,7 +151,7 @@ def main():
         for plugin_name, ui_config in all_config_ui.items():
             with st.expander(f"{t('configurations')} {plugin_name}"):
                 config[plugin_name] = ui_config
-                
+
         if st.button(t("save_button")):
             save_config(config)
             st.success(t("success_message"))

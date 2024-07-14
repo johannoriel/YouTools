@@ -32,6 +32,7 @@ translations["en"].update({
     "directpublish_replacing_background": "Replacing green screen background...",
     "directpublish_preprompt": "Change prompt is you wish (be specific):",
     "directpublish_title_generator" : "Generate a catchy title for a YouTube video based on this summary, not exceeding 100 characters, without commenting, just the title, without quotation marks.",
+    "directpublish_addings" : "Add any text to your description (will not be modified)",
 })
 
 translations["fr"].update({
@@ -56,6 +57,7 @@ translations["fr"].update({
     "directpublish_replacing_background": "Remplacement du fond vert...",
     "directpublish_preprompt": "Modifiez le prompt si besoin (rajoutez des éléments spécifiques):",
     "directpublish_title_generator" : "Génère un titre accrocheur pour une vidéo YouTube basée sur ce résumé, sans dépasser 100 caractères, sans commenter, juste le titre, sans guillemets.",
+    "directpublish_addings" : "Rajoutez du texte à votre description (ne sera pas modifié)"
 })
 
 class DirectpublishPlugin(Plugin):
@@ -156,6 +158,11 @@ class DirectpublishPlugin(Plugin):
         user_prompt = st.text_area(t("directpublish_preprompt"), value=st.session_state.rag_question, key="rag_prompt_key")
         st.session_state.rag_question = user_prompt
 
+        if 'addings' not in st.session_state:
+            st.session_state.addings = ""
+        addings = st.text_area(t('directpublish_addings'), value=st.session_state.addings, key="directpublish_addings")
+        st.session_state.addings = addings
+
         if st.button(t("directpublish_publish_button")):
             with st.spinner(t("directpublish_processing")):
                 try:
@@ -202,12 +209,13 @@ class DirectpublishPlugin(Plugin):
                     # 4. Générer un résumé du transcript
                     st.text(t("directpublish_generating_description"))
                     description = self.ragllm_plugin.process_with_llm(
-                        directpublish_preprompt,
+                        user_prompt,
                         config['ragllm']['llm_sys_prompt'],
                         transcript,
                         config['ragllm']['llm_model']
-                    ) + config['directpublish']['signature']
+                    )
                     st.code(description)
+                    signature = config['directpublish']['signature']
 
                     # 5. Générer un titre pour la vidéo
                     st.text(t("directpublish_generating_title"))
@@ -215,7 +223,7 @@ class DirectpublishPlugin(Plugin):
                     title = remove_quotes(self.ragllm_plugin.process_with_llm(
                         title_prompt,
                         config['ragllm']['llm_sys_prompt'],
-                        description,
+                        f"{description}\n\n{addings}\n{signature}",
                         config['ragllm']['llm_model']
                     ))
                     st.code(title)
