@@ -41,7 +41,8 @@ translations["en"].update({
     "rag_top_k_chunks": "Number of chunks to use",
     "rag_default_sys_prompt": "You are an AI assistant. Your task is to analyze the provided context and answer questions based ONLY on this context. If the information is not in the context, clearly state that.",
     "rag_error_fetching_models_ollama": "Error fetching Ollama models: ",
-    "rag_error_calling_llm": "Error calling LLM: "
+    "rag_error_calling_llm": "Error calling LLM: ",
+    "rag_processing" : "Processing...",
 })
 
 translations["fr"].update({
@@ -64,7 +65,8 @@ translations["fr"].update({
     "rag_top_k_chunks": "Nombre de chunks à utiliser",
     "rag_default_sys_prompt": "Tu es un assistant IA. Ta tâche est d'analyser le contexte fourni et de répondre aux questions en te basant UNIQUEMENT sur ce contexte. Si l'information n'est pas dans le contexte, dis-le clairement.",
     "rag_error_fetching_models_ollama": "Erreur lors de la récupération des modèles Ollama : ",
-    "rag_error_calling_llm": "Erreur lors de l'appel au LLM : "
+    "rag_error_calling_llm": "Erreur lors de l'appel au LLM : ",
+    "rag_processing" : "En cours de traitement...",
 })
 
 class RagllmPlugin(Plugin):
@@ -80,7 +82,7 @@ class RagllmPlugin(Plugin):
 
     def get_tabs(self):
         return [{"name": "RAG", "plugin": "ragllm"}]
-        
+
     def get_config_fields(self):
         return {
             "provider": {
@@ -236,28 +238,33 @@ class RagllmPlugin(Plugin):
 
     def run(self, config):
         st.write(t("rag_plugin_loaded"))
-       
-        rag_text = st.text_area(t("rag_enter_text"), height=200)
+
+        # Initialiser rag_text avec la valeur de session_state si elle existe, sinon utiliser une chaîne vide
+        if 'rag_text' not in st.session_state:
+            st.session_state.rag_text = ""
+
+        rag_text = st.text_area(t("rag_enter_text"), height=200, value=st.session_state.rag_text)
         user_prompt = st.text_area(t("rag_enter_question"), "résume")
 
         if st.button(t("rag_button_get_answer")):
-            if rag_text:
-                self.process_rag_text(rag_text, config['ragllm']['chunk_size'], config['ragllm']['embedder'])
-                st.success(t("rag_success_text_processed"))
-            else:
-                st.warning(t("rag_warning_enter_text"))        
-            if user_prompt and self.embeddings is not None:
-                context, citations = self.obtenir_contexte(user_prompt, config)
-                response = self.process_with_llm(user_prompt, config['ragllm']['llm_sys_prompt'], context, config['ragllm']['llm_model'])
-                
-                st.write(t("rag_answer"))
-                st.write(response)
-                
-                st.write(t("rag_citations"))
-                for i, citation in enumerate(citations, 1):
-                    st.write(f"{i}. {citation[:100]}...")
-            elif self.embeddings is None:
-                st.warning(t("rag_warning_process_text_first"))
-            else:
-                st.warning(t("rag_warning_enter_question"))
+            with st.spinner(t("rag_processing")):
+                if rag_text:
+                    st.session_state.rag_text = rag_text  # Mettre à jour la valeur dans session_state
+                    self.process_rag_text(rag_text, config['ragllm']['chunk_size'], config['ragllm']['embedder'])
+                    st.success(t("rag_success_text_processed"))
+                else:
+                    st.warning(t("rag_warning_enter_text"))
+                if user_prompt and self.embeddings is not None:
+                    context, citations = self.obtenir_contexte(user_prompt, config)
+                    response = self.process_with_llm(user_prompt, config['ragllm']['llm_sys_prompt'], context, config['ragllm']['llm_model'])
 
+                    st.write(t("rag_answer"))
+                    st.write(response)
+
+                    st.write(t("rag_citations"))
+                    for i, citation in enumerate(citations, 1):
+                        st.write(f"{i}. {citation[:100]}...")
+                elif self.embeddings is None:
+                    st.warning(t("rag_warning_process_text_first"))
+                else:
+                    st.warning(t("rag_warning_enter_question"))

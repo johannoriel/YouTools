@@ -187,6 +187,7 @@ class DirectpublishPlugin(Plugin):
                         config['common']['language']
                     )
                     st.code(transcript)
+                    st.session_state.rag_text = transcript
 
                     # 4. Générer un résumé du transcript
                     st.text(t("directpublish_generating_description"))
