@@ -48,7 +48,7 @@ class TempvideosPlugin(Plugin):
         request = youtube.channels().list(part='contentDetails', id=channel_id)
         response = request.execute()
         playlist_id = response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-        
+
         videos = []
         next_page_token = None
         while True:
@@ -78,7 +78,7 @@ class TempvideosPlugin(Plugin):
         title = video['snippet']['title']
         published_at = datetime.datetime.strptime(video['snippet']['publishedAt'], '%Y-%m-%dT%H:%M:%SZ')
         match = re.match(r'\[(\d+)j\]', title)
-        
+
         if match:
             days = int(match.group(1))
             delta_days = (datetime.datetime.utcnow() - published_at).days
@@ -96,15 +96,15 @@ class TempvideosPlugin(Plugin):
 
     def run(self, config):
         st.header(t("temp_videos_header"))
-        
+
         channel_id = config['common'].get('channel_id')
         if channel_id:
             credentials = get_credentials()
             youtube = build('youtube', 'v3', credentials=credentials)
-            
+
             videos = self.list_videos(youtube, channel_id)
             temp_videos = [self.check_video_expiration(video) for video in videos if self.check_video_expiration(video)]
-            
+
             if temp_videos:
                 for video in temp_videos:
                     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
@@ -119,15 +119,14 @@ class TempvideosPlugin(Plugin):
                             st.write(t('temp_videos_expires_in_days').format(days=video['days_left']))
                     with col4:
                         st.write(f"{t('temp_videos_status')} {video['privacy_status']}")
-                
+
                 if st.button(t("temp_videos_unpublish_button")):
                     expired_videos = [video for video in temp_videos if video['is_expired'] and video['privacy_status'] == 'public']
                     for video in expired_videos:
                         self.update_video_privacy(youtube, video['video_id'])
                     st.success(t("temp_videos_unpublish_success").format(count=len(expired_videos)))
-                    st.experimental_rerun()
+                    st.rerun()
             else:
                 st.info(t("temp_videos_no_temp_videos"))
         else:
             st.warning(t("temp_videos_configure_channel_id"))
-

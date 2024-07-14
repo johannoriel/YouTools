@@ -37,7 +37,7 @@ translations["fr"].update({
 class TrimsilencesPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
-        
+
     def get_config_fields(self):
         return {
             "silence_threshold": {
@@ -83,14 +83,14 @@ class TrimsilencesPlugin(Plugin):
         print(ffmpeg_command)
         try:
             subprocess.run(ffmpeg_command, shell=True, check=True, cwd=current_dir)
-            
+
             if not os.path.exists(output_sh_path) or os.path.getsize(output_sh_path) == 0:
                 raise subprocess.CalledProcessError(1, ffmpeg_command, t("trim_silences_output_sh_error"))
-            
+
             subprocess.run(f"chmod +x '{output_sh_path}'", shell=True, check=True)
             subprocess.run(output_sh_path, shell=True, check=True)
             os.remove(output_sh_path)
-            
+
             return output_file
         except subprocess.CalledProcessError as e:
             return t("trim_silences_error").format(error=str(e))
@@ -104,7 +104,7 @@ class TrimsilencesPlugin(Plugin):
 
         video_files, outfile_videos, _ = all_videos
         st.session_state['list_video_files'] = all_videos
-        
+
         st.subheader(t("trim_silences_original_videos"))
         for file, full_path, _ in video_files:
             col1, col2 = st.columns([3, 1])
@@ -123,5 +123,4 @@ class TrimsilencesPlugin(Plugin):
                         st.error(result)
                     else:
                         st.success(t("trim_silences_success").format(result=result))
-                        st.experimental_rerun()
-
+                        st.rerun()

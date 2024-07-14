@@ -74,7 +74,7 @@ class ChromakeyPlugin(Plugin):
                     try:
                         replace_background(video_path, background_path, result_path)
                         st.success(f"{t('chromakey_success_message')}{result_filename}")
-                        st.experimental_rerun()
+                        st.rerun()
                     except Exception as e:
                         st.error(f"{t('chromakey_error_message')}{str(e)}")
             else:

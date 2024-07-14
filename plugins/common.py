@@ -124,6 +124,19 @@ def list_video_files(directory):
     chroma_videos = []
     for file in os.listdir(directory):
         if file.lower().endswith(('.mkv', '.mp4')):
+            # Check if the file name contains spaces
+            if ' ' in file:
+                # Create a new file name by replacing spaces with underscores
+                new_file = file.replace(' ', '_')
+                old_path = os.path.join(directory, file)
+                new_path = os.path.join(directory, new_file)
+
+                # Rename the file
+                os.rename(old_path, new_path)
+
+                # Use the new file name for further processing
+                file = new_file
+
             full_path = os.path.join(directory, file)
             mod_time = os.path.getmtime(full_path)
             if file.startswith('outfile_'):
