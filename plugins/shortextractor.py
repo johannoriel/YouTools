@@ -77,9 +77,11 @@ class ShortextractorPlugin(Plugin):
         return [{"name": t("shortextractor_tab"), "plugin": "shortextractor"}]
 
     def convert_srt_time_to_seconds(self, time_str):
-        """Convert SRT time format to seconds."""
-        hours, minutes, seconds = time_str.replace(',', '.').split(':')
-        return float(hours) * 3600 + float(minutes) * 60 + float(seconds)
+        """Convert SRT time format to seconds with millisecond precision."""
+        hours, minutes, seconds = time_str.split(':')
+        seconds, milliseconds = seconds.split(',')
+        total_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(milliseconds) / 1000
+        return total_seconds
 
     def ffmpeg(self, ffmpeg_command):
         try:
@@ -95,6 +97,7 @@ class ShortextractorPlugin(Plugin):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
         end_seconds = self.convert_srt_time_to_seconds(end_time)
         duration = end_seconds - start_seconds
+        print(f"Durée: {duration}, début : {start_seconds}")
 
         videos_dir =  os.path.dirname(input_file)
         input_filename = os.path.basename(input_file)
@@ -114,9 +117,7 @@ class ShortextractorPlugin(Plugin):
         self.ffmpeg(ffmpeg_command)
         ffmpeg_command = [
             "ffmpeg", "-y",
-            "-ss", f"{start_seconds:.3f}",
             "-i", zoom_file,
-            "-t", f"{duration:.3f}",
             "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'",
             "-c:a", "copy",
             output_file
@@ -202,7 +203,7 @@ class ShortextractorPlugin(Plugin):
             col2.text_input(t("shortextractor_end_time"), value=end_time, key='display_end_time')
 
             # Assurez-vous que les valeurs sont des floats
-            default_zoom = float(config['shortextractor'].get('zoom_factor', 1.2))
+            default_zoom = float(config['shortextractor'].get('zoom_factor', 1))
             default_center_x = float(config['shortextractor'].get('center_x', 0))
             default_center_y = float(config['shortextractor'].get('center_y', 0))
 
@@ -214,6 +215,7 @@ class ShortextractorPlugin(Plugin):
             if st.button(t("shortextractor_extract")):
                 with st.spinner(t("shortextractor_extracting")):
                     output_file = os.path.join(work_directory, f"short_{os.path.splitext(selected_video)[0]}.mp4")
+                    st.write(f"Extracting {start_time} -> {end_time}")
                     result = self.extract_short(selected_video_path, start_time, end_time, output_file, zoom_factor, center_x, center_y)
                     if result == output_file:
                         st.success("Short extracted successfully!")
