@@ -117,7 +117,7 @@ class ShortextractorPlugin(Plugin):
             "-ss", f"{start_seconds:.3f}",
             "-i", zoom_file,
             "-t", f"{duration:.3f}",
-            "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):(iw/2)/{zoom_factor}+((iw/2)*{center_x:.3f}):ih/2'",
+            "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'",
             "-c:a", "copy",
             output_file
         ]
