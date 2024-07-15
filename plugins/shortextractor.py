@@ -81,45 +81,54 @@ class ShortextractorPlugin(Plugin):
         hours, minutes, seconds = time_str.replace(',', '.').split(':')
         return float(hours) * 3600 + float(minutes) * 60 + float(seconds)
 
+    def ffmpeg(self, ffmpeg_command):
+        try:
+            print("Commande ffmpeg:", " ".join(ffmpeg_command))
+            result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+            print("Sortie STDOUT:", result.stdout)
+            print("Sortie STDERR:", result.stderr)
+        except subprocess.CalledProcessError as e:
+            print("Erreur ffmpeg:", e.stderr)
+            return f"{t('shortextractor_error')}{e.stderr}"
+
     def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
         end_seconds = self.convert_srt_time_to_seconds(end_time)
         duration = end_seconds - start_seconds
 
-        # Calcul des paramètres pour le zoom et le positionnement
-        scale_w = f"iw*{zoom_factor}"
-        scale_h = f"ih*{zoom_factor}"
-        crop_w = f"min(1080, iw*{zoom_factor})"
-        crop_h = f"min(1920, ih*{zoom_factor})"
-        x_offset = f"(iw*{zoom_factor} - {crop_w}) * {center_x}"
-        y_offset = f"(ih*{zoom_factor} - {crop_h}) * {center_y}"
-
-        filter_complex = (
-            f"scale={scale_w}:{scale_h},"
-            f"crop={crop_w}:{crop_h}:{x_offset}:{y_offset},"
-            f"scale=1080:1920"
-        )
+        videos_dir =  os.path.dirname(input_file)
+        input_filename = os.path.basename(input_file)
+        zoom_filename = f"zoom_{input_filename}"
+        zoom_file = os.path.join(videos_dir, zoom_filename)
+        print(zoom_file)
 
         ffmpeg_command = [
             "ffmpeg", "-y",
             "-ss", f"{start_seconds:.3f}",
             "-i", input_file,
             "-t", f"{duration:.3f}",
-            "-vf", "crop='min(iw,ih)*9/16:min(iw,ih):iw/2:ih/2'",
+            "-vf", f"scale=iw/{zoom_factor}:ih/{zoom_factor}, pad=iw*{zoom_factor}:ih*{zoom_factor}:(ow-iw)/2:(oh-ih)/2",
+            "-c:a", "copy",
+            zoom_file
+        ]
+        self.ffmpeg(ffmpeg_command)
+        crop_width = "min(iw,ih)*9/16"
+        crop_height = "min(iw,ih)"
+        x = f"(iw-{crop_width})*{center_x}"
+        y = "ih/2"
+        ffmpeg_command = [
+            "ffmpeg", "-y",
+            "-ss", f"{start_seconds:.3f}",
+            "-i", zoom_file,
+            "-t", f"{duration:.3f}",
+            "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):iw/2+({center_x}-0.5)*iw:ih/2'",
             "-c:a", "copy",
             output_file
         ]
+        self.ffmpeg(ffmpeg_command)
+        os.remove(zoom_file)
+        return output_file
 
-        try:
-            print("Commande ffmpeg:", " ".join(ffmpeg_command))
-            result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
-            print("Commande ffmpeg:", " ".join(ffmpeg_command))
-            print("Sortie STDOUT:", result.stdout)
-            print("Sortie STDERR:", result.stderr)
-            return output_file
-        except subprocess.CalledProcessError as e:
-            print("Erreur ffmpeg:", e.stderr)
-            return f"{t('shortextractor_error')}{e.stderr}"
 
     def parse_transcript(self, transcript):
         lines = transcript.split('\n')
