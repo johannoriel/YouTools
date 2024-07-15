@@ -86,16 +86,32 @@ class ShortextractorPlugin(Plugin):
         end_seconds = self.convert_srt_time_to_seconds(end_time)
         duration = end_seconds - start_seconds
 
+        # Calcul des paramètres pour le zoom et le positionnement
+        scale_w = f"iw*{zoom_factor}"
+        scale_h = f"ih*{zoom_factor}"
+        crop_w = f"min(1080, iw*{zoom_factor})"
+        crop_h = f"min(1920, ih*{zoom_factor})"
+        x_offset = f"(iw*{zoom_factor} - {crop_w}) * {center_x}"
+        y_offset = f"(ih*{zoom_factor} - {crop_h}) * {center_y}"
+
+        filter_complex = (
+            f"scale={scale_w}:{scale_h},"
+            f"crop={crop_w}:{crop_h}:{x_offset}:{y_offset},"
+            f"scale=1080:1920"
+        )
+
         ffmpeg_command = [
             "ffmpeg", "-y",
             "-ss", f"{start_seconds:.3f}",
             "-i", input_file,
             "-t", f"{duration:.3f}",
-            "-filter:v", f"scale=iw*{zoom_factor}:-1,crop=ih*9/16:ih,setsar=1,crop=ih*9/16:ih:iw*{center_x}-ow/2:ih*{center_y}-oh/2",
+            "-vf", "crop='min(iw,ih)*9/16:min(iw,ih):iw/2:ih/2'",
             "-c:a", "copy",
             output_file
         ]
+
         try:
+            print("Commande ffmpeg:", " ".join(ffmpeg_command))
             result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
             print("Commande ffmpeg:", " ".join(ffmpeg_command))
             print("Sortie STDOUT:", result.stdout)
@@ -185,9 +201,10 @@ class ShortextractorPlugin(Plugin):
             default_center_x = float(config['shortextractor'].get('center_x', 0.5))
             default_center_y = float(config['shortextractor'].get('center_y', 0.5))
 
-            zoom_factor = st.slider(t("shortextractor_zoom"), min_value=1.0, max_value=2.0, value=default_zoom, step=0.1)
-            center_x = st.slider(t("shortextractor_center_x"), min_value=0.0, max_value=1.0, value=default_center_x, step=0.1)
-            center_y = st.slider(t("shortextractor_center_y"), min_value=0.0, max_value=1.0, value=default_center_y, step=0.1)
+            col1, col2, col3 = st.columns([1, 1, 1])
+            zoom_factor = col1.slider(t("shortextractor_zoom"), min_value=1.0, max_value=2.0, value=default_zoom, step=0.1)
+            center_x = col2.slider(t("shortextractor_center_x"), min_value=0.0, max_value=1.0, value=default_center_x, step=0.1)
+            center_y = col3.slider(t("shortextractor_center_y"), min_value=0.0, max_value=1.0, value=default_center_y, step=0.1)
 
             if st.button(t("shortextractor_extract")):
                 with st.spinner(t("shortextractor_extracting")):
@@ -195,7 +212,6 @@ class ShortextractorPlugin(Plugin):
                     result = self.extract_short(selected_video_path, start_time, end_time, output_file, zoom_factor, center_x, center_y)
                     if result == output_file:
                         st.success("Short extracted successfully!")
-                        col1, col2, col3 = st.columns([1, 2, 1])
                         col2.video(output_file)
                     else:
                         st.error(result)
