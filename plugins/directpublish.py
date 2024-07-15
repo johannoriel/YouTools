@@ -1,7 +1,7 @@
 from global_vars import translations, t
 from app import Plugin
 import streamlit as st
-from plugins.common import list_video_files, upload_video, remove_quotes, list_all_video_files
+from plugins.common import upload_video, remove_quotes, list_all_video_files
 from plugins.trimsilences import TrimsilencesPlugin
 from plugins.transcript import TranscriptPlugin
 from plugins.ragllm import RagllmPlugin

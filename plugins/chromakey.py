@@ -56,7 +56,7 @@ class ChromakeyPlugin(Plugin):
         work_directory = config['common']['work_directory']
         background_directory = config['chromakey']['background_directory']
 
-        original_files, trimed_files, _ = list_video_files(work_directory)
+        original_files, trimed_files, _, _ = list_video_files(work_directory)
         video_files = original_files + trimed_files
         background_files = [f for f in os.listdir(background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
 
