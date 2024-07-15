@@ -216,6 +216,32 @@ class ShortextractorPlugin(Plugin):
         if 'transcript' in st.session_state:
             parsed_transcript = self.parse_transcript(st.session_state.transcript)
 
+            # Création des options pour les select boxes
+            options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
+
+            col1, col2 = st.columns(2)
+            with col1:
+                start_index = st.selectbox(t("shortextractor_select_start"), options=options, key='start_select')
+
+            # Mise à jour automatique de l'index de fin
+            if 'start_select' in st.session_state:
+                if options.index(st.session_state.get('end_select', options[-1])) < options.index(start_index):
+                    end_index = options.index(start_index)
+                else:
+                    end_index = options.index(st.session_state.get('end_select', options[-1]))
+            else:
+                end_index = len(options) - 1
+
+            with col2:
+                end_index = st.selectbox(t("shortextractor_select_end"), options=options, key='end_select')
+
+            # Extraction des timecodes sélectionnés
+            start_time = parsed_transcript[options.index(start_index)]['start']
+            end_time = parsed_transcript[options.index(end_index)]['end']
+
+            st.session_state.start_time = start_time
+            st.session_state.end_time = end_time
+
             if st.button(t("shortextractor_suggest_timecode")):
                 with st.spinner(t("shortextractor_suggesting")):
                     ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
@@ -234,50 +260,18 @@ class ShortextractorPlugin(Plugin):
 
                     options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
                     start_index, end_index = self.extract_timecodes(llm_response, options)
+                    #st.write(f"{start_index} -> {end_index}")
+                    #st.write(options)
+                    start_time = parsed_transcript[start_index]['start']
+                    end_time = parsed_transcript[end_index]['end']
+                    #st.write(f"{start_time} -> {end_time}")
 
-                    st.session_state.start_select = start_index
-                    st.session_state.end_select = end_index
-
-            # Création des options pour les select boxes
-            options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
-
-            col1, col2 = st.columns(2)
-            with col1:
-                # Get the start_index from session state, defaulting to 0 if not present
-                start_index = st.session_state.get('start_select', 0)
-
-                # Ensure start_index is within the valid range
-                start_index = max(0, min(start_index, len(options) - 1))
-
-                start_select = st.selectbox(t("shortextractor_select_start"),
-                                            options=options,
-                                            key='start_select',
-                                            index=start_index)
-                start_index = options.index(start_select)
-
-            # Mise à jour automatique de l'index de fin
-            end_index = st.session_state.get('end_select', len(options) - 1)
-
-            # Ensure end_index is within the valid range and not less than start_index
-            end_index = max(start_index, min(end_index, len(options) - 1))
-
-            with col2:
-                end_select = st.selectbox(t("shortextractor_select_end"),
-                                          options=options,
-                                          key='end_select',
-                                          index=end_index)
-                end_index = options.index(end_select)
-
-            # Extraction des timecodes sélectionnés
-            start_time = parsed_transcript[start_index]['start']
-            end_time = parsed_transcript[end_index]['end']
-
-            st.session_state.start_time = start_time
-            st.session_state.end_time = end_time
-
+            col3,col4 = st.columns(2)
             # Affichage des timecodes sélectionnés
-            col1.text_input(t("shortextractor_start_time"), value=start_time, key='display_start_time')
-            col2.text_input(t("shortextractor_end_time"), value=end_time, key='display_end_time')
+            col3.text_input(t("shortextractor_start_time"), value=start_time, key='display_start_time')
+            col4.text_input(t("shortextractor_end_time"), value=end_time, key='display_end_time')
+
+
 
             # Assurez-vous que les valeurs sont des floats
             default_zoom = float(config['shortextractor'].get('zoom_factor', 1.2))
