@@ -1,10 +1,12 @@
 from global_vars import translations, t
 from app import Plugin
 import streamlit as st
-import os
+import os, re
 import subprocess
 from plugins.common import list_video_files
 from plugins.transcript import TranscriptPlugin
+from plugins.ragllm import RagllmPlugin
+
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -28,6 +30,10 @@ translations["en"].update({
     "shortextractor_end_time": "End time",
     "shortextractor_select_start": "Select start time",
     "shortextractor_select_end": "Select end time",
+    "shortextractor_suggest_timecode": "Suggest Timecode",
+    "shortextractor_suggesting": "Suggesting timecode...",
+    "shortextractor_llm_response": "LLM Response:",
+    "shortextractor_no_timecode": "No valid timecode found in the LLM response.",
 })
 
 translations["fr"].update({
@@ -51,6 +57,10 @@ translations["fr"].update({
     "shortextractor_end_time": "Temps de fin",
     "shortextractor_select_start": "Sélectionner le temps de début",
     "shortextractor_select_end": "Sélectionner le temps de fin",
+    "shortextractor_suggest_timecode": "Suggérer un timecode",
+    "shortextractor_suggesting": "Suggestion de timecode en cours...",
+    "shortextractor_llm_response": "Réponse du LLM :",
+    "shortextractor_no_timecode": "Aucun timecode valide trouvé dans la réponse du LLM.",
 })
 
 class ShortextractorPlugin(Plugin):
@@ -90,6 +100,40 @@ class ShortextractorPlugin(Plugin):
         except subprocess.CalledProcessError as e:
             print("Erreur ffmpeg:", e.stderr)
             return f"{t('shortextractor_error')}{e.stderr}"
+
+    def extract_timecodes(self, llm_response, options):
+        timecode_pattern = r'(\d{2}:\d{2}:\d{2}(?:,\d{3})?)'
+        timecodes = re.findall(timecode_pattern, llm_response)
+        if len(timecodes) >= 2:
+            start_index = self.find_closest_index(options, timecodes[0])
+            end_index = self.find_closest_index(options, timecodes[1])
+            return start_index, end_index
+        elif len(timecodes) == 1:
+            index = self.find_closest_index(options, timecodes[0])
+            return index, index
+        else:
+            return 0, len(options) - 1
+
+    def find_closest_index(self, options, target):
+        def extract_time(option):
+            return option.split(' - ')[0] if isinstance(option, str) else option
+
+        target_time = extract_time(target)
+
+        closest_index = 0
+        min_diff = float('inf')
+        for i, option in enumerate(options):
+            option_time = extract_time(option)
+
+            # Convert times to seconds for comparison
+            target_seconds = self.convert_srt_time_to_seconds(target_time) if isinstance(target_time, str) else target_time
+            option_seconds = self.convert_srt_time_to_seconds(option_time)
+
+            diff = abs(option_seconds - target_seconds)
+            if diff < min_diff:
+                min_diff = diff
+                closest_index = i
+        return closest_index
 
     def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
@@ -147,6 +191,7 @@ class ShortextractorPlugin(Plugin):
             parsed.append(current_entry)
         return parsed
 
+
     def run(self, config):
         st.header(t("shortextractor_header"))
 
@@ -171,28 +216,61 @@ class ShortextractorPlugin(Plugin):
         if 'transcript' in st.session_state:
             parsed_transcript = self.parse_transcript(st.session_state.transcript)
 
+            if st.button(t("shortextractor_suggest_timecode")):
+                with st.spinner(t("shortextractor_suggesting")):
+                    ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
+
+                    prompt = f"""Analyze the following video transcript and suggest a short, interesting segment (15-60 seconds) that could be extracted as a standalone short video. Provide the start and end timecodes in the format HH:MM:SS,mmm.
+
+            Transcript:
+            {st.session_state.transcript}
+
+            Please respond with two timecodes: a start time and an end time, along with a brief explanation of why this segment would make a good short video."""
+
+                    llm_response = ragllm_plugin.process_with_llm(prompt, config['ragllm']['llm_sys_prompt'], "", config['ragllm']['llm_model'])
+
+                    st.text(t("shortextractor_llm_response"))
+                    st.text(llm_response)
+
+                    options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
+                    start_index, end_index = self.extract_timecodes(llm_response, options)
+
+                    st.session_state.start_select = start_index
+                    st.session_state.end_select = end_index
+
             # Création des options pour les select boxes
             options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
 
             col1, col2 = st.columns(2)
             with col1:
-                start_index = st.selectbox(t("shortextractor_select_start"), options=options, key='start_select')
+                # Get the start_index from session state, defaulting to 0 if not present
+                start_index = st.session_state.get('start_select', 0)
+
+                # Ensure start_index is within the valid range
+                start_index = max(0, min(start_index, len(options) - 1))
+
+                start_select = st.selectbox(t("shortextractor_select_start"),
+                                            options=options,
+                                            key='start_select',
+                                            index=start_index)
+                start_index = options.index(start_select)
 
             # Mise à jour automatique de l'index de fin
-            if 'start_select' in st.session_state:
-                if options.index(st.session_state.get('end_select', options[-1])) < options.index(start_index):
-                    end_index = options.index(start_index)
-                else:
-                    end_index = options.index(st.session_state.get('end_select', options[-1]))
-            else:
-                end_index = len(options) - 1
+            end_index = st.session_state.get('end_select', len(options) - 1)
+
+            # Ensure end_index is within the valid range and not less than start_index
+            end_index = max(start_index, min(end_index, len(options) - 1))
 
             with col2:
-                end_index = st.selectbox(t("shortextractor_select_end"), options=options, key='end_select')
+                end_select = st.selectbox(t("shortextractor_select_end"),
+                                          options=options,
+                                          key='end_select',
+                                          index=end_index)
+                end_index = options.index(end_select)
 
             # Extraction des timecodes sélectionnés
-            start_time = parsed_transcript[options.index(start_index)]['start']
-            end_time = parsed_transcript[options.index(end_index)]['end']
+            start_time = parsed_transcript[start_index]['start']
+            end_time = parsed_transcript[end_index]['end']
 
             st.session_state.start_time = start_time
             st.session_state.end_time = end_time
