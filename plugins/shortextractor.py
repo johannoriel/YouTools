@@ -112,16 +112,12 @@ class ShortextractorPlugin(Plugin):
             zoom_file
         ]
         self.ffmpeg(ffmpeg_command)
-        crop_width = "min(iw,ih)*9/16"
-        crop_height = "min(iw,ih)"
-        x = f"(iw-{crop_width})*{center_x}"
-        y = "ih/2"
         ffmpeg_command = [
             "ffmpeg", "-y",
             "-ss", f"{start_seconds:.3f}",
             "-i", zoom_file,
             "-t", f"{duration:.3f}",
-            "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):iw/2+({center_x}-0.5)*iw:ih/2'",
+            "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):(iw/2)/{zoom_factor}+((iw/2)*{center_x:.3f}):ih/2'",
             "-c:a", "copy",
             output_file
         ]
@@ -207,13 +203,13 @@ class ShortextractorPlugin(Plugin):
 
             # Assurez-vous que les valeurs sont des floats
             default_zoom = float(config['shortextractor'].get('zoom_factor', 1.2))
-            default_center_x = float(config['shortextractor'].get('center_x', 0.5))
-            default_center_y = float(config['shortextractor'].get('center_y', 0.5))
+            default_center_x = float(config['shortextractor'].get('center_x', 0))
+            default_center_y = float(config['shortextractor'].get('center_y', 0))
 
             col1, col2, col3 = st.columns([1, 1, 1])
             zoom_factor = col1.slider(t("shortextractor_zoom"), min_value=1.0, max_value=2.0, value=default_zoom, step=0.1)
-            center_x = col2.slider(t("shortextractor_center_x"), min_value=0.0, max_value=1.0, value=default_center_x, step=0.1)
-            center_y = col3.slider(t("shortextractor_center_y"), min_value=0.0, max_value=1.0, value=default_center_y, step=0.1)
+            center_x = col2.slider(t("shortextractor_center_x"), min_value=-1.0, max_value=1.0, value=default_center_x, step=0.1)
+            center_y = col3.slider(t("shortextractor_center_y"), min_value=-1.0, max_value=1.0, value=default_center_y, step=0.1)
 
             if st.button(t("shortextractor_extract")):
                 with st.spinner(t("shortextractor_extracting")):
