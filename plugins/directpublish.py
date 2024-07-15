@@ -200,7 +200,7 @@ class DirectpublishPlugin(Plugin):
                     transcript = self.transcript_plugin.transcribe_video(
                         video_to_process,
                         "txt",
-                        os.path.expanduser(config['transcript']['whisper_path']),
+                        config['transcript']['whisper_path'],
                         config['transcript']['whisper_model'],
                         config['transcript']['ffmpeg_path'],
                         config['common']['language']

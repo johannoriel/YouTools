@@ -102,7 +102,7 @@ class TrimsilencesPlugin(Plugin):
 
         all_videos = list_video_files(config['common']['work_directory'])
 
-        video_files, outfile_videos, _ = all_videos
+        video_files, outfile_videos, _, _ = all_videos
         st.session_state['list_video_files'] = all_videos
 
         st.subheader(t("trim_silences_original_videos"))

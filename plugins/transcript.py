@@ -109,9 +109,10 @@ class TranscriptPlugin(Plugin):
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{output_format}") as temp_output:
                 output_file = temp_output.name
             file_without_extension, file_extension = os.path.splitext(output_file)
+            expanded_whisper_path = os.path.expanduser(whisper_path)
             whisper_command = [
-                whisper_path,
-                "-m", f"{os.path.dirname(whisper_path)}/models/ggml-{whisper_model}.bin",
+                expanded_whisper_path,
+                "-m", f"{os.path.dirname(expanded_whisper_path)}/models/ggml-{whisper_model}.bin",
                 "-f", temp_audio_path,
                 "-l", lang,
                 "-of", file_without_extension,

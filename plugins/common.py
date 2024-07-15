@@ -122,6 +122,7 @@ def list_video_files(directory):
     video_files = []
     outfile_videos = []
     chroma_videos = []
+    short_videos = []
     for file in os.listdir(directory):
         if file.lower().endswith(('.mkv', '.mp4')):
             # Check if the file name contains spaces
@@ -143,17 +144,20 @@ def list_video_files(directory):
                 outfile_videos.append((file, full_path, mod_time))
             elif file.startswith('chroma_'):
                 chroma_videos.append((file, full_path, mod_time))
+            elif file.startswith('short'):
+                short_videos.append((file, full_path, mod_time))
             else:
                 video_files.append((file, full_path, mod_time))
 
     video_files.sort(key=lambda x: x[2], reverse=True)
     outfile_videos.sort(key=lambda x: x[2], reverse=True)
     chroma_videos.sort(key=lambda x: x[2], reverse=True)
-    return video_files, outfile_videos, chroma_videos
+    short_videos.sort(key=lambda x: x[2], reverse=True)
+    return video_files, outfile_videos, chroma_videos, short_videos
 
 def list_all_video_files(directory):
-    l1, l2, l3 = list_video_files(directory)
-    return l1+l2+l3
+    l1, l2, l3, l4 = list_video_files(directory)
+    return l1+l2+l3+l4
 
 def remove_quotes(s):
     if s.startswith('"') and s.endswith('"'):
