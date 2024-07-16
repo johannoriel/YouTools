@@ -69,17 +69,17 @@ class ShortextractorPlugin(Plugin):
             "zoom_factor": {
                 "type": "number",
                 "label": t("shortextractor_zoom"),
-                "default": 1.2
+                "default": 1
             },
             "center_x": {
                 "type": "number",
                 "label": t("shortextractor_center_x"),
-                "default": 0.5
+                "default": 0
             },
             "center_y": {
                 "type": "number",
                 "label": t("shortextractor_center_y"),
-                "default": 0.5
+                "default": 0
             }
         }
 
@@ -261,11 +261,9 @@ class ShortextractorPlugin(Plugin):
 
                     options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
                     start_index, end_index = self.extract_timecodes(llm_response, options)
-                    #st.write(f"{start_index} -> {end_index}")
-                    #st.write(options)
                     start_time = parsed_transcript[start_index]['start']
                     end_time = parsed_transcript[end_index]['end']
-                    #st.write(f"{start_time} -> {end_time}")
+                    st.write(f"{start_time} -> {end_time}")
 
             col3,col4 = st.columns(2)
             # Affichage des timecodes sélectionnés
