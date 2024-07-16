@@ -9,9 +9,7 @@ from global_vars import translations, t
 # Constantes
 CONFIG_FILE = "config.json"
 
-# Initialisation de la langue dans st.session_state
-if 'lang' not in st.session_state:
-    st.session_state.lang = "en"
+
 
 # Fonction pour mettre à jour la langue
 def set_lang(language):
@@ -103,13 +101,16 @@ def save_config(config: Dict[str, Any]):
 
 def main():
     st.set_page_config(page_title="YoutTools", layout="wide")
-    st.title(t("page_title"))
     # Initialisation du gestionnaire de plugins
     plugin_manager = PluginManager()
     plugin_manager.load_plugins()
 
     # Chargement de la configuration
     config = load_config()
+    # Initialisation de la langue dans st.session_state
+    if 'lang' not in st.session_state:
+        st.session_state.lang = config['common']['language']
+    st.title(t("page_title"))
 
     load_dotenv()
     API_KEY = os.getenv("YOUTUBE_API_KEY")
