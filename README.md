@@ -21,7 +21,6 @@ general_settings:
 ## .env
 ```
 YOUTUBE_API_KEY=xxxxxxx
-LLM_API_KEY=sk-xxxxx
 ```
 ## Install with pyenv
 ```
