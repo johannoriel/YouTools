@@ -227,7 +227,7 @@ class DirectpublishPlugin(Plugin):
                         config['ragllm']['llm_sys_prompt'],
                         transcript,
                         config['ragllm']['llm_model']
-                    ))
+                    )).split('\n')[0].strip()
                     st.code(title)
 
                     # 5. Générer un titre pour la vidéo

@@ -225,6 +225,11 @@ class ShortextractorPlugin(Plugin):
                 st.session_state.start_index = 0
             if 'end_index' not in st.session_state:
                 st.session_state.end_index = len(options) - 1
+            if 'start_time' not in st.session_state:
+                st.session_state.start_time = parsed_transcript[st.session_state.start_index]['start']
+            if 'end_time' not in st.session_state:
+                st.session_state.end_time = parsed_transcript[st.session_state.end_index]['end']
+
 
             col1, col2 = st.columns(2)
             with col1:
@@ -239,13 +244,17 @@ class ShortextractorPlugin(Plugin):
                                          index=st.session_state.end_index,
                                          key='end_select')
 
-            # Mise à jour des indices dans st.session_state
+            # Mise à jour des indices et des temps dans st.session_state
             st.session_state.start_index = options.index(start_index)
             st.session_state.end_index = options.index(end_index)
+            st.session_state.start_time = parsed_transcript[st.session_state.start_index]['start']
+            st.session_state.end_time = parsed_transcript[st.session_state.end_index]['end']
 
             # Assurer que l'index de fin n'est pas avant l'index de début
             if st.session_state.end_index < st.session_state.start_index:
                 st.session_state.end_index = st.session_state.start_index
+                st.session_state.end_time = parsed_transcript[st.session_state.end_index]['end']
+
 
             # Mise à jour des valeurs de timecode
             start_time = parsed_transcript[st.session_state.start_index]['start']
@@ -273,14 +282,14 @@ class ShortextractorPlugin(Plugin):
                     suggested_start_index, suggested_end_index = self.extract_timecodes(llm_response, options)
                     st.session_state.start_index = suggested_start_index
                     st.session_state.end_index = suggested_end_index
-                    start_time = parsed_transcript[suggested_start_index]['start']
-                    end_time = parsed_transcript[suggested_end_index]['end']
-                    st.write(f"{start_time} -> {end_time}")
+                    st.session_state.start_time = parsed_transcript[suggested_start_index]['start']
+                    st.session_state.end_time = parsed_transcript[suggested_end_index]['end']
+                    st.write(f"{st.session_state.start_time} -> {st.session_state.end_time}")
 
             col3,col4 = st.columns(2)
             # Affichage des timecodes sélectionnés
-            col3.text_input(t("shortextractor_start_time"), value=start_time, key='display_start_time')
-            col4.text_input(t("shortextractor_end_time"), value=end_time, key='display_end_time')
+            st.session_state.start_time = col3.text_input(t("shortextractor_start_time"), value=st.session_state.start_time, key='display_start_time')
+            st.session_state.end_time = col4.text_input(t("shortextractor_end_time"), value=st.session_state.end_time, key='display_end_time')
 
 
 
@@ -290,15 +299,15 @@ class ShortextractorPlugin(Plugin):
             default_center_y = float(config['shortextractor'].get('center_y', 0))
 
             col1, col2, col3 = st.columns([1, 1, 1])
-            zoom_factor = col1.slider(t("shortextractor_zoom"), min_value=1.0, max_value=2.0, value=default_zoom, step=0.1)
+            zoom_factor = col1.slider(t("shortextractor_zoom"), min_value=1.0, max_value=3.0, value=default_zoom, step=0.1)
             center_x = col2.slider(t("shortextractor_center_x"), min_value=-1.0, max_value=1.0, value=default_center_x, step=0.1)
             center_y = col3.slider(t("shortextractor_center_y"), min_value=-1.0, max_value=1.0, value=default_center_y, step=0.1)
 
             if st.button(t("shortextractor_extract")):
                 with st.spinner(t("shortextractor_extracting")):
                     output_file = os.path.join(work_directory, f"short_{os.path.splitext(selected_video)[0]}.mp4")
-                    st.write(f"Extracting {start_time} -> {end_time}")
-                    result = self.extract_short(selected_video_path, start_time, end_time, output_file, zoom_factor, center_x, center_y)
+                    st.write(f"Extracting {st.session_state.start_time} -> {st.session_state.end_time}")
+                    result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time, output_file, zoom_factor, center_x, center_y)
                     if result == output_file:
                         st.success("Short extracted successfully!")
                         col2.video(output_file)

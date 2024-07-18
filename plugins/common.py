@@ -118,6 +118,34 @@ def upload_video(filename, title, description, category, keywords, privacy_statu
     st.success(t('upload_finished')+f" : {response['id']}")
     return response['id']
 
+def list_video_files2(directory, prefix_exclude=None, extensions=('.mkv', '.mp4')):
+    def rename_file_without_spaces(file, directory):
+        if ' ' in file:
+            new_file = file.replace(' ', '_')
+            old_path = os.path.join(directory, file)
+            new_path = os.path.join(directory, new_file)
+            os.rename(old_path, new_path)
+            return new_file
+        return file
+
+    video_files = []
+    for file in os.listdir(directory):
+        if file.lower().endswith(extensions):
+            file = rename_file_without_spaces(file, directory)
+
+            if prefix_exclude:
+                if not any(file.startswith(prefix) for prefix in prefix_exclude):
+                    full_path = os.path.join(directory, file)
+                    mod_time = os.path.getmtime(full_path)
+                    video_files.append((file, full_path, mod_time))
+            else:
+                full_path = os.path.join(directory, file)
+                mod_time = os.path.getmtime(full_path)
+                video_files.append((file, full_path, mod_time))
+
+    video_files.sort(key=lambda x: x[2], reverse=True)
+    return video_files
+
 def list_video_files(directory):
     video_files = []
     outfile_videos = []
