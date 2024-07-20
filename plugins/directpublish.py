@@ -167,7 +167,7 @@ class DirectpublishPlugin(Plugin):
 
         if st.button(t("directpublish_publish_button")):
             with st.spinner(t("directpublish_processing")):
-                try:
+                #try:
                     video_to_process = selected_video_path
 
                     # 1. Retirer les silences si demandé
@@ -253,5 +253,5 @@ class DirectpublishPlugin(Plugin):
 
                     st.success(t("directpublish_success").format(video_id=video_id))
 
-                except Exception as e:
-                    st.error(t("directpublish_error").format(error=str(e)))
+                #except Exception as e:
+                #    st.error(t("directpublish_error").format(error=str(e)))
