@@ -126,7 +126,7 @@ class TranscriptPlugin(Plugin):
             except subprocess.CalledProcessError as e:
                 print("Erreur lors de l'exécution de whisper:")
                 print(e.stderr)  # Affiche le message d'erreur de whisper
-            print('done')
+            print('Transcription done')
 
             with open(output_file, 'r') as f:
                 transcript = f.read()

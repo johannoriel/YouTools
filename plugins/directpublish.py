@@ -18,7 +18,7 @@ translations["en"].update({
     "directpublish_video_category": "Video category",
     "directpublish_publish_button": "Publish to YouTube",
     "directpublish_processing": "Processing video...",
-    "directpublish_success": "Video successfully published! Video URL: https://www.youtube.com/watch?v={video_id}",
+    "directpublish_success": "Video successfully published! Video URL: https://www.youtube.com/watch?v={video_id}, Edition : https://studio.youtube.com/video/{video_id}/edit",
     "directpublish_error": "An error occurred during publication: {error}",
     "directpublish_generating_title": "Generating video title...",
     "directpublish_generating_description": "Generating video description...",
@@ -34,6 +34,7 @@ translations["en"].update({
     "directpublish_title_generator" : "Generate a catchy title for a YouTube video based on this summary, not exceeding 100 characters, without commenting, just the title, without quotation marks.",
     "directpublish_tag_generator" : "Generate a comma list of keywords describing the subject, without any comment or adding, just a raw list of comma seaparated keywords",
     "directpublish_addings" : "Add any text to your description (will not be modified)",
+    "directpublish_notags" : "Invalid tags - upload without them",
 })
 
 translations["fr"].update({
@@ -44,7 +45,7 @@ translations["fr"].update({
     "directpublish_video_category": "Catégorie de la vidéo",
     "directpublish_publish_button": "Publier sur YouTube",
     "directpublish_processing": "Traitement de la vidéo en cours...",
-    "directpublish_success": "Vidéo publiée avec succès ! URL de la vidéo : https://www.youtube.com/watch?v={video_id}",
+    "directpublish_success": "Vidéo publiée avec succès ! URL de la vidéo : https://www.youtube.com/watch?v={video_id}, édition : https://studio.youtube.com/video/{video_id}/edit",
     "directpublish_error": "Une erreur s'est produite lors de la publication : {error}",
     "directpublish_generating_title": "Génération du titre de la vidéo...",
     "directpublish_generating_description": "Génération de la description de la vidéo...",
@@ -59,7 +60,8 @@ translations["fr"].update({
     "directpublish_preprompt": "Modifiez le prompt si besoin (rajoutez des éléments spécifiques):",
     "directpublish_title_generator" : "Génère un titre accrocheur pour une vidéo YouTube basée sur ce résumé, sans dépasser 100 caractères, sans commenter, juste le titre, sans guillemets.",
     "directpublish_tag_generator" : "Génère une liste de mots-clés décrivant le sujet, sans commentaire ni ajout, juste une liste brute séparée par des virgules",
-    "directpublish_addings" : "Rajoutez du texte à votre description (ne sera pas modifié)"
+    "directpublish_addings" : "Rajoutez du texte à votre description (ne sera pas modifié)",
+    "directpublish_notags" : "Tags invalides - upload sans eux",
 })
 
 class DirectpublishPlugin(Plugin):
@@ -242,16 +244,27 @@ class DirectpublishPlugin(Plugin):
 
                     # 6. Uploader la vidéo sur YouTube
                     st.text(t("directpublish_upload"))
-                    video_id = upload_video(
-                        video_to_process,
-                        title,
-                        f"{description}\n\n{addings}\n{signature}",
-                        selected_category,
-                        tags.split(','),  # keywords (optionnel)
-                        "unlisted"
-                    )
+                    try:
+                        video_id = upload_video(
+                            video_to_process,
+                            title,
+                            f"{description}\n\n{addings}\n{signature}",
+                            selected_category,
+                            tags.split(','),  # keywords (optionnel)
+                            "unlisted"
+                        )
+                    except ResumableUploadError:
+                        video_id = upload_video(
+                            video_to_process,
+                            title,
+                            f"{description}\n\n{addings}\n{signature}",
+                            selected_category,
+                            "unlisted"
+                        )
+                        st.success(t("directpublish_notags"))
 
                     st.success(t("directpublish_success").format(video_id=video_id))
+                    print("Upload finished")
 
                 #except Exception as e:
                 #    st.error(t("directpublish_error").format(error=str(e)))

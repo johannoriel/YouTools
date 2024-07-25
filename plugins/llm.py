@@ -86,12 +86,12 @@ class LlmPlugin(Plugin):
     def process_with_llm(self, prompt: str, sysprompt: str, transcript: str, llm_model: str) -> str:
         try:
             model_config = next((model for model in self.config['model_list'] if model['model_name'] == llm_model), None)
-            
+
             if not model_config:
                 raise ValueError(f"Configuration non trouvée pour le modèle {llm_model}")
-            
+
             litellm_params = model_config['litellm_params']
-            
+
             response = completion(
                 model=litellm_params['model'],
                 messages=[
@@ -106,6 +106,4 @@ class LlmPlugin(Plugin):
             return f"{t('llm_error_calling_llm')}{str(e)}"
 
     def run(self, config):
-        global lang
         st.write(t("llm_loaded"))
-
