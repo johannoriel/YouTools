@@ -29,7 +29,20 @@ translations["en"].update({
     "transcript_llm_copy_button": "Copy LLM Summary",
     "transcript_llm_copy_success": "LLM Summary copied! Use Ctrl+C (or Cmd+C on Mac) to copy it from the code block above.",
     "transcript_llm_download_button": "Download LLM Summary",
-    "transcript_error_transcribing": "Error during transcription: "
+    "transcript_error_transcribing": "Error during transcription: ",
+    "prompt_management": "Prompt Management",
+    "select_prompt": "Select a prompt",
+    "custom_prompt": "Custom prompt (optional)",
+    "apply_prompt": "Apply Prompt",
+    "new_prompt_name": "New prompt name",
+    "new_prompt_content": "New prompt content",
+    "add_prompt": "Add Prompt",
+    "edit_prompt": "Edit Prompt",
+    "delete_prompt": "Delete Prompt",
+    "prompt_result": "Prompt Result",
+    "copy_result": "Copy Result",
+    "download_result": "Download Result",
+    "result_copied": "Result copied! Use Ctrl+C (or Cmd+C on Mac) to copy it from the code block above.",
 })
 
 translations["fr"].update({
@@ -52,12 +65,30 @@ translations["fr"].update({
     "transcript_llm_copy_button": "Copier le résumé LLM",
     "transcript_llm_copy_success": "Résumé LLM copié ! Utilisez Ctrl+C (ou Cmd+C sur Mac) pour le copier depuis le bloc de code ci-dessus.",
     "transcript_llm_download_button": "Télécharger le résumé LLM",
-    "transcript_error_transcribing": "Erreur lors de la transcription : "
+    "transcript_error_transcribing": "Erreur lors de la transcription : ",
+    "prompt_management": "Gestion des prompts",
+    "select_prompt": "Sélectionner un prompt",
+    "custom_prompt": "Prompt personnalisé (optionnel)",
+    "apply_prompt": "Appliquer le Prompt",
+    "new_prompt_name": "Nom du nouveau prompt",
+    "new_prompt_content": "Contenu du nouveau prompt",
+    "add_prompt": "Ajouter un Prompt",
+    "edit_prompt": "Modifier le Prompt",
+    "delete_prompt": "Supprimer le Prompt",
+    "prompt_result": "Résultat du Prompt",
+    "copy_result": "Copier le Résultat",
+    "download_result": "Télécharger le Résultat",
+    "result_copied": "Résultat copié ! Utilisez Ctrl+C (ou Cmd+C sur Mac) pour le copier depuis le bloc de code ci-dessus.",
 })
 
 class TranscriptPlugin(Plugin):
+    def __init__(self, name, plugin_manager):
+        super().__init__(name, plugin_manager)
+        if 'prompts' not in st.session_state:
+            st.session_state.prompts = {}
+
     def get_config_fields(self):
-        return {
+        fields = {
             "whisper_path": {
                 "type": "text",
                 "label": t("transcript_whisper_path"),
@@ -73,8 +104,14 @@ class TranscriptPlugin(Plugin):
                 "type": "text",
                 "label": t("transcript_ffmpeg_path"),
                 "default": "ffmpeg"
+            },
+            "prompts": {
+                "type": "json",
+                "label": "Saved Prompts",
+                "default": "{}"
             }
         }
+        return fields
 
     def get_tabs(self):
         return [{"name": t("transcript_tab"), "plugin": "transcript"}]
@@ -147,9 +184,60 @@ class TranscriptPlugin(Plugin):
             if os.path.exists(f"transcript.{output_format}"):
                 os.remove(f"transcript.{output_format}")
 
+    def manage_prompts(self, config):
+        st.subheader(t("prompt_management"))
+
+        # Charger les prompts depuis la configuration
+        if 'prompts' not in config['transcript']:
+            config['transcript']['prompts'] = {}
+        st.session_state.prompts = config['transcript']['prompts']
+
+        # Afficher les prompts existants
+        prompt_options = list(st.session_state.prompts.keys()) + ['Custom']
+        selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="prompt_select")
+
+        if selected_prompt == 'Custom':
+            prompt_content = st.text_area(t("custom_prompt"), "", key="custom_prompt")
+        else:
+            prompt_content = st.text_area(t("edit_prompt"), st.session_state.prompts.get(selected_prompt, ""), key="edit_prompt")
+
+        # Ajouter ou modifier un prompt
+        new_prompt_name = st.text_input(t("new_prompt_name"), key="new_prompt_name")
+        if st.button(t("add_prompt"), key="add_prompt"):
+            if new_prompt_name:
+                st.session_state.prompts[new_prompt_name] = prompt_content
+                config['transcript']['prompts'] = st.session_state.prompts
+                self.plugin_manager.save_config(config)
+                st.success(f"Prompt '{new_prompt_name}' added/updated.")
+                st.rerun()
+
+        # Supprimer un prompt
+        if selected_prompt != 'Custom' and st.button(t("delete_prompt"), key="delete_prompt"):
+            del st.session_state.prompts[selected_prompt]
+            config['transcript']['prompts'] = st.session_state.prompts
+            self.plugin_manager.save_config(config)
+            st.success(f"Prompt '{selected_prompt}' deleted.")
+            st.rerun()
+
+        return selected_prompt, prompt_content
+
+    def apply_prompt(self, transcript, prompt, llm_plugin, llm_config):
+        response = llm_plugin.process_with_llm(
+            prompt,
+            llm_config.get('llm_sys_prompt', ''),
+            transcript,
+            llm_config.get('llm_model', '')
+        )
+        return response
+
     def run(self, config):
         st.header(t("transcript_header"))
 
+        # Gestion des prompts (indépendante du transcript)
+        with st.expander(t("prompt_management"), expanded=True):
+            selected_prompt, prompt_content = self.manage_prompts(config)
+
+        # Le reste du code pour la transcription
         work_directory = os.path.expanduser(config['common']['work_directory'])
         whisper_path = os.path.expanduser(config['transcript']['whisper_path'])
         whisper_model = config['transcript']['whisper_model']
@@ -171,7 +259,6 @@ class TranscriptPlugin(Plugin):
                 transcript = self.transcribe_video(selected_video_path, output_format, whisper_path, whisper_model, ffmpeg_path, config['common']['language'])
                 st.session_state.transcript = transcript
                 st.session_state.show_transcript = True
-                st.session_state.show_llm_response = False
 
         if st.session_state.get('show_transcript', False):
             st.success(t("transcript_transcription_done"))
@@ -190,37 +277,32 @@ class TranscriptPlugin(Plugin):
                     mime="text/plain"
                 )
 
-            # Résumé avec LLM
-            llm_plugin = self.plugin_manager.get_plugin('llm')
-            llm_config = config.get('llm', {})
-            prompt = llm_config.get('llm_prompt', '')
+            # Application du prompt
+            if st.button(t("apply_prompt")):
+                llm_plugin = self.plugin_manager.get_plugin('llm')
+                llm_config = config.get('llm', {})
 
-            with st.expander(t("transcript_summary_with_llm")):
-                with st.form("llm_form"):
-                    st.markdown(t("transcript_summary_with_llm"))
-                    custom_prompt = st.text_input(t("transcript_custom_prompt"), prompt)
-                    submit_button = st.form_submit_button(t("transcript_summary_button"))
+                final_prompt = prompt_content
+                if selected_prompt != 'Custom':
+                    final_prompt = st.session_state.prompts[selected_prompt] + "\n" + prompt_content
 
-                if submit_button:
-                    video_content = f"# {selected_video} \n {st.session_state.transcript}"
-                    llm_response = llm_plugin.process_with_llm(
-                        custom_prompt or prompt,
-                        llm_config.get('llm_sys_prompt', ''),
-                        video_content,
-                        llm_config.get('llm_model', '')
-                    )
-                    st.text_area(t("transcript_llm_summary"), llm_response, height=200)
-                    st.session_state.llm_response = llm_response
-                    st.session_state.show_llm_response = True
+                result = self.apply_prompt(st.session_state.transcript, final_prompt, llm_plugin, llm_config)
+                st.session_state.prompt_result = result
 
-                if st.session_state.get('show_llm_response', False):
-                    if st.button(t("transcript_llm_copy_button")):
-                        st.code(st.session_state.llm_response)
-                        st.success(t("transcript_llm_copy_success"))
+            # Affichage du résultat
+            if 'prompt_result' in st.session_state:
+                st.subheader(t("prompt_result"))
+                st.text_area("", st.session_state.prompt_result, height=300)
 
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(t("copy_result")):
+                        st.code(st.session_state.prompt_result)
+                        st.success(t("result_copied"))
+                with col2:
                     st.download_button(
-                        label=t("transcript_llm_download_button"),
-                        data=st.session_state.llm_response,
-                        file_name=f"llm_summary_{os.path.splitext(selected_video)[0]}.txt",
+                        label=t("download_result"),
+                        data=st.session_state.prompt_result,
+                        file_name="prompt_result.txt",
                         mime="text/plain"
                     )

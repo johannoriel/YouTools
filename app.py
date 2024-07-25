@@ -9,6 +9,16 @@ from global_vars import translations, t
 # Constantes
 CONFIG_FILE = "config.json"
 
+def load_config() -> Dict[str, Any]:
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_config(config: Dict[str, Any]):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
 
 
 # Fonction pour mettre à jour la langue
@@ -89,15 +99,8 @@ class PluginManager:
         if plugin_name in self.plugins:
             self.plugins[plugin_name].run(config)
 
-def load_config() -> Dict[str, Any]:
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    return {}
-
-def save_config(config: Dict[str, Any]):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
+    def save_config(self, config):
+        save_config(config)
 
 def main():
     st.set_page_config(page_title="YoutTools", layout="wide")
