@@ -19,8 +19,6 @@ def save_config(config: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
 
-
-
 # Fonction pour mettre à jour la langue
 def set_lang(language):
     st.session_state.lang = language

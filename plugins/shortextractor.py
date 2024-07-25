@@ -210,7 +210,10 @@ class ShortextractorPlugin(Plugin):
 
     def display_searchable_transcript(self, transcript):
         st.subheader(t("searchable_transcript"))
-
+        if not isinstance(transcript, list):
+            return
+        if not "start" in transcript[0]:
+            return
         col1, col2 = st.columns([1, 3])
 
         with col1:
@@ -292,6 +295,10 @@ class ShortextractorPlugin(Plugin):
 
         if 'transcript' in st.session_state:
             parsed_transcript = self.parse_transcript(st.session_state.transcript)
+            if not isinstance(parsed_transcript, list):
+                return
+            if not "start" in parsed_transcript[0]:
+                return
 
             self.display_searchable_transcript(parsed_transcript)
 

@@ -91,18 +91,18 @@ class TranscriptPlugin(Plugin):
         fields = {
             "whisper_path": {
                 "type": "text",
-                "label": t("transcript_whisper_path"),
+                "label": "transcript_whisper_path",
                 "default": "~/Evaluation/whisper.cpp/main"
             },
             "whisper_model": {
                 "type": "select",
-                "label": t("transcript_whisper_model"),
+                "label": "transcript_whisper_model",
                 "options": [("tiny", "Tiny"), ("base", "Base"), ("small", "Small"), ("medium", "Medium"), ("large", "Large")],
                 "default": "medium"
             },
             "ffmpeg_path": {
                 "type": "text",
-                "label": t("transcript_ffmpeg_path"),
+                "label": "transcript_ffmpeg_path",
                 "default": "ffmpeg"
             },
             "prompts": {
