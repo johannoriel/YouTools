@@ -34,6 +34,14 @@ translations["en"].update({
     "shortextractor_suggesting": "Suggesting timecode...",
     "shortextractor_llm_response": "LLM Response:",
     "shortextractor_no_timecode": "No valid timecode found in the LLM response.",
+    "shortextractor_sugestion" : "Suggest a thematic or a subject",
+    "searchable_transcript" : "Search in transcript",
+    "search_in_transcript" : "Term to search for",
+    "set_as_start_time" : "Set as start time",
+    "start_time_set" : "Start time set",
+    "set_as_end_time" : "Set as end time",
+    "start_end_set" : "End time set",
+    "full_transcript" : "Transcript",
 })
 
 translations["fr"].update({
@@ -61,6 +69,14 @@ translations["fr"].update({
     "shortextractor_suggesting": "Suggestion de timecode en cours...",
     "shortextractor_llm_response": "Réponse du LLM :",
     "shortextractor_no_timecode": "Aucun timecode valide trouvé dans la réponse du LLM.",
+    "shortextractor_sugestion" : "Suggérer une thématique ou un sujet",
+    "searchable_transcript" : "Rechercher dans le transcript",
+    "search_in_transcript" : "Terme à rechercher",
+    "set_as_start_time" : "Définir comme temps de début",
+    "start_time_set" : "Temps de début défini",
+    "set_as_end_time" : "Définir comme temps de fin",
+    "start_end_set" : "Temps de fin définis",
+    "full_transcript" : "Transcription de la vidéo",
 })
 
 class ShortextractorPlugin(Plugin):
@@ -192,6 +208,66 @@ class ShortextractorPlugin(Plugin):
             parsed.append(current_entry)
         return parsed
 
+    def display_searchable_transcript(self, transcript):
+        st.subheader(t("searchable_transcript"))
+
+        col1, col2 = st.columns([1, 3])
+
+        with col1:
+            search_term = st.text_input(t("search_in_transcript"), "")
+
+            if st.button(t("set_as_start_time")):
+                self.set_time_from_search(search_term, 'start', transcript)
+
+            if st.button(t("set_as_end_time")):
+                self.set_time_from_search(search_term, 'end', transcript)
+
+        with col2:
+            full_transcript = "\n\n".join([f"{entry['start']} - {entry['end']}\n{entry['text']}" for entry in transcript])
+
+            if search_term:
+                pattern = re.compile(re.escape(search_term), re.IGNORECASE)
+                matches = list(pattern.finditer(full_transcript))
+
+                if matches:
+                    pattern = re.compile(re.escape(search_term), re.IGNORECASE)
+                    matches = []
+
+                    for entry in transcript:
+                        if pattern.search(entry['text']):
+                            matches.append(entry)
+
+                    if matches:
+                        st.write(f"{len(matches)} occurrence(s) found:")
+                        for i, match in enumerate(matches, 1):
+                            highlighted_text = pattern.sub(lambda m: f"**{m.group()}**", match['text'])
+                            #st.markdown(f"**Occurrence {i}:**")
+                            st.markdown(f"{match['start']} - {match['end']} {highlighted_text}")
+                            st.markdown("---")
+                else:
+                    st.warning(t("search_term_not_found").format(search_term=search_term))
+                    st.text_area(t("full_transcript"), full_transcript, height=400)
+            else:
+                st.text_area(t("full_transcript"), full_transcript, height=400)
+
+    def set_time_from_search(self, search_term, time_type, transcript):
+        if not search_term:
+            st.warning(t("enter_search_term"))
+            return
+
+        for i, entry in enumerate(transcript):
+            if search_term.lower() in entry['text'].lower():
+                if time_type == 'start':
+                    st.session_state.start_index = i
+                    st.session_state.start_time = entry['start']
+                    st.success(t("start_time_set").format(time=entry['start']))
+                else:
+                    st.session_state.end_index = i
+                    st.session_state.end_time = entry['end']
+                    st.success(t("end_time_set").format(time=entry['end']))
+                return
+
+        st.warning(t("search_term_not_found").format(search_term=search_term))
 
     def run(self, config):
         st.header(t("shortextractor_header"))
@@ -216,6 +292,8 @@ class ShortextractorPlugin(Plugin):
 
         if 'transcript' in st.session_state:
             parsed_transcript = self.parse_transcript(st.session_state.transcript)
+
+            self.display_searchable_transcript(parsed_transcript)
 
             # Création des options pour les select boxes
             options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
@@ -260,17 +338,26 @@ class ShortextractorPlugin(Plugin):
             start_time = parsed_transcript[st.session_state.start_index]['start']
             end_time = parsed_transcript[st.session_state.end_index]['end']
 
+            suggestion = st.text_input(t("shortextractor_sugestion"))
 
             if st.button(t("shortextractor_suggest_timecode")):
                 with st.spinner(t("shortextractor_suggesting")):
                     ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
 
-                    prompt = f"""Analyze the following video transcript and suggest a short, interesting segment (15-60 seconds) that could be extracted as a standalone short video. Provide the start and end timecodes in the format HH:MM:SS,mmm.
+                    suggest_theme = ""
+                    if suggestion != "":
+                        suggest_theme = f"Search speifically around the thematic or following subject : '{suggestion}'"
+
+                    print(suggest_theme)
+                    prompt = f"""Analyze the following video transcript and suggest a short, interesting segment (15-60 seconds) that could be extracted as a standalone short video.
+
+                    Provide the start and end timecodes in the format HH:MM:SS,mmm.
 
             Transcript:
             {st.session_state.transcript}
 
-            Please respond with two timecodes: a start time and an end time, along with a brief explanation of why this segment would make a good short video."""
+            Please respond with two timecodes: a start time and an end time, along with a brief explanation of why this segment would make a good short video.
+            {suggest_theme}"""
 
                     llm_response = ragllm_plugin.process_with_llm(prompt, config['ragllm']['llm_sys_prompt'], "", config['ragllm']['llm_model'])
 
