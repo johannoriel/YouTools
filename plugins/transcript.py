@@ -39,6 +39,7 @@ translations["en"].update({
     "new_prompt_name": "New prompt name",
     "new_prompt_content": "New prompt content",
     "add_prompt": "Add Prompt",
+    "save_prompt": "Save Prompt",
     "edit_prompt": "Edit Prompt",
     "delete_prompt": "Delete Prompt",
     "prompt_result": "Prompt Result",
@@ -75,6 +76,7 @@ translations["fr"].update({
     "new_prompt_name": "Nom du nouveau prompt",
     "new_prompt_content": "Contenu du nouveau prompt",
     "add_prompt": "Ajouter un Prompt",
+    "save_prompt": "Sauver le Prompt",
     "edit_prompt": "Modifier le Prompt",
     "delete_prompt": "Supprimer le Prompt",
     "prompt_result": "Résultat du Prompt",
@@ -204,8 +206,9 @@ class TranscriptPlugin(Plugin):
             prompt_content = st.text_area(t("edit_prompt"), st.session_state.prompts.get(selected_prompt, ""), key="edit_prompt")
 
         # Ajouter ou modifier un prompt
-        new_prompt_name = st.text_input(t("new_prompt_name"), key="new_prompt_name")
-        if st.button(t("add_prompt"), key="add_prompt"):
+        col1, col2, col3 = st.columns([1, 1, 1])
+        new_prompt_name = col1.text_input(t("new_prompt_name"), key="new_prompt_name")
+        if col1.button(t("add_prompt"), key="add_prompt"):
             if new_prompt_name:
                 st.session_state.prompts[new_prompt_name] = prompt_content
                 config['transcript']['prompts'] = st.session_state.prompts
@@ -214,11 +217,19 @@ class TranscriptPlugin(Plugin):
                 st.rerun()
 
         # Supprimer un prompt
-        if selected_prompt != 'Custom' and st.button(t("delete_prompt"), key="delete_prompt"):
+        if selected_prompt != 'Custom' and col2.button(t("delete_prompt"), key="delete_prompt"):
             del st.session_state.prompts[selected_prompt]
             config['transcript']['prompts'] = st.session_state.prompts
             self.plugin_manager.save_config(config)
             st.success(f"Prompt '{selected_prompt}' deleted.")
+            st.rerun()
+
+        # Sauver un prompt
+        if selected_prompt != 'Custom' and col3.button(t("save_prompt"), key="save_prompt"):
+            st.session_state.prompts[selected_prompt] = prompt_content
+            config['transcript']['prompts'] = st.session_state.prompts
+            self.plugin_manager.save_config(config)
+            st.success(f"Prompt '{new_prompt_name}' added/updated.")
             st.rerun()
 
         return selected_prompt, prompt_content
