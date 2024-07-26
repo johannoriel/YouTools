@@ -62,21 +62,21 @@ class RecentvideosPlugin(Plugin):
 
     def get_channel_videos(self, channel_id, api_key):
         youtube = build('youtube', 'v3', developerKey=api_key)
-        
+
         try:
             channel_response = youtube.channels().list(
                 part='contentDetails',
                 id=channel_id
             ).execute()
-            
+
             uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-            
+
             playlist_response = youtube.playlistItems().list(
                 part='snippet',
                 playlistId=uploads_playlist_id,
                 maxResults=5
             ).execute()
-            
+
             videos = []
             for item in playlist_response['items']:
                 video = {
@@ -85,7 +85,7 @@ class RecentvideosPlugin(Plugin):
                     'thumbnail': item['snippet']['thumbnails']['default']['url']
                 }
                 videos.append(video)
-            
+
             return videos
         except HttpError as e:
             st.error(f"{t('recent_videos_error')}{e}")
@@ -103,9 +103,9 @@ class RecentvideosPlugin(Plugin):
                 return t("recent_videos_no_transcript_available"), "N/A"
             except Exception as e:
                 return f"{t('recent_videos_transcript_error')}{str(e)}", "N/A"
-        
+
         full_transcript = " ".join([entry['text'] for entry in transcript])
-        
+
         return full_transcript, language
 
     def run(self, config):
@@ -113,7 +113,7 @@ class RecentvideosPlugin(Plugin):
         api_key = config['api_key']
         if 'channel_id' in config['common'] and config['common']['channel_id']:
             videos = self.get_channel_videos(config['common']['channel_id'], api_key)
-            
+
             for video in videos:
                 col1, col2, col3 = st.columns([1, 2, 1])
                 with col1:
@@ -131,7 +131,7 @@ class RecentvideosPlugin(Plugin):
                         st.session_state.current_video_id = video['video_id']
         else:
             st.info(t("recent_videos_configure_channel_id"))
-        
+
         # Affichage du transcript
         if st.session_state.get('show_transcript', False):
             st.header(t("recent_videos_transcript_header"))
@@ -159,14 +159,13 @@ class RecentvideosPlugin(Plugin):
                 if st.button(t("recent_videos_process_llm_button")):
                     video_content = f"# {st.session_state.title} \n {st.session_state.transcript}"
                     llm_response = llm_plugin.process_with_llm(
-                        prompt, 
-                        llm_config.get('llm_sys_prompt', ''), 
-                        video_content, 
-                        llm_config.get('llm_model', '')
+                        prompt,
+                        llm_config.get('llm_sys_prompt', ''),
+                        video_content
                     )
                     st.session_state.llm_response = llm_response
                     st.session_state.show_llm_response = True
-                    
+
         # Affichage de la réponse du LLM
         if st.session_state.get('show_llm_response', False):
             st.header(t("recent_videos_llm_response_header"))
@@ -183,4 +182,3 @@ class RecentvideosPlugin(Plugin):
                     file_name=f"llm_response_{st.session_state.current_video_id}.txt",
                     mime="text/plain"
                 )
-

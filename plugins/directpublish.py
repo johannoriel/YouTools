@@ -215,8 +215,7 @@ class DirectpublishPlugin(Plugin):
                     description = self.ragllm_plugin.process_with_llm(
                         user_prompt,
                         config['ragllm']['llm_sys_prompt'],
-                        transcript,
-                        config['ragllm']['llm_model']
+                        transcript
                     )
                     st.code(description)
                     signature = config['directpublish']['signature']
@@ -227,8 +226,7 @@ class DirectpublishPlugin(Plugin):
                     title = remove_quotes(self.ragllm_plugin.process_with_llm(
                         title_prompt,
                         config['ragllm']['llm_sys_prompt'],
-                        transcript,
-                        config['ragllm']['llm_model']
+                        transcript
                     )).split('\n')[0].strip()
                     st.code(title)
 
@@ -237,8 +235,7 @@ class DirectpublishPlugin(Plugin):
                     tags = remove_quotes(self.ragllm_plugin.process_with_llm(
                         tag_prompt,
                         config['ragllm']['llm_sys_prompt'],
-                        transcript,
-                        config['ragllm']['llm_model']
+                        transcript
                     ))
                     st.code(tags)
 

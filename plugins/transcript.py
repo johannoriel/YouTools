@@ -227,8 +227,7 @@ class TranscriptPlugin(Plugin):
         response = llm_plugin.process_with_llm(
             prompt,
             llm_config.get('llm_sys_prompt', ''),
-            transcript,
-            llm_config.get('llm_model', '')
+            transcript
         )
         return response
 

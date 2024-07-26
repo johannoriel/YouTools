@@ -1,6 +1,7 @@
 from global_vars import t, translations
 from app import Plugin
 import streamlit as st
+import torch
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -44,6 +45,8 @@ class CommonPlugin(Plugin):
         st.header("Common Plugin")
         st.write(f"Channel: {config['common']['channel_id']}")
         st.write(f"{t('work_directory')}: {config['common']['work_directory']}")
+        torch.cuda.empty_cache()
+        st.write("CUDA memory reset")
 
 import os
 from google.oauth2.credentials import Credentials

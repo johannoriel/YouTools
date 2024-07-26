@@ -179,6 +179,16 @@ class RagllmPlugin(Plugin):
                 )
         return updated_config
 
+    def get_sidebar_config_ui(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        available_models = self.get_available_models('ollama') + self.get_available_models('groq')
+        default_model = config.get('llm_model', available_models[0] if available_models else None)
+        selected_model = st.sidebar.selectbox(
+            t("rag_llm_model"),
+            options=available_models,
+            index=available_models.index(default_model) if default_model in available_models else 0,
+            key="ragllm_llm_model"
+        )
+        return {"llm_model": selected_model}
 
     def get_available_models(self, provider: str) -> List[str]:
         if provider == 'ollama':
@@ -225,12 +235,14 @@ class RagllmPlugin(Plugin):
         context = "\n\n".join([self.chunks[i] for i in top_indices])
         return context, [self.chunks[i] for i in top_indices]
 
-    def process_with_llm(self, prompt: str, sysprompt: str, context: str, llm_model: str) -> str:
+    def process_with_llm(self, prompt: str, sysprompt: str, context: str) -> str:
         try:
+            llm_model = st.session_state.ragllm_llm_model
             messages = [
                 {"role": "system", "content": sysprompt},
                 {"role": "user", "content": f"Contexte : {context}\n\nQuestion : {prompt}"}
             ]
+            print(f"---------------------------------------\nCalling LLM {llm_model} \n with sysprompt {sysprompt} \n and prompt {prompt} \n and context len of {len(context)}")
             response = completion(model=llm_model, messages=messages)
             return response['choices'][0]['message']['content']
         except Exception as e:
@@ -260,7 +272,7 @@ class RagllmPlugin(Plugin):
                     st.warning(t("rag_warning_enter_text"))
                 if user_prompt and self.embeddings is not None:
                     context, citations = self.obtenir_contexte(user_prompt, config)
-                    response = self.process_with_llm(user_prompt, config['ragllm']['llm_sys_prompt'], context, config['ragllm']['llm_model'])
+                    response = self.process_with_llm(user_prompt, config['ragllm']['llm_sys_prompt'], context)
 
                     st.write(t("rag_answer"))
                     st.write(response)

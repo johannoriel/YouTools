@@ -64,6 +64,9 @@ class Plugin:
     def run(self, config: Dict[str, Any]):
         pass
 
+    def get_sidebar_config_ui(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+
 class PluginManager:
     def __init__(self):
         self.plugins: Dict[str, Plugin] = {}
@@ -132,6 +135,14 @@ def main():
     if new_lang != st.session_state.lang:
         st.session_state.lang = new_lang
         st.rerun()
+
+    # Ajout des éléments de configuration de la sidebar pour chaque plugin
+    for plugin_name, plugin in plugin_manager.plugins.items():
+        sidebar_config = plugin.get_sidebar_config_ui(config.get(plugin_name, {}))
+        if sidebar_config:
+            st.sidebar.markdown(f"**{plugin_name} Configuration**")
+            for key, value in sidebar_config.items():
+                config.setdefault(plugin_name, {})[key] = value
 
     # Gestion de l'onglet sélectionné
     if 'selected_tab_id' not in st.session_state:

@@ -43,6 +43,13 @@ translations["en"].update({
     "start_end_set" : "End time set",
     "full_transcript" : "Transcript",
     "shortextractor_format916": "Convert to 9/16 format",
+    "shortextractor_suggest_timecode_prompt": """Analyze the following video transcript and suggest a short, interesting segment (15-60 seconds) that could be extracted as a standalone short video.
+
+Provide the start and end timecodes in the format HH:MM:SS,mmm.
+
+Please respond with two timecodes: a start time and an end time, along with a brief explanation of why this segment would make a good short video.
+""",
+    "shortextractor_searchfor" : "Search speifically around the thematic or following subject : '{suggestion}'",
 })
 
 translations["fr"].update({
@@ -79,6 +86,13 @@ translations["fr"].update({
     "start_end_set" : "Temps de fin définis",
     "full_transcript" : "Transcription de la vidéo",
     "shortextractor_format916": "Conversion au format 9/16",
+    "shortextractor_suggest_timecode_prompt": """Analyse la transcription vidéo suivante et suggérez un court segment intéressant (15-60 secondes) qui pourrait être extrait comme une courte vidéo autonome.
+
+Fournis les codes temporels de début et de fin au format HH:MM,mmm.
+
+Réponds avec deux codes temporels : un code temporel de début et un code temporel de fin, accompagnés d'une brève explication de pourquoi ce segment ferait une bonne courte vidéo.
+""",
+    "shortextractor_searchfor" : "Recherche spécifiquement autour des thématiques suivantes : '{suggestion}'",
 })
 
 class ShortextractorPlugin(Plugin):
@@ -307,6 +321,8 @@ class ShortextractorPlugin(Plugin):
             parsed_transcript = self.parse_transcript(st.session_state.transcript)
             if not isinstance(parsed_transcript, list):
                 return
+            if not parsed_transcript:
+                return
             if not "start" in parsed_transcript[0]:
                 return
 
@@ -363,20 +379,12 @@ class ShortextractorPlugin(Plugin):
 
                     suggest_theme = ""
                     if suggestion != "":
-                        suggest_theme = f"Search speifically around the thematic or following subject : '{suggestion}'"
+                        suggest_theme = t("shortextractor_searchfor").format(suggestion=suggestion)
 
                     print(suggest_theme)
-                    prompt = f"""Analyze the following video transcript and suggest a short, interesting segment (15-60 seconds) that could be extracted as a standalone short video.
+                    prompt = t("shortextractor_suggest_timecode_prompt") + suggest_theme
 
-                    Provide the start and end timecodes in the format HH:MM:SS,mmm.
-
-            Transcript:
-            {st.session_state.transcript}
-
-            Please respond with two timecodes: a start time and an end time, along with a brief explanation of why this segment would make a good short video.
-            {suggest_theme}"""
-
-                    llm_response = ragllm_plugin.process_with_llm(prompt, config['ragllm']['llm_sys_prompt'], "", config['ragllm']['llm_model'])
+                    llm_response = ragllm_plugin.process_with_llm(prompt, config['ragllm']['llm_sys_prompt'], st.session_state.transcript)
 
                     st.text(t("shortextractor_llm_response"))
                     st.text(llm_response)
