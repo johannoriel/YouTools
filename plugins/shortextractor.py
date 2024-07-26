@@ -42,6 +42,7 @@ translations["en"].update({
     "set_as_end_time" : "Set as end time",
     "start_end_set" : "End time set",
     "full_transcript" : "Transcript",
+    "shortextractor_format916": "Convert to 9/16 format",
 })
 
 translations["fr"].update({
@@ -77,6 +78,7 @@ translations["fr"].update({
     "set_as_end_time" : "Définir comme temps de fin",
     "start_end_set" : "Temps de fin définis",
     "full_transcript" : "Transcription de la vidéo",
+    "shortextractor_format916": "Conversion au format 9/16",
 })
 
 class ShortextractorPlugin(Plugin):
@@ -153,7 +155,7 @@ class ShortextractorPlugin(Plugin):
                 closest_index = i
         return closest_index
 
-    def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y):
+    def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y, format_916):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
         end_seconds = self.convert_srt_time_to_seconds(end_time)
         duration = end_seconds - start_seconds
@@ -175,13 +177,21 @@ class ShortextractorPlugin(Plugin):
             zoom_file
         ]
         self.ffmpeg(ffmpeg_command)
-        ffmpeg_command = [
-            "ffmpeg", "-y",
-            "-i", zoom_file,
-            "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'",
-            "-c:a", "copy",
-            output_file
-        ]
+        if format_916:
+            ffmpeg_command = [
+                "ffmpeg", "-y",
+                "-i", zoom_file,
+                "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'",
+                "-c:a", "copy",
+                output_file
+            ]
+        else:
+            ffmpeg_command = [
+                "ffmpeg", "-y",
+                "-i", zoom_file,
+                "-c:a", "copy",
+                output_file
+            ]
         self.ffmpeg(ffmpeg_command)
         os.remove(zoom_file)
         return output_file
@@ -397,13 +407,15 @@ class ShortextractorPlugin(Plugin):
             center_x = col2.slider(t("shortextractor_center_x"), min_value=-1.0, max_value=1.0, value=default_center_x, step=0.1)
             center_y = col3.slider(t("shortextractor_center_y"), min_value=-1.0, max_value=1.0, value=default_center_y, step=0.1)
 
+            format_916 = st.checkbox(t("shortextractor_format916"), value=True)
+
             if st.button(t("shortextractor_extract")):
                 with st.spinner(t("shortextractor_extracting")):
                     output_file = os.path.join(work_directory, f"short_{os.path.splitext(selected_video)[0]}.mp4")
                     st.write(f"Extracting {st.session_state.start_time} -> {st.session_state.end_time}")
-                    result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time, output_file, zoom_factor, center_x, center_y)
+                    result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time, output_file, zoom_factor, center_x, center_y, format_916)
                     if result == output_file:
                         st.success("Short extracted successfully!")
-                        col2.video(output_file)
+                        col2.video(output_file, muted=False)
                     else:
                         st.error(result)

@@ -7,6 +7,8 @@ import subprocess
 import json
 import tempfile
 import getpass
+from plugins.ragllm import RagllmPlugin
+
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -279,14 +281,14 @@ class TranscriptPlugin(Plugin):
 
             # Application du prompt
             if st.button(t("apply_prompt")):
-                llm_plugin = self.plugin_manager.get_plugin('llm')
+                ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
                 llm_config = config.get('llm', {})
 
                 final_prompt = prompt_content
                 if selected_prompt != 'Custom':
                     final_prompt = st.session_state.prompts[selected_prompt] + "\n" + prompt_content
 
-                result = self.apply_prompt(st.session_state.transcript, final_prompt, llm_plugin, llm_config)
+                result = self.apply_prompt(st.session_state.transcript, final_prompt, ragllm_plugin, llm_config)
                 st.session_state.prompt_result = result
 
             # Affichage du résultat
