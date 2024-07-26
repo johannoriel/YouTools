@@ -12,7 +12,7 @@ from plugins.ragllm import RagllmPlugin
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
-    "transcript_tab": "Local Transcription",
+    "transcript_tab": "Post-Transcription tools",
     "transcript_header": "Local Video Transcription",
     "transcript_no_videos": "No videos found in the directory",
     "transcript_select_video": "Select a video to transcribe",
@@ -46,10 +46,11 @@ translations["en"].update({
     "copy_result": "Copy Result",
     "download_result": "Download Result",
     "result_copied": "Result copied! Use Ctrl+C (or Cmd+C on Mac) to copy it from the code block above.",
+    "promt_result_display": "Result",
 })
 
 translations["fr"].update({
-    "transcript_tab": "Transcription locale",
+    "transcript_tab": "Outils post-transcription",
     "transcript_header": "Transcription locale de vidéos",
     "transcript_no_videos": "Aucune vidéo trouvée dans le répertoire",
     "transcript_select_video": "Sélectionnez une vidéo à transcrire",
@@ -83,6 +84,7 @@ translations["fr"].update({
     "copy_result": "Copier le Résultat",
     "download_result": "Télécharger le Résultat",
     "result_copied": "Résultat copié ! Utilisez Ctrl+C (ou Cmd+C sur Mac) pour le copier depuis le bloc de code ci-dessus.",
+    "promt_result_display": "Resultat",
 })
 
 class TranscriptPlugin(Plugin):
@@ -121,7 +123,7 @@ class TranscriptPlugin(Plugin):
         return [{"name": t("transcript_tab"), "plugin": "transcript"}]
 
     def transcribe_video(self, video_path, output_format, whisper_path, whisper_model, ffmpeg_path, lang):
-        print("Exécuté par l'utilisateur :", getpass.getuser())
+        print("Executed by user :", getpass.getuser())
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
             temp_audio_path = temp_audio.name
 
@@ -138,10 +140,10 @@ class TranscriptPlugin(Plugin):
             print("Commande ffmpeg:", " ".join(ffmpeg_command))
             try:
                 result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
-                print("Sortie STDOUT:", result.stdout)
+                print("Output STDOUT:", result.stdout)
                 #print("Sortie STDERR:", result.stderr)
             except subprocess.CalledProcessError as e:
-                print("Erreur lors de l'exécution de ffmpeg:")
+                print("Error while executing ffmpeg:")
                 print(e.stderr)  # Affiche le message d'erreur de ffmpeg
 
 
@@ -159,13 +161,13 @@ class TranscriptPlugin(Plugin):
                 "-of", file_without_extension,
                 "-otxt" if output_format == "txt" else "-osrt"
             ]
-            print("Commande whisper:", " ".join(whisper_command))
+            print("Command whisper:", " ".join(whisper_command))
             try:
                 result = subprocess.run(whisper_command, check=True, capture_output=True, text=True)
                 print("Sortie STDOUT:", result.stdout)
                 #print("Sortie STDERR:", result.stderr)
             except subprocess.CalledProcessError as e:
-                print("Erreur lors de l'exécution de whisper:")
+                print("Error while executing whisper:")
                 print(e.stderr)  # Affiche le message d'erreur de whisper
             print('Transcription done')
 
@@ -304,7 +306,7 @@ class TranscriptPlugin(Plugin):
             # Affichage du résultat
             if 'prompt_result' in st.session_state:
                 st.subheader(t("prompt_result"))
-                st.text_area("", st.session_state.prompt_result, height=300)
+                st.text_area(t("promt_result_display"), st.session_state.prompt_result, height=300)
 
                 col1, col2 = st.columns(2)
                 with col1:
