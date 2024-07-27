@@ -64,6 +64,20 @@ translations["fr"].update({
     "directpublish_notags" : "Tags invalides - upload sans eux",
 })
 
+def cut_string(text, limit=500):
+    # Check if the length of the text is less than the limit
+    if len(text) <= limit:
+        return text
+
+    # Cut the text at the limit of characters
+    cut_text = text[:limit]
+
+    # Find the last position of a space to avoid cutting in the middle of a word
+    last_space = cut_text.rfind(' ')
+
+    # Return the text up to the last space
+    return cut_text[:last_space]
+
 class DirectpublishPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
@@ -232,11 +246,11 @@ class DirectpublishPlugin(Plugin):
 
                     # 5. Générer un titre pour la vidéo
                     tag_prompt = t("directpublish_tag_generator")
-                    tags = remove_quotes(self.ragllm_plugin.process_with_llm(
+                    tags = remove_quotes(cut_string(self.ragllm_plugin.process_with_llm(
                         tag_prompt,
                         config['ragllm']['llm_sys_prompt'],
                         transcript
-                    ))
+                    )))
                     st.code(tags)
 
                     # 6. Uploader la vidéo sur YouTube
@@ -250,7 +264,7 @@ class DirectpublishPlugin(Plugin):
                             tags.split(','),  # keywords (optionnel)
                             "unlisted"
                         )
-                    except ResumableUploadError:
+                    except :
                         video_id = upload_video(
                             video_to_process,
                             title,

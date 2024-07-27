@@ -247,7 +247,7 @@ class AutotranslatorPlugin(Plugin):
         st.session_state.video_to_translate = url
         enhance_video = st.checkbox(t("autotranslator_enhance_checkbox"))
         do_translate = st.checkbox("Dubb")
-        upload_video = st.checkbox("Upload")
+        do_upload_video = st.checkbox("Upload")
 
         max_zoom = 1.05
         max_rotation = 5
@@ -265,7 +265,7 @@ class AutotranslatorPlugin(Plugin):
 
         if st.button(t("autotranslator_process_button")):
             with st.spinner(t("autotranslator_processing")):
-                try:
+                #try:
                     # Download video
                     input_file, video_info = self.download_video(url, config)
                     st.success(t("autotranslator_download_success"))
@@ -303,8 +303,9 @@ class AutotranslatorPlugin(Plugin):
                     translated_description = self.translate_text(description, ragllm_plugin, config)+f"\nSource : {url}"
                     translated_tags = [self.translate_text(tag, ragllm_plugin, config) for tag in tags]
 
+                    st.write(f"{translated_title}\n{translated_description}\n{translated_tags}")
                     # Upload video
-                    if upload_video:
+                    if do_upload_video:
                         video_id = upload_video(
                             final_file,
                             translated_title,
@@ -314,10 +315,9 @@ class AutotranslatorPlugin(Plugin):
                             "protected"
                         )
                         st.success(t("autotranslator_upload_success") + video_id)
-                    st.write(f"{translated_title}\n{translated_description}\n{translated_tags}")
                     col1, _ = st.columns([1, 2])
                     col1.video(final_file)
                     st.success(t("autotranslator_upload_success"))
 
-                except Exception as e:
-                    st.error(t("autotranslator_error") + str(e))
+                #except Exception as e:
+                #    st.error(t("autotranslator_error") + str(e))

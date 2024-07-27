@@ -140,7 +140,7 @@ def main():
     for plugin_name, plugin in plugin_manager.plugins.items():
         sidebar_config = plugin.get_sidebar_config_ui(config.get(plugin_name, {}))
         if sidebar_config:
-            st.sidebar.markdown(f"**{plugin_name} Configuration**")
+            #st.sidebar.markdown(f"**{plugin_name} Configuration**")
             for key, value in sidebar_config.items():
                 config.setdefault(plugin_name, {})[key] = value
 
