@@ -11,3 +11,5 @@ transformers
 torch 
 numpy 
 scikit-learn
+yt-dlp
+ffmpeg-python
