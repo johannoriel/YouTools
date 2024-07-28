@@ -26,7 +26,7 @@ translations["en"].update({
     "autotranslator_enhancement_success": "Video enhanced successfully!",
     "autotranslator_upload_success": "Video uploaded successfully! Video ID: ",
     "autotranslator_error": "An error occurred: ",
-    "autotranslator_translation_script": "Translation Script Name:",
+    "autotranslator_translation_sonitranslate": "SoniTranslate directory:",
     "autotranslator_intro_video": "Select Intro Video (optional):",
     "autotranslator_outro_video": "Select Outro Video (optional):",
     "autotranslator_concat_success": "Videos concatenated successfully!",
@@ -50,7 +50,7 @@ translations["fr"].update({
     "autotranslator_enhancement_success": "Vidéo améliorée avec succès !",
     "autotranslator_upload_success": "Vidéo uploadée avec succès ! ID de la vidéo : ",
     "autotranslator_error": "Une erreur s'est produite : ",
-    "autotranslator_translation_script": "Nom du script de traduction :",
+    "autotranslator_translation_sonitranslate": "Répertoire de SoniTranslate :",
     "autotranslator_intro_video": "Sélectionner une vidéo d'introduction (optionnel) :",
     "autotranslator_outro_video": "Sélectionner une vidéo de conclusion (optionnel) :",
     "autotranslator_concat_success": "Vidéos concaténées avec succès !",
@@ -67,10 +67,10 @@ class AutotranslatorPlugin(Plugin):
 
     def get_config_fields(self):
         return {
-            "translation_script": {
+            "translation_sonitranslate": {
                 "type": "text",
-                "label": t("autotranslator_translation_script"),
-                "default": "your_translation_script.py"
+                "label": t("autotranslator_translation_sonitranslate"),
+                "default": ""
             }
         }
 
@@ -99,8 +99,8 @@ class AutotranslatorPlugin(Plugin):
     def translate_video(self, input_file, config):
         work_directory = config['common']['work_directory']
         output_file = os.path.join(work_directory,'translated_video.mp4')
-        translation_script = config['autotranslator']['translation_script']
-        command = f"{translation_script} {input_file} {output_file}"
+        translation_sonitranslate = config['autotranslator']['translation_sonitranslate']
+        command = f"./autotranslate.sh {input_file} {output_file} {translation_sonitranslate}"
         subprocess.run(command, shell=True, check=True)
         return output_file
 
