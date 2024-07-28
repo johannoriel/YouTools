@@ -7,6 +7,7 @@ import streamlit as st
 import os
 import subprocess
 import yt_dlp
+from yt_dlp.utils import download_range_func
 from googleapiclient.discovery import build
 import ffmpeg
 import math
@@ -30,6 +31,10 @@ translations["en"].update({
     "autotranslator_outro_video": "Select Outro Video (optional):",
     "autotranslator_concat_success": "Videos concatenated successfully!",
     "autotranslator_processing": "Processing video...",
+    "autotranslator_start_timecode": "Start Timecode (mm : ss) (option):",
+    "autotranslator_end_timecode": "End Timecode (mm : ss) (option):",
+    "autotranslator_translate_prompt": "Traduis depuis l'anglais vers le français:\n\n",
+    "autotranslator_no_comment": "Ne commente pas, n'ajoute rien à part ce qui est demandé.",
 })
 
 translations["fr"].update({
@@ -50,6 +55,10 @@ translations["fr"].update({
     "autotranslator_outro_video": "Sélectionner une vidéo de conclusion (optionnel) :",
     "autotranslator_concat_success": "Vidéos concaténées avec succès !",
     "autotranslator_processing": "Traitement en cours...",
+    "autotranslator_start_timecode": "Timecode de début (mm : ss) (option) :",
+    "autotranslator_end_timecode": "Timecode de fin (mm : ss) (option):",
+    "autotranslator_translate_prompt": "Translate from English to French:\n\n",
+    "autotranslator_no_comment": "Do not comment, do not add anything beside what you are instructed to do.",
 })
 
 class AutotranslatorPlugin(Plugin):
@@ -65,12 +74,23 @@ class AutotranslatorPlugin(Plugin):
             }
         }
 
-    def download_video(self, url, config):
+    def timecode_to_seconds(self, timecode):
+        parts = timecode.split(':')
+        return int(parts[0]) * 60 + int(parts[1])
+
+    def download_video(self, url, config, start_time=None, end_time=None):
         work_directory = config['common']['work_directory']
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl':  os.path.join(work_directory, 'downloaded_video.%(ext)s')
+            'outtmpl': os.path.join(work_directory, 'downloaded_video.%(ext)s')
         }
+
+        if start_time is not None or end_time is not None:
+            ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
+            ydl_opts['force_keyframes_at_cuts'] = True
+
+        print(ydl_opts)
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
@@ -144,8 +164,12 @@ class AutotranslatorPlugin(Plugin):
         return output_file
 
     def translate_text(self, text, ragllm_plugin, config):
-        prompt = f"Traduis depuis l'anglais vers le français:\n\n{text}"
-        translated_text = ragllm_plugin.process_with_llm(prompt, "Do not comment, do not add anything beside what you are instructed to do.", "")
+        prompt = t("autotranslator_translate_prompt") + text
+        translated_text = ragllm_plugin.process_with_llm(
+            prompt,
+            t("autotranslator_no_comment"),
+            ""
+        )
         return translated_text
 
     def concatenate_videos_without_subtitles(self, intro_video, main_video, outro_video, config):
@@ -243,8 +267,12 @@ class AutotranslatorPlugin(Plugin):
 
         if 'video_to_translate' not in st.session_state:
             st.session_state['video_to_translate'] = ''
-        url = st.text_input(t("autotranslator_url_input"), value=st.session_state.video_to_translate)
+
+        col1, col2, col3 = st.columns(3)
+        url = col1.text_input(t("autotranslator_url_input"), value=st.session_state.video_to_translate)
         st.session_state.video_to_translate = url
+        start_timecode = col2.text_input(t("autotranslator_start_timecode"), "")
+        end_timecode = col3.text_input(t("autotranslator_end_timecode"), "")
         enhance_video = st.checkbox(t("autotranslator_enhance_checkbox"))
         do_translate = st.checkbox("Dubb")
         do_upload_video = st.checkbox("Upload")
@@ -254,6 +282,7 @@ class AutotranslatorPlugin(Plugin):
         if enhance_video:
             max_zoom = st.slider(t("autotranslator_zoom_factor"), 1.0, 1.1, 1.05, 0.01)
             max_rotation = st.slider(t("autotranslator_rotation_angle"), 0, 10, 5, 1)
+
 
         # Récupérer la liste des fichiers vidéo
         video_files = list_all_video_files(config['common']['work_directory'])
@@ -266,8 +295,11 @@ class AutotranslatorPlugin(Plugin):
         if st.button(t("autotranslator_process_button")):
             with st.spinner(t("autotranslator_processing")):
                 #try:
+                    start_time = self.timecode_to_seconds(start_timecode) if start_timecode else None
+                    end_time = self.timecode_to_seconds(end_timecode) if end_timecode else None
+
                     # Download video
-                    input_file, video_info = self.download_video(url, config)
+                    input_file, video_info = self.download_video(url, config, start_time, end_time)
                     st.success(t("autotranslator_download_success"))
 
                     # Translate video
@@ -275,7 +307,7 @@ class AutotranslatorPlugin(Plugin):
                         translated_file = self.translate_video(input_file, config)
                     else:
                         work_directory = config['common']['work_directory']
-                        translated_file = os.path.join(work_directory,'translated_video.mp4')
+                        translated_file = os.path.join(work_directory,'downloaded_video.mp4')
                     st.success(t("autotranslator_translation_success"))
 
                     # Enhance video if option is selected
