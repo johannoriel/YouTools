@@ -19,8 +19,12 @@ general_settings:
 ```
 
 ## .env
+GROQ optionnal
+HF_TOKEN needed for SoniTranslate
 ```
 YOUTUBE_API_KEY=xxxxxxx
+GROQ_API_KEY=gsk_xxxxxxxxxxx 
+YOUR_HF_TOKEN=hf_xxxxxxxxxxx
 ```
 ## Install with pyenv
 ```
