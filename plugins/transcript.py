@@ -8,6 +8,7 @@ import json
 import tempfile
 import getpass
 from plugins.ragllm import RagllmPlugin
+import ast
 
 
 # Ajout des traductions spécifiques à ce plugin
@@ -195,8 +196,18 @@ class TranscriptPlugin(Plugin):
 
         # Charger les prompts depuis la configuration
         if 'prompts' not in config['transcript']:
-            config['transcript']['prompts'] = {}
-        st.session_state.prompts = config['transcript']['prompts']
+            config['transcript']['prompts'] = '{}'
+
+        # S'assurer que les prompts sont chargés comme un dictionnaire
+        try:
+            if isinstance(config['transcript']['prompts'], str):
+                # Utiliser ast.literal_eval pour évaluer en toute sécurité la chaîne comme un dictionnaire Python
+                st.session_state.prompts = ast.literal_eval(config['transcript']['prompts'])
+            else:
+                st.session_state.prompts = config['transcript']['prompts']
+        except (SyntaxError, ValueError):
+            st.error("Erreur lors du décodage des prompts de la configuration. Réinitialisation à un dictionnaire vide.")
+            st.session_state.prompts = {}
 
         # Afficher les prompts existants
         prompt_options = list(st.session_state.prompts.keys()) + ['Custom']
@@ -213,25 +224,25 @@ class TranscriptPlugin(Plugin):
         if col1.button(t("add_prompt"), key="add_prompt"):
             if new_prompt_name:
                 st.session_state.prompts[new_prompt_name] = prompt_content
-                config['transcript']['prompts'] = st.session_state.prompts
+                config['transcript']['prompts'] = str(st.session_state.prompts)
                 self.plugin_manager.save_config(config)
-                st.success(f"Prompt '{new_prompt_name}' added/updated.")
+                st.success(f"Prompt '{new_prompt_name}' ajouté/mis à jour.")
                 st.rerun()
 
         # Supprimer un prompt
         if selected_prompt != 'Custom' and col2.button(t("delete_prompt"), key="delete_prompt"):
             del st.session_state.prompts[selected_prompt]
-            config['transcript']['prompts'] = st.session_state.prompts
+            config['transcript']['prompts'] = str(st.session_state.prompts)
             self.plugin_manager.save_config(config)
-            st.success(f"Prompt '{selected_prompt}' deleted.")
+            st.success(f"Prompt '{selected_prompt}' supprimé.")
             st.rerun()
 
-        # Sauver un prompt
+        # Sauvegarder un prompt
         if selected_prompt != 'Custom' and col3.button(t("save_prompt"), key="save_prompt"):
             st.session_state.prompts[selected_prompt] = prompt_content
-            config['transcript']['prompts'] = st.session_state.prompts
+            config['transcript']['prompts'] = str(st.session_state.prompts)
             self.plugin_manager.save_config(config)
-            st.success(f"Prompt '{new_prompt_name}' added/updated.")
+            st.success(f"Prompt '{selected_prompt}' sauvegardé.")
             st.rerun()
 
         return selected_prompt, prompt_content
