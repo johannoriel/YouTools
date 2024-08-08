@@ -16,7 +16,7 @@ translations["en"].update({
     "directpublish_select_video": "Select a video to publish",
     "directpublish_remove_silences": "Remove silences before publishing",
     "directpublish_video_category": "Video category",
-    "directpublish_publish_button": "Publish to YouTube",
+    "directpublish_publish_button": "Process",
     "directpublish_processing": "Processing video...",
     "directpublish_success": "Video successfully published! Video URL: https://www.youtube.com/watch?v={video_id}, Edition : https://studio.youtube.com/video/{video_id}/edit",
     "directpublish_error": "An error occurred during publication: {error}",
@@ -35,6 +35,7 @@ translations["en"].update({
     "directpublish_tag_generator" : "Generate a comma list of keywords describing the subject, without any comment or adding, just a raw list of comma seaparated keywords",
     "directpublish_addings" : "Add any text to your description (will not be modified)",
     "directpublish_notags" : "Invalid tags - upload without them",
+    "directpublish_dopublish" : "Publish to YouTube",
 })
 
 translations["fr"].update({
@@ -43,7 +44,7 @@ translations["fr"].update({
     "directpublish_select_video": "Sélectionner une vidéo à publier",
     "directpublish_remove_silences": "Retirer les silences avant la publication",
     "directpublish_video_category": "Catégorie de la vidéo",
-    "directpublish_publish_button": "Publier sur YouTube",
+    "directpublish_publish_button": "Lancer le traitement",
     "directpublish_processing": "Traitement de la vidéo en cours...",
     "directpublish_success": "Vidéo publiée avec succès ! URL de la vidéo : https://www.youtube.com/watch?v={video_id}, édition : https://studio.youtube.com/video/{video_id}/edit",
     "directpublish_error": "Une erreur s'est produite lors de la publication : {error}",
@@ -62,6 +63,7 @@ translations["fr"].update({
     "directpublish_tag_generator" : "Génère une liste de mots-clés décrivant le sujet, sans commentaire ni ajout, juste une liste brute séparée par des virgules",
     "directpublish_addings" : "Rajoutez du texte à votre description (ne sera pas modifié)",
     "directpublish_notags" : "Tags invalides - upload sans eux",
+    "directpublish_dopublish" : "Publier sur YouTube",
 })
 
 def cut_string(text, limit=500):
@@ -119,6 +121,7 @@ class DirectpublishPlugin(Plugin):
         # Option pour retirer les silences
         remove_silences = st.checkbox(t("directpublish_remove_silences"))
         replace_green_screen = st.checkbox(t("directpublish_replace_green_screen"))
+        do_publish = st.checkbox(t("directpublish_dopublish"), value=True)
 
         # Sélection du fond si le remplacement du fond vert est activé
         background_video = None
@@ -211,71 +214,72 @@ class DirectpublishPlugin(Plugin):
                         video_to_process = result_path
                         st.text(video_to_process)
 
-                    # 3. Transcrire la vidéo
-                    st.text(t("directpublish_generating_transcription"))
-                    transcript = self.transcript_plugin.transcribe_video(
-                        video_to_process,
-                        "txt",
-                        config['transcript']['whisper_path'],
-                        config['transcript']['whisper_model'],
-                        config['transcript']['ffmpeg_path'],
-                        config['common']['language']
-                    )
-                    st.code(transcript)
-                    st.session_state.rag_text = transcript
-
-                    # 4. Générer un résumé du transcript
-                    st.text(t("directpublish_generating_description"))
-                    description = self.ragllm_plugin.process_with_llm(
-                        user_prompt,
-                        config['ragllm']['llm_sys_prompt'],
-                        transcript
-                    )
-                    st.code(description)
-                    signature = config['directpublish']['signature']
-
-                    # 5. Générer un titre pour la vidéo
-                    st.text(t("directpublish_generating_title"))
-                    title_prompt = t("directpublish_title_generator")
-                    title = remove_quotes(self.ragllm_plugin.process_with_llm(
-                        title_prompt,
-                        config['ragllm']['llm_sys_prompt'],
-                        transcript
-                    )).split('\n')[0].strip()
-                    st.code(title)
-
-                    # 5. Générer un titre pour la vidéo
-                    tag_prompt = t("directpublish_tag_generator")
-                    tags = remove_quotes(cut_string(self.ragllm_plugin.process_with_llm(
-                        tag_prompt,
-                        config['ragllm']['llm_sys_prompt'],
-                        transcript
-                    )))
-                    st.code(tags)
-
-                    # 6. Uploader la vidéo sur YouTube
-                    st.text(t("directpublish_upload"))
-                    try:
-                        video_id = upload_video(
+                    if do_publish:
+                        # 3. Transcrire la vidéo
+                        st.text(t("directpublish_generating_transcription"))
+                        transcript = self.transcript_plugin.transcribe_video(
                             video_to_process,
-                            title,
-                            f"{description}\n\n{addings}\n{signature}",
-                            selected_category,
-                            tags.split(','),  # keywords (optionnel)
-                            "unlisted"
+                            "txt",
+                            config['transcript']['whisper_path'],
+                            config['transcript']['whisper_model'],
+                            config['transcript']['ffmpeg_path'],
+                            config['common']['language']
                         )
-                    except :
-                        video_id = upload_video(
-                            video_to_process,
-                            title,
-                            f"{description}\n\n{addings}\n{signature}",
-                            selected_category,
-                            "unlisted"
+                        st.code(transcript)
+                        st.session_state.transcript = transcript # May bu used by other plugins
+
+                        # 4. Générer un résumé du transcript
+                        st.text(t("directpublish_generating_description"))
+                        description = self.ragllm_plugin.process_with_llm(
+                            user_prompt,
+                            config['ragllm']['llm_sys_prompt'],
+                            transcript
                         )
-                        st.success(t("directpublish_notags"))
+                        st.code(description)
+                        signature = config['directpublish']['signature']
 
-                    st.success(t("directpublish_success").format(video_id=video_id))
-                    print("Upload finished")
+                        # 5. Générer un titre pour la vidéo
+                        st.text(t("directpublish_generating_title"))
+                        title_prompt = t("directpublish_title_generator")
+                        title = remove_quotes(self.ragllm_plugin.process_with_llm(
+                            title_prompt,
+                            config['ragllm']['llm_sys_prompt'],
+                            transcript
+                        )).split('\n')[0].strip()
+                        st.code(title)
 
-                #except Exception as e:
-                #    st.error(t("directpublish_error").format(error=str(e)))
+                        # 5. Générer un titre pour la vidéo
+                        tag_prompt = t("directpublish_tag_generator")
+                        tags = remove_quotes(cut_string(self.ragllm_plugin.process_with_llm(
+                            tag_prompt,
+                            config['ragllm']['llm_sys_prompt'],
+                            transcript
+                        )))
+                        st.code(tags)
+
+                        # 6. Uploader la vidéo sur YouTube
+                        st.text(t("directpublish_upload"))
+                        try:
+                            video_id = upload_video(
+                                video_to_process,
+                                title,
+                                f"{description}\n\n{addings}\n{signature}",
+                                selected_category,
+                                tags.split(','),  # keywords (optionnel)
+                                "unlisted"
+                            )
+                        except :
+                            video_id = upload_video(
+                                video_to_process,
+                                title,
+                                f"{description}\n\n{addings}\n{signature}",
+                                selected_category,
+                                "unlisted"
+                            )
+                            st.success(t("directpublish_notags"))
+
+                        st.success(t("directpublish_success").format(video_id=video_id))
+                        print("Upload finished")
+
+                    #except Exception as e:
+                    #    st.error(t("directpublish_error").format(error=str(e)))
