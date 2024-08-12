@@ -135,7 +135,7 @@ class RecentvideosPlugin(Plugin):
         # Affichage du transcript
         if st.session_state.get('show_transcript', False):
             st.header(t("recent_videos_transcript_header"))
-            st.write(f"{t('recent_videos_transcript_language')} {st.session_state.transcript_lang}")
+            st.write(f"{t('recent_videos_transcript_language')} {st.session_state.lang}")
             st.text_area(t("recent_videos_transcript_content"), st.session_state.transcript, height=300)
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -146,7 +146,7 @@ class RecentvideosPlugin(Plugin):
                 st.download_button(
                     label=t("recent_videos_download_transcript_button"),
                     data=st.session_state.transcript,
-                    file_name=f"transcript_{st.session_state.transcript_lang}.txt",
+                    file_name=f"transcript_{st.session_state.lang}.txt",
                     mime="text/plain"
                 )
             with col3:
