@@ -21,6 +21,8 @@ def main():
     # Ajouter le répertoire SoniTranslate au chemin de recherche des modules
     sys.path.append(args.soni_translate_dir)
 
+    print(f">>> autotranslate.py {args.input} {args.output}")
+
     from app_rvc import SoniTranslate, upload_model_list
     from soni_translate.mdx_net import (
         UVR_MODELS,

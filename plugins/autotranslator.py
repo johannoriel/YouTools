@@ -17,55 +17,91 @@ from pytube import YouTube
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
 import os
 
+def debug_youtube_object(yt):
+    print("Available attributes and methods in the YouTube object:")
+    for attr in dir(yt):
+        try:
+            value = getattr(yt, attr)
+            #print(f"{attr}: {value}")
+            print(f"{attr}")
+        except Exception as e:
+            print(f"{attr}: Could not retrieve value - {str(e)}")
+
+def convert_time_to_seconds(time_str):
+    # Convert a time string "mm:ss" to seconds
+    if isinstance(time_str, str):
+        minutes, seconds = map(int, time_str.split(":"))
+        return minutes * 60 + seconds
+    elif isinstance(time_str, int):
+        return time_str
+    else:
+        return 0
+
+def extract_video_section(input_path, output_dir, start_time=None, end_time=None, video_length=None):
+    # If no start_time and end_time are provided, return the full video path
+    if start_time is None and end_time is None:
+        return input_path
+
+    # Convert time from "mm:ss" to seconds
+    start_sec = convert_time_to_seconds(start_time) if start_time else 0
+    end_sec = convert_time_to_seconds(end_time) if end_time else video_length
+
+    # Extract the video section using moviepy
+    new_file_name = os.path.join(output_dir, "section_" + os.path.basename(input_path))
+    print(f"Extracting section {start_sec} -> {end_sec}...")
+    ffmpeg_extract_subclip(input_path, start_sec, end_sec, targetname=new_file_name)
+    print(f"Section extracted {new_file_name}")
+
+    # Delete the full downloaded video to save space
+    #os.remove(input_path) #debug only
+
+    return new_file_name
+
 def download_video_pytube(url, output_dir, start_time=None, end_time=None):
     # Download the full video using pytube
     yt = YouTube(url)
-
     # Extract video information
     video_info = {
         "title": yt.title,
         "description": yt.description,
         "tags": yt.keywords,
-        "category": yt.metadata.get('category', 'Unknown')
+        "category": 'Unknown'
     }
 
+    # Check if metadata is available
+    if hasattr(yt, 'metadata') and yt.metadata:
+        # Since yt.metadata is an object, try to find 'category' if it exists
+        # Note: YouTubeMetadata may not have 'category', adapt as needed based on actual content
+        for data in yt.metadata.raw_metadata:
+            if 'category' in data:
+                video_info['category'] = data['category']
+                break
+
     video = yt.streams.filter(file_extension='mp4').first()
-    output_path = video.download(output_path=output_dir)
+    filename = video.download(output_path=output_dir)
 
-    if start_time is None and end_time is None:
-        # If no start_time and end_time are provided, return the full video
-        new_file_name = output_path
-    else:
-        # Convert time from "mm:ss" to seconds
-        start_sec = int(start_time.split(":")[0]) * 60 + int(start_time.split(":")[1]) if start_time else 0
-        end_sec = int(end_time.split(":")[0]) * 60 + int(end_time.split(":")[1]) if end_time else yt.length
-
-        # Extract the video section using moviepy
-        new_file_name = os.path.join(output_dir, "section_" + os.path.basename(output_path))
-        ffmpeg_extract_subclip(output_path, start_sec, end_sec, targetname=new_file_name)
-
-        # Delete the full downloaded video to save space
-        os.remove(output_path)
+    new_file_name = extract_video_section(filename, output_dir, start_time, end_time, video_length=yt.length)
 
     return new_file_name, video_info
 
-def download_video_dlp(url, start_time=None, end_time=None, output_dir):
-    work_directory = output_dir
+def download_video_dlp(url, output_dir, start_time=None, end_time=None):
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': os.path.join(work_directory, 'downloaded_video.%(ext)s')
+        'outtmpl': os.path.join(output_dir, 'downloaded_video.%(ext)s')
     }
 
-    if start_time is not None or end_time is not None:
-        ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
-        ydl_opts['force_keyframes_at_cuts'] = True
+    #if start_time is not None or end_time is not None:
+    #    ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
+    #    ydl_opts['force_keyframes_at_cuts'] = True
 
     print(ydl_opts)
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
-    return filename, info
+
+    new_file_name = extract_video_section(filename, output_dir, start_time, end_time)
+    return new_file_name, info
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -76,8 +112,8 @@ translations["en"].update({
     "autotranslator_zoom_factor": "Max zoom factor (1.0 to 1.1):",
     "autotranslator_rotation_angle": "Max rotation angle (degrees):",
     "autotranslator_process_button": "Process Video",
-    "autotranslator_download_success": "Video downloaded successfully!",
-    "autotranslator_translation_success": "Video translated successfully!",
+    "autotranslator_download_success": "Video downloaded successfully : ",
+    "autotranslator_translation_success": "Video translated successfully : ",
     "autotranslator_enhancement_success": "Video enhanced successfully!",
     "autotranslator_upload_success": "Video uploaded successfully! Video ID: ",
     "autotranslator_error": "An error occurred: ",
@@ -100,8 +136,8 @@ translations["fr"].update({
     "autotranslator_zoom_factor": "Facteur de zoom max (1.0 à 1.1) :",
     "autotranslator_rotation_angle": "Angle de rotation max (degrés) :",
     "autotranslator_process_button": "Traiter la vidéo",
-    "autotranslator_download_success": "Vidéo téléchargée avec succès !",
-    "autotranslator_translation_success": "Vidéo traduite avec succès !",
+    "autotranslator_download_success": "Vidéo téléchargée avec succès : ",
+    "autotranslator_translation_success": "Vidéo traduite avec succès : ",
     "autotranslator_enhancement_success": "Vidéo améliorée avec succès !",
     "autotranslator_upload_success": "Vidéo uploadée avec succès ! ID de la vidéo : ",
     "autotranslator_error": "Une erreur s'est produite : ",
@@ -135,8 +171,8 @@ class AutotranslatorPlugin(Plugin):
 
     def download_video(self, url, config, start_time=None, end_time=None):
         work_directory = config['common']['work_directory']
-        return download_video_pytube(url, start_time, end_time, work_directory)
-        #return download_video_dlp(url, start_time, end_time, work_directory)
+        #return download_video_pytube(url, work_directory, start_time, end_time)
+        return download_video_dlp(url, work_directory, start_time, end_time)
 
     def translate_video(self, input_file, config):
         work_directory = config['common']['work_directory']
@@ -342,15 +378,15 @@ class AutotranslatorPlugin(Plugin):
 
                     # Download video
                     input_file, video_info = self.download_video(url, config, start_time, end_time)
-                    st.success(t("autotranslator_download_success"))
+                    st.success(t("autotranslator_download_success")+input_file)
 
                     # Translate video
                     if do_translate:
                         translated_file = self.translate_video(input_file, config)
                     else:
                         work_directory = config['common']['work_directory']
-                        translated_file = os.path.join(work_directory,'downloaded_video.mp4')
-                    st.success(t("autotranslator_translation_success"))
+                        translated_file = os.path.join(work_directory,input_file)
+                    st.success(t("autotranslator_translation_success") + translated_file)
 
                     # Enhance video if option is selected
                     if enhance_video:
