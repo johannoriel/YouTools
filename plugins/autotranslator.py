@@ -12,6 +12,61 @@ from googleapiclient.discovery import build
 import ffmpeg
 import math
 
+
+from pytube import YouTube
+from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
+import os
+
+def download_video_pytube(url, output_dir, start_time=None, end_time=None):
+    # Download the full video using pytube
+    yt = YouTube(url)
+
+    # Extract video information
+    video_info = {
+        "title": yt.title,
+        "description": yt.description,
+        "tags": yt.keywords,
+        "category": yt.metadata.get('category', 'Unknown')
+    }
+
+    video = yt.streams.filter(file_extension='mp4').first()
+    output_path = video.download(output_path=output_dir)
+
+    if start_time is None and end_time is None:
+        # If no start_time and end_time are provided, return the full video
+        new_file_name = output_path
+    else:
+        # Convert time from "mm:ss" to seconds
+        start_sec = int(start_time.split(":")[0]) * 60 + int(start_time.split(":")[1]) if start_time else 0
+        end_sec = int(end_time.split(":")[0]) * 60 + int(end_time.split(":")[1]) if end_time else yt.length
+
+        # Extract the video section using moviepy
+        new_file_name = os.path.join(output_dir, "section_" + os.path.basename(output_path))
+        ffmpeg_extract_subclip(output_path, start_sec, end_sec, targetname=new_file_name)
+
+        # Delete the full downloaded video to save space
+        os.remove(output_path)
+
+    return new_file_name, video_info
+
+def download_video_dlp(url, start_time=None, end_time=None, output_dir):
+    work_directory = output_dir
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': os.path.join(work_directory, 'downloaded_video.%(ext)s')
+    }
+
+    if start_time is not None or end_time is not None:
+        ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
+        ydl_opts['force_keyframes_at_cuts'] = True
+
+    print(ydl_opts)
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+    return filename, info
+
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
     "autotranslator_tab": "Auto Translator",
@@ -80,21 +135,8 @@ class AutotranslatorPlugin(Plugin):
 
     def download_video(self, url, config, start_time=None, end_time=None):
         work_directory = config['common']['work_directory']
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': os.path.join(work_directory, 'downloaded_video.%(ext)s')
-        }
-
-        if start_time is not None or end_time is not None:
-            ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
-            ydl_opts['force_keyframes_at_cuts'] = True
-
-        print(ydl_opts)
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-        return filename, info
+        return download_video_pytube(url, start_time, end_time, work_directory)
+        #return download_video_dlp(url, start_time, end_time, work_directory)
 
     def translate_video(self, input_file, config):
         work_directory = config['common']['work_directory']
@@ -324,20 +366,20 @@ class AutotranslatorPlugin(Plugin):
                     if final_file != enhanced_file:
                         st.success(t("autotranslator_concat_success"))
 
-                    # Get and translate video info
-                    title = video_info['title']
-                    description = video_info['description']
-                    tags = video_info.get('tags', [])
-                    category = video_info.get('categories', ['22'])[0]  # Use original category or default to "22" (People & Blogs)
-
-                    ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
-                    translated_title = self.translate_text(title, ragllm_plugin, config)
-                    translated_description = self.translate_text(description, ragllm_plugin, config)+f"\nSource : {url}"
-                    translated_tags = [self.translate_text(tag, ragllm_plugin, config) for tag in tags]
-
-                    st.write(f"{translated_title}\n{translated_description}\n{translated_tags}")
                     # Upload video
                     if do_upload_video:
+                        # Get and translate video info
+                        title = video_info['title']
+                        description = video_info['description']
+                        tags = video_info.get('tags', [])
+                        category = video_info.get('categories', ['22'])[0]  # Use original category or default to "22" (People & Blogs)
+
+                        ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
+                        translated_title = self.translate_text(title, ragllm_plugin, config)
+                        translated_description = self.translate_text(description, ragllm_plugin, config)+f"\nSource : {url}"
+                        translated_tags = [self.translate_text(tag, ragllm_plugin, config) for tag in tags]
+
+                        st.write(f"{translated_title}\n{translated_description}\n{translated_tags}")
                         video_id = upload_video(
                             final_file,
                             translated_title,
