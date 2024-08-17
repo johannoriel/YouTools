@@ -100,7 +100,6 @@ class PluginManager:
 
     def get_all_tabs(self) -> List[Dict[str, Any]]:
         all_tabs = []
-        print("Starred plugins:", self.starred_plugins)
         for plugin_name, plugin in sorted(self.plugins.items()):
             tabs = plugin.get_tabs()
             for tab in tabs:
@@ -148,7 +147,6 @@ def main():
 
     # Création des onglets avec des identifiants uniques
     tabs = [{"id": "configurations", "name": t("configurations")}] + [{"id": tab['plugin'], "name": tab['name'], "starred" : tab['starred']} for tab in plugin_manager.get_all_tabs()]
-    print(tabs)
 
     # Gestion de la langue
     if 'lang' not in st.session_state:
@@ -175,7 +173,6 @@ def main():
     # Sort tabs alphabetically, with starred tabs first
     sorted_tabs = sorted(tabs, key=lambda x: (not x.get('starred', False), x['name']))
     tab_names = [f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" for tab in sorted_tabs]
-    print(tabs)
 
     selected_tab_index = [tab["id"] for tab in sorted_tabs].index(st.session_state.selected_tab_id)
     selected_tab = st.sidebar.radio(t("navigation"), tab_names, index=selected_tab_index, key="tab_selector")

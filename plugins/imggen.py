@@ -29,7 +29,8 @@ translations["en"].update({
     "face_preset": "Face Preset",
     "thumbnail_preset": "Thumbnail Preset",
     "prompt_history": "Prompt History",
-    "immgen_processing": "Processing...",
+    "imggen_processing": "Processing...",
+    "imggen_done": "Image generation done !",
 })
 translations["fr"].update({
     "generate_image": "Générer une Image",
@@ -48,7 +49,8 @@ translations["fr"].update({
     "face_preset": "Préréglage Visage",
     "thumbnail_preset": "Préréglage Vignette",
     "prompt_history": "Historique des Prompts",
-    "immgen_processing": "En cours...",
+    "imggen_processing": "En cours...",
+    "imggen_done": "Génération d'images terminée !",
 })
 
 class ImggenPlugin(Plugin):
@@ -74,7 +76,12 @@ class ImggenPlugin(Plugin):
                 "type": "text",
                 "label": t("face_prompt"),
                 "default": "le visage d'un homme caucasien, brun, yeux bleus, légère barbe"
-            }
+            },
+            "background_prompt": {
+                "type": "text",
+                "label": t("background_prompt"),
+                "default": ", arrière plan blanc vif uni"
+            },
         }
 
     def get_tabs(self):
@@ -142,7 +149,7 @@ class ImggenPlugin(Plugin):
         if selected_history_prompt:
             st.session_state.imggen_prompt = selected_history_prompt
 
-        prompt = st.text_input(t("prompt"), key="imggen_prompt")
+        prompt = st.text_area(t("prompt"), key="imggen_prompt", height=150)
         aspect_ratio = st.selectbox(t("aspect_ratio"), ["1:1", "16:9"], key="imggen_aspect_ratio")
         remove_background = st.checkbox(t("remove_background"), key="imggen_remove_background")
         background_removal_method = st.selectbox(t("background_removal_method"), ["ai", "color"], key="imggen_background_removal_method")
@@ -156,27 +163,60 @@ class ImggenPlugin(Plugin):
         style = st.selectbox(t("style"), [""] + [s.strip() for s in styles], key="imggen_style")
 
         if st.button(t("generate")):
-            with st.spinner(t("immgen_processing")):
+            with st.spinner(t("imggen_processing")):
                 if input_image:
                     input_image = Image.open(input_image).convert("RGB")
 
-                full_prompt = prompt
-                self.add_to_prompt_history(full_prompt)
+                self.add_to_prompt_history(prompt)
 
-                if style:
-                    full_prompt += f", style: {style}"
-
-                image, used_seed = self.generate_image(
-                    full_prompt, aspect_ratio, remove_background, background_removal_method,
-                    None if use_random_seed else seed, use_face, steps, input_image, config['imggen']['face_prompt']
+                sub_prompts = [p.strip() for p in prompt.split('\n') if p.strip()]
+                background_prompt = ', '+ config['imggen']['background_prompt']
+                self.generate_images( background_prompt,
+                    sub_prompts, aspect_ratio, remove_background, background_removal_method,
+                    None if use_random_seed else seed, use_face, steps, input_image,
+                    config['imggen']['face_prompt'], style, config['imggen']['output_dir']
                 )
 
-                st.image(image, caption=f"{t('image_generated')}: {used_seed}")
+    def generate_images(self, background_prompt, prompts, aspect_ratio, remove_background, background_removal_method,
+                        seed, use_face, steps, input_image, face_prompt, style, output_dir):
+        num_columns = 3  # Nombre de colonnes dans la galerie
+        cols = st.columns(num_columns)  # Crée les colonnes une fois pour la galerie
 
-                output_dir = os.path.expanduser(config['imggen']['output_dir'])
-                self.save_image(image, output_dir, prompt)
+        # Barre de progression unique avec un placeholder
+        progress_placeholder = st.empty()
+        progress_bar = progress_placeholder.progress(0)
 
-    def generate_image(self, prompt, aspect_ratio="1:1", remove_background=True, background_removal_method="ai", seed=None, face=True, steps=2, input_image=None, face_prompt=""):
+        # Génération et affichage progressif des images
+        for i, sub_prompt in enumerate(prompts):
+            full_prompt = sub_prompt
+            if style:
+                full_prompt += f", style: {style}"
+
+            # Génère l'image
+            image, used_seed = self.generate_image(background_prompt,
+                full_prompt, aspect_ratio, remove_background, background_removal_method,
+                seed, use_face, steps, input_image, face_prompt
+            )
+
+            # Choisir la colonne dans laquelle afficher l'image
+            col_idx = i % num_columns
+            with cols[col_idx]:  # Mise à jour dans la colonne correspondante
+                # Affichage de l'image directement
+                st.image(image, caption=f"Image {i+1}/{len(prompts)} \nSeed: {used_seed}\nPrompt: {full_prompt}", use_column_width=True)
+
+            # Sauvegarder l'image
+            self.save_image(image, output_dir, sub_prompt)
+
+            # Mettre à jour la barre de progression
+            progress_bar.progress((i + 1) / len(prompts))
+
+        # Lorsque tout est terminé, remplacez la barre de progression par un message
+        progress_placeholder.empty()  # Efface la barre de progression
+        st.success(t("imggen_done"))
+
+
+
+    def generate_image(self, background_prompt, prompt, aspect_ratio="1:1", remove_background=True, background_removal_method="ai", seed=None, face=True, steps=2, input_image=None, face_prompt=""):
         if seed is None:
             seed = random.randint(0, 2**32 - 1)
         print(f"seed : {seed}")
@@ -187,7 +227,7 @@ class ImggenPlugin(Plugin):
             prompt = face_prompt + ", " + prompt
 
         if remove_background:
-            prompt += ", arrière plan blanc vif uni"
+            prompt += background_prompt
 
         if aspect_ratio == "1:1":
             height, width = 1024, 1024
@@ -309,7 +349,7 @@ def main():
         input_image = Image.open(args.input_image).convert("RGB")
 
     plugin = ImggenPlugin("imggen", None)
-    image, used_seed = plugin.generate_image(
+    image, used_seed = plugin.generate_image(", arrière plan blanc vif uni",
         args.prompt, args.aspect_ratio, args.remove_background, args.method,
         args.seed, args.face, args.steps, input_image
     )
