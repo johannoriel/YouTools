@@ -7,3 +7,4 @@ config.json
 client_secret.json
 token.json
 __pycache__
+imggen_prompt_history.json

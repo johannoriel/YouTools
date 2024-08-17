@@ -13,3 +13,5 @@ numpy
 scikit-learn
 yt-dlp
 ffmpeg-python
+diffusers
+rembg
