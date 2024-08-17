@@ -70,6 +70,7 @@ class Plugin:
 class PluginManager:
     def __init__(self):
         self.plugins: Dict[str, Plugin] = {}
+        self.starred_plugins: Set[str] = set()
 
     def load_plugins(self):
         plugins_dir = 'plugins'
@@ -85,16 +86,36 @@ class PluginManager:
 
     def get_all_config_ui(self, config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         all_ui = {}
-        for plugin_name, plugin in self.plugins.items():
-             with st.expander(f"{t('configurations')} {plugin_name}"):
+        for plugin_name, plugin in sorted(self.plugins.items()):
+             with st.expander(f"{'⭐ ' if plugin_name in self.starred_plugins else ''}{t('configurations')} {plugin_name}"):
                 all_ui[plugin_name] = plugin.get_config_ui(config.get(plugin_name, {}))
+                if st.button(f"{'Unstar' if plugin_name in self.starred_plugins else 'Star'} {plugin_name}"):
+                    if plugin_name in self.starred_plugins:
+                        self.starred_plugins.remove(plugin_name)
+                    else:
+                        self.starred_plugins.add(plugin_name)
+                    self.save_starred_plugins(config)
+                    st.rerun()
         return all_ui
 
     def get_all_tabs(self) -> List[Dict[str, Any]]:
         all_tabs = []
-        for plugin in self.plugins.values():
-            all_tabs.extend(plugin.get_tabs())
+        print("Starred plugins:", self.starred_plugins)
+        for plugin_name, plugin in sorted(self.plugins.items()):
+            tabs = plugin.get_tabs()
+            for tab in tabs:
+                tab['id'] = plugin_name
+                tab['starred'] = plugin_name in self.starred_plugins
+            all_tabs.extend(tabs)
         return all_tabs
+
+
+    def load_starred_plugins(self, config: Dict[str, Any]):
+        self.starred_plugins = set(config.get('starred_plugins', []))
+
+    def save_starred_plugins(self, config: Dict[str, Any]):
+        config['starred_plugins'] = list(self.starred_plugins)
+        save_config(config)
 
     def run_plugin(self, plugin_name: str, config: Dict[str, Any]):
         if plugin_name in self.plugins:
@@ -111,6 +132,8 @@ def main():
 
     # Chargement de la configuration
     config = load_config()
+    plugin_manager.load_starred_plugins(config)
+
     # Initialisation de la langue dans st.session_state
     if 'lang' not in st.session_state:
         st.session_state.lang = config['common']['language']
@@ -124,7 +147,8 @@ def main():
     config['llm_key'] = LLM_KEY
 
     # Création des onglets avec des identifiants uniques
-    tabs = [{"id": "configurations", "name": t("configurations")}] + [{"id": tab['plugin'], "name": tab['name']} for tab in plugin_manager.get_all_tabs()]
+    tabs = [{"id": "configurations", "name": t("configurations")}] + [{"id": tab['plugin'], "name": tab['name'], "starred" : tab['starred']} for tab in plugin_manager.get_all_tabs()]
+    print(tabs)
 
     # Gestion de la langue
     if 'lang' not in st.session_state:
@@ -148,10 +172,15 @@ def main():
     if 'selected_tab_id' not in st.session_state:
         st.session_state.selected_tab_id = "directpublish"
 
-    selected_tab_index = [tab["id"] for tab in tabs].index(st.session_state.selected_tab_id)
-    selected_tab = st.sidebar.radio(t("navigation"), [tab["name"] for tab in tabs], index=selected_tab_index, key="tab_selector")
+    # Sort tabs alphabetically, with starred tabs first
+    sorted_tabs = sorted(tabs, key=lambda x: (not x.get('starred', False), x['name']))
+    tab_names = [f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" for tab in sorted_tabs]
+    print(tabs)
 
-    new_selected_tab_id = next(tab["id"] for tab in tabs if tab["name"] == selected_tab)
+    selected_tab_index = [tab["id"] for tab in sorted_tabs].index(st.session_state.selected_tab_id)
+    selected_tab = st.sidebar.radio(t("navigation"), tab_names, index=selected_tab_index, key="tab_selector")
+
+    new_selected_tab_id = next(tab["id"] for tab in sorted_tabs if f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" == selected_tab)
 
     if new_selected_tab_id != st.session_state.selected_tab_id:
         st.session_state.selected_tab_id = new_selected_tab_id
