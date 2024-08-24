@@ -8,10 +8,12 @@ from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
 
+from plugins.common import get_credentials
+
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
-    "recent_videos_tab": "5 Latest YouTube Videos",
-    "recent_videos_header": "5 Latest Videos",
+    "recent_videos_tab": "10 Latest YouTube Videos",
+    "recent_videos_header": "10 Latest Videos",
     "recent_videos_transcript_button": "Transcript",
     "recent_videos_transcript_header": "Transcript",
     "recent_videos_transcript_language": "Transcript Language:",
@@ -33,8 +35,8 @@ translations["en"].update({
 })
 
 translations["fr"].update({
-    "recent_videos_tab": "5 dernières vidéos Youtube",
-    "recent_videos_header": "5 dernières vidéos",
+    "recent_videos_tab": "10 dernières vidéos Youtube",
+    "recent_videos_header": "10 dernières vidéos",
     "recent_videos_transcript_button": "Transcript",
     "recent_videos_transcript_header": "Transcript",
     "recent_videos_transcript_language": "Langue de la transcription :",
@@ -60,37 +62,6 @@ class RecentvideosPlugin(Plugin):
     def get_tabs(self):
         return [{"name": t("recent_videos_tab"), "plugin": "recentvideos"}]
 
-    def get_channel_videos(self, channel_id, api_key):
-        youtube = build('youtube', 'v3', developerKey=api_key)
-
-        try:
-            channel_response = youtube.channels().list(
-                part='contentDetails',
-                id=channel_id
-            ).execute()
-
-            uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-
-            playlist_response = youtube.playlistItems().list(
-                part='snippet',
-                playlistId=uploads_playlist_id,
-                maxResults=5
-            ).execute()
-
-            videos = []
-            for item in playlist_response['items']:
-                video = {
-                    'title': item['snippet']['title'],
-                    'video_id': item['snippet']['resourceId']['videoId'],
-                    'thumbnail': item['snippet']['thumbnails']['default']['url']
-                }
-                videos.append(video)
-
-            return videos
-        except HttpError as e:
-            st.error(f"{t('recent_videos_error')}{e}")
-            return []
-
     def get_transcript(self, video_id, language):
         try:
             transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
@@ -108,11 +79,92 @@ class RecentvideosPlugin(Plugin):
 
         return full_transcript, language
 
+    def get_channel_public_videos(self, channel_id, api_key, page_token=None):
+        youtube = build('youtube', 'v3', developerKey=api_key)
+
+        try:
+            channel_response = youtube.channels().list(
+                part='contentDetails',
+                id=channel_id
+            ).execute()
+
+            uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+
+            playlist_response = youtube.playlistItems().list(
+                part='snippet',
+                playlistId=uploads_playlist_id,
+                maxResults=10,  # Affiche 10 vidéos par page
+                pageToken=page_token  # Ajout de la gestion des pages
+            ).execute()
+
+            videos = []
+            for item in playlist_response['items']:
+                video = {
+                    'title': item['snippet']['title'],
+                    'video_id': item['snippet']['resourceId']['videoId'],
+                    'thumbnail': item['snippet']['thumbnails']['default']['url']
+                }
+                videos.append(video)
+
+            next_page_token = playlist_response.get('nextPageToken')
+            prev_page_token = playlist_response.get('prevPageToken')
+
+            return videos, next_page_token, prev_page_token
+        except HttpError as e:
+            st.error(f"{t('recent_videos_error')}{e}")
+            return [], None, None
+
+    def get_channel_videos(self, channel_id, page_token=None):
+        # Utilisation des credentials pour obtenir l'accès aux vidéos protégées
+        credentials = get_credentials()
+        youtube = build('youtube', 'v3', credentials=credentials)
+
+        try:
+            # Récupération des informations sur la chaîne
+            channel_response = youtube.channels().list(
+                part='contentDetails',
+                id=channel_id
+            ).execute()
+
+            uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+
+            # Récupération des vidéos avec gestion de la pagination
+            playlist_response = youtube.playlistItems().list(
+                part='snippet',
+                playlistId=uploads_playlist_id,
+                maxResults=10,  # Affiche 10 vidéos par page
+                pageToken=page_token  # Gestion des pages
+            ).execute()
+
+            videos = []
+            for item in playlist_response['items']:
+                video = {
+                    'title': item['snippet']['title'],
+                    'video_id': item['snippet']['resourceId']['videoId'],
+                    'thumbnail': item['snippet']['thumbnails']['default']['url']
+                }
+                videos.append(video)
+
+            # Gestion des tokens pour la pagination
+            next_page_token = playlist_response.get('nextPageToken')
+            prev_page_token = playlist_response.get('prevPageToken')
+
+            return videos, next_page_token, prev_page_token
+
+        except HttpError as e:
+            st.error(f"Une erreur s'est produite : {e}")
+            return [], None, None
+
     def run(self, config):
         st.header(t("recent_videos_header"))
         api_key = config['api_key']
+
         if 'channel_id' in config['common'] and config['common']['channel_id']:
-            videos = self.get_channel_videos(config['common']['channel_id'], api_key)
+            page_token = st.session_state.get('page_token', None)
+
+            videos, next_page_token, prev_page_token = self.get_channel_videos(
+                config['common']['channel_id'], page_token
+            )
 
             for video in videos:
                 col1, col2, col3 = st.columns([1, 2, 1])
@@ -129,13 +181,27 @@ class RecentvideosPlugin(Plugin):
                         st.session_state.transcript_lang = lang
                         st.session_state.show_transcript = True
                         st.session_state.current_video_id = video['video_id']
+
+            # Afficher les boutons de pagination
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col1:
+                if prev_page_token and st.button("Page Précédente"):
+                    st.session_state.page_token = prev_page_token
+                    st.experimental_rerun()
+            with col2:
+                st.write("")  # Espace pour alignement
+            with col3:
+                if next_page_token and st.button("Page Suivante"):
+                    st.session_state.page_token = next_page_token
+                    st.experimental_rerun()
+
         else:
             st.info(t("recent_videos_configure_channel_id"))
 
         # Affichage du transcript
         if st.session_state.get('show_transcript', False):
             st.header(t("recent_videos_transcript_header"))
-            st.write(f"{t('recent_videos_transcript_language')} {st.session_state.lang}")
+            st.write(f"{t('recent_videos_transcript_language')} {st.session_state.transcript_lang}")
             st.text_area(t("recent_videos_transcript_content"), st.session_state.transcript, height=300)
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -146,7 +212,7 @@ class RecentvideosPlugin(Plugin):
                 st.download_button(
                     label=t("recent_videos_download_transcript_button"),
                     data=st.session_state.transcript,
-                    file_name=f"transcript_{st.session_state.lang}.txt",
+                    file_name=f"transcript_{st.session_state.transcript_lang}.txt",
                     mime="text/plain"
                 )
             with col3:
