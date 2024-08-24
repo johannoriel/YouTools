@@ -228,25 +228,45 @@ class RagllmPlugin(Plugin):
         else:
             raise ValueError("Méthode de similarité non reconnue")
 
-    def obtenir_contexte(self, query: str, config: Dict[str, Any]) -> tuple:
+    def get_context(self, query: str, config: Dict[str, Any]) -> tuple:
         query_embedding = self.get_embedding(query, config['ragllm']['embedder'])
         similarities = self.calculate_similarity(query_embedding, config['ragllm']['similarity_method'])
         top_indices = np.argsort(similarities)[-config['ragllm']['top_k']:][::-1]
         context = "\n\n".join([self.chunks[i] for i in top_indices])
         return context, [self.chunks[i] for i in top_indices]
 
-    def process_with_llm(self, prompt: str, sysprompt: str, context: str) -> str:
+    def call_llm(self, prompt: str, sysprompt: str) -> str:
         try:
             llm_model = st.session_state.ragllm_llm_model
             messages = [
                 {"role": "system", "content": sysprompt},
-                {"role": "user", "content": f"Contexte : {context}\n\nQuestion : {prompt}"}
+                {"role": "user", "content": prompt}
             ]
-            print(f"---------------------------------------\nCalling LLM {llm_model} \n with sysprompt {sysprompt} \n and prompt {prompt} \n and context len of {len(context)}")
             response = completion(model=llm_model, messages=messages)
             return response['choices'][0]['message']['content']
         except Exception as e:
             return f"{t('rag_error_calling_llm')}{str(e)}"
+
+    def free_llm(self):
+        try:
+            llm_model = st.session_state.ragllm_llm_model
+            if llm_model.startswith("ollama/"):
+                ollama_model = llm_model.split("/")[1]
+                response = requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={
+                        "model": ollama_model,
+                        "prompt": "bye",
+                        "keep_alive": 0
+                    }
+                )
+                return response.json()['response']
+        except Exception as e:
+            return f"{t('rag_error_calling_llm')}{str(e)}"
+
+    def process_with_llm(self, prompt: str, sysprompt: str, context: str) -> str:
+        print(f"---------------------------------------\nCalling LLM {llm_model} \n with sysprompt {sysprompt} \n and prompt {prompt} \n and context len of {len(context)}")
+        self.call_llm(f"Contexte : {context}\n\nQuestion : {prompt}", sysprompt)
 
     def run(self, config):
         st.write(t("rag_plugin_loaded"))
@@ -271,7 +291,7 @@ class RagllmPlugin(Plugin):
                 else:
                     st.warning(t("rag_warning_enter_text"))
                 if user_prompt and self.embeddings is not None:
-                    context, citations = self.obtenir_contexte(user_prompt, config)
+                    context, citations = self.get_context(user_prompt, config)
                     response = self.process_with_llm(user_prompt, config['ragllm']['llm_sys_prompt'], context)
 
                     st.write(t("rag_answer"))
