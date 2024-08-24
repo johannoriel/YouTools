@@ -13,6 +13,7 @@ import subprocess
 from moviepy.editor import *
 from PIL import Image
 import io
+import glob
 
 # Add translations for this plugin
 translations["en"].update({
@@ -45,6 +46,12 @@ translations["en"].update({
     "generate_video_from_url": "Generate Video from URL",
     "show_detailed_steps": "Show Detailed Steps",
     "processing_video": "Processing video...",
+    "scan_files": "Scan Files",
+    "assemble_video": "Assemble Video",
+    "no_files_found": "No audio or image files found in the output directory.",
+    "files_scanned_successfully": "Files scanned successfully!",
+    "scanned_files": "Scanned Files",
+    "video_files_generated": "Video files generated successfully. You can now assemble the video.",
 })
 translations["fr"].update({
     "article_to_video": "Article vers Vidéo",
@@ -76,6 +83,12 @@ translations["fr"].update({
     "generate_video_from_url": "Générer une Vidéo depuis l'URL",
     "show_detailed_steps": "Afficher les Étapes Détaillées",
     "processing_video": "Traitement de la vidéo en cours...",
+    "scan_files": "Scanner les Fichiers",
+    "assemble_video": "Assembler la Vidéo",
+    "no_files_found": "Aucun fichier audio ou image trouvé dans le répertoire de sortie.",
+    "files_scanned_successfully": "Fichiers scannés avec succès !",
+    "scanned_files": "Fichiers Scannés",
+    "video_files_generated": "Fichiers vidéo générés avec succès. Vous pouvez maintenant assembler la vidéo.",
 })
 
 class ArticletovideoPlugin(Plugin):
@@ -128,13 +141,52 @@ class ArticletovideoPlugin(Plugin):
 
         url = st.text_input(t("article_url"), key="article_url_input")
 
-        if st.button(t("generate_video_from_url"), key="generate_video_button"):
-            self.generate_video_from_url(url, config)
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if st.button(t("generate_video_from_url"), key="generate_video_button"):
+                self.generate_video_from_url(url, config)
+
+        with col2:
+            if st.button(t("scan_files"), key="scan_files_button"):
+                self.scan_files(config)
+
+        with col3:
+            if st.button(t("assemble_video"), key="assemble_video_button"):
+                self.assemble_final_video(config, use_zoom_and_transitions=True)
 
         show_detailed_steps = st.checkbox(t("show_detailed_steps"), value=False, key="show_detailed_steps_checkbox")
 
         if show_detailed_steps:
             self.show_detailed_interface(config)
+
+    def scan_files(self, config):
+        output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
+
+        # Scan for audio files
+        audio_files = sorted(glob.glob(os.path.join(output_dir, "audio_*.wav")))
+
+        # Scan for image files
+        image_files = sorted(glob.glob(os.path.join(output_dir, "image_*.png")))
+
+        if not audio_files or not image_files:
+            st.warning(t("no_files_found"))
+            return
+
+        st.session_state.audio_paths = audio_files
+        st.session_state.image_paths = image_files
+
+        # Reconstruct segments and prompts based on file count
+        st.session_state.segments = [f"Segment {i+1}" for i in range(len(audio_files))]
+        st.session_state.prompts = [f"Prompt for image {i+1}" for i in range(len(image_files))]
+
+        st.success(t("files_scanned_successfully"))
+
+        # Display scanned files
+        st.subheader(t("scanned_files"))
+        st.write(f"Audio files: {len(audio_files)}")
+        st.write(f"Image files: {len(image_files)}")
+
 
     def generate_video_from_url(self, url, config):
         with st.spinner(t("processing_video")):
@@ -155,12 +207,8 @@ class ArticletovideoPlugin(Plugin):
             # Step 4: Generate video
             self.generate_video(translated_text, prompts, config)
 
-            # Step 5: Assemble final video
-            use_zoom_and_transitions = True  # You can make this configurable if needed
-            self.assemble_final_video(config, use_zoom_and_transitions)
+        st.success(t("video_files_generated"))
 
-        st.success(t("video_generated"))
-        st.video(os.path.join(os.path.expanduser(config['articletovideo']['output_dir']), "final_video.mp4"))
 
     def show_detailed_interface(self, config):
         use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
