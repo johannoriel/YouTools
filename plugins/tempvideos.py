@@ -120,13 +120,23 @@ class TempvideosPlugin(Plugin):
                     with col4:
                         st.write(f"{t('temp_videos_status')} {video['privacy_status']}")
 
+                video_list = "\n".join([f"- [{video['title']}]('https://www.youtube.com/watch?v={video['video_id']}')" for video in temp_videos])
+                st.markdown("### Liste des vidéos avec leur lien (Markdown) :")
+                st.code(video_list, language="markdown")
+
+                video_list_html = "<ul>" + "".join([f"<li><a href='https://www.youtube.com/watch?v={video['video_id']}' target='_blank'>{video['title']}</a></li>" for video in temp_videos]) + "</ul>"
+                st.markdown("### Liste des vidéos avec leur lien (HTML) :")
+                st.markdown(video_list_html, unsafe_allow_html=True)
+
                 if st.button(t("temp_videos_unpublish_button")):
                     expired_videos = [video for video in temp_videos if video['is_expired'] and video['privacy_status'] == 'public']
                     for video in expired_videos:
                         self.update_video_privacy(youtube, video['video_id'])
                     st.success(t("temp_videos_unpublish_success").format(count=len(expired_videos)))
                     st.rerun()
+
             else:
                 st.info(t("temp_videos_no_temp_videos"))
+
         else:
             st.warning(t("temp_videos_configure_channel_id"))
