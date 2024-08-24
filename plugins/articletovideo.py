@@ -42,6 +42,9 @@ translations["en"].update({
     "translated_text": "Translated Text",
     "regenerate_image": "Regenerate Image",
     "upload_image": "Upload Image",
+    "generate_video_from_url": "Generate Video from URL",
+    "show_detailed_steps": "Show Detailed Steps",
+    "processing_video": "Processing video...",
 })
 translations["fr"].update({
     "article_to_video": "Article vers Vidéo",
@@ -70,6 +73,9 @@ translations["fr"].update({
     "translated_text": "Texte Traduit",
     "regenerate_image": "Régénérer l'Image",
     "upload_image": "Télécharger une Image",
+    "generate_video_from_url": "Générer une Vidéo depuis l'URL",
+    "show_detailed_steps": "Afficher les Étapes Détaillées",
+    "processing_video": "Traitement de la vidéo en cours...",
 })
 
 class ArticletovideoPlugin(Plugin):
@@ -120,42 +126,77 @@ class ArticletovideoPlugin(Plugin):
     def run(self, config):
         st.header(t("article_to_video"))
 
-        # New checkbox for zoom and transitions
-        use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True)
+        url = st.text_input(t("article_url"), key="article_url_input")
 
-        url = st.text_input(t("article_url"))
-        if st.button(t("retrieve")):
+        if st.button(t("generate_video_from_url"), key="generate_video_button"):
+            self.generate_video_from_url(url, config)
+
+        show_detailed_steps = st.checkbox(t("show_detailed_steps"), value=False, key="show_detailed_steps_checkbox")
+
+        if show_detailed_steps:
+            self.show_detailed_interface(config)
+
+    def generate_video_from_url(self, url, config):
+        with st.spinner(t("processing_video")):
+            # Step 1: Retrieve article
             article_text = self.retrieve_article(url)
             st.session_state.article_text = article_text
 
-        if 'article_text' in st.session_state:
-            article_text = st.text_area(t("article_text"), st.session_state.article_text, height=300)
+            # Step 2: Translate text
+            translated_text = self.translate_text(article_text, config['articletovideo']['target_language'])
+            st.session_state.translated_text = translated_text
 
-            if st.button(t("translate")):
+            # Step 3: Generate prompts
+            split_by = config['articletovideo']['split_by']
+            segments = self.split_text(translated_text, split_by)
+            prompts = self.generate_all_image_prompts(segments)
+            st.session_state.edited_prompts = prompts
+
+            # Step 4: Generate video
+            self.generate_video(translated_text, prompts, config)
+
+            # Step 5: Assemble final video
+            use_zoom_and_transitions = True  # You can make this configurable if needed
+            self.assemble_final_video(config, use_zoom_and_transitions)
+
+        st.success(t("video_generated"))
+        st.video(os.path.join(os.path.expanduser(config['articletovideo']['output_dir']), "final_video.mp4"))
+
+    def show_detailed_interface(self, config):
+        use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
+
+        if st.button(t("retrieve"), key="retrieve_button"):
+            article_text = self.retrieve_article(st.session_state.get('url', ''))
+            st.session_state.article_text = article_text
+
+        if 'article_text' in st.session_state:
+            article_text = st.text_area(t("article_text"), st.session_state.article_text, height=300, key="article_text_area")
+
+            if st.button(t("translate"), key="translate_button"):
                 translated_text = self.translate_text(article_text, config['articletovideo']['target_language'])
                 st.session_state.translated_text = translated_text
 
         if 'translated_text' in st.session_state:
-            translated_text = st.text_area(t("translated_text"), st.session_state.translated_text, height=300)
+            translated_text = st.text_area(t("translated_text"), st.session_state.translated_text, height=300, key="translated_text_area")
 
-            if st.button(t("edit_prompts")):
+            if st.button(t("edit_prompts"), key="edit_prompts_button"):
                 self.generate_and_edit_prompts(translated_text, config)
 
         if 'edited_prompts' in st.session_state:
             self.display_prompts(st.session_state.edited_prompts)
-            if st.button(t("generate_video")):
-                self.generate_video(translated_text, st.session_state.edited_prompts, config)
+            if st.button(t("generate_video"), key="generate_video_button_detailed"):
+                self.generate_video(st.session_state.translated_text, st.session_state.edited_prompts, config)
 
         if 'image_paths' in st.session_state and 'prompts' in st.session_state and 'segments' in st.session_state:
             st.header(t("edit_images_and_prompts"))
             self.display_image_gallery()
 
-            if st.button(t("assemble_video")):
+            if st.button(t("assemble_video"), key="assemble_video_button"):
                 self.assemble_final_video(config, use_zoom_and_transitions)
 
     def convert_numbers_to_words(self, text, lang):
-        sysprompt = f"You are an AI assistant that converts numbers including real numbers and percentages to words in {lang}. Maintain the original sentence structure and only convert the numbers and real numbers and percentages."
-        prompt = f"Convert all numbers and real numbers and percentages in the following text to words in {lang}:\n\n{text}"
+        sysprompt = f"You are an AI assistant that converts numbers including real numbers and percentages to words in {lang}. Maintain the original sentence structure and only convert the numbers and real numbers and percentages. DO NOT ADD COMMENTS"
+        prompt = f"Without comment, convert all numbers and real numbers and percentages in the following text to words in {lang}:\n\n{text}"
         ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         result = ragllm_plugin.call_llm(prompt, sysprompt)
         return result
@@ -199,11 +240,10 @@ class ArticletovideoPlugin(Plugin):
 
         with st.spinner(t("generating_prompts")):
             prompts = self.generate_all_image_prompts(segments)
-        self.display_prompts(prompts)
 
     def display_prompts(self, prompts):
         prompts_text = "\n\n".join(prompts)
-        edited_prompts = st.text_area(t("edit_prompts"), prompts_text, height=300)
+        edited_prompts = st.text_area(t("edit_prompts"), prompts_text, height=300, key="edit_prompts_text_area")
         st.session_state.edited_prompts = edited_prompts.split("\n\n")
 
     def generate_video(self, text, prompts, config):
