@@ -8,6 +8,7 @@ from plugins.ragllm import RagllmPlugin
 from plugins.chromakey import ChromakeyPlugin
 from chromakey_background import replace_background
 import os
+import requests
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -36,6 +37,12 @@ translations["en"].update({
     "directpublish_addings" : "Add any text to your description (will not be modified)",
     "directpublish_notags" : "Invalid tags - upload without them",
     "directpublish_dopublish" : "Publish to YouTube",
+    "directpublish_triggering_webhook": "Triggering webhook: {webhook}",
+    "directpublish_webhook_triggered": "Webhook {webhook} triggered successfully",
+    "directpublish_webhook_not_triggered": "Failed to trigger webhook {webhook}. Status code: {status_code}",
+    "directpublish_webhook_error": "Error triggering webhook {webhook}: {error}",
+    "webhook_urls": "Webhook URLs (one per line, optional)",
+    "directpublish_no_webhooks": "No webhooks configured",
 })
 
 translations["fr"].update({
@@ -64,6 +71,12 @@ translations["fr"].update({
     "directpublish_addings" : "Rajoutez du texte à votre description (ne sera pas modifié)",
     "directpublish_notags" : "Tags invalides - upload sans eux",
     "directpublish_dopublish" : "Publier sur YouTube",
+    "directpublish_triggering_webhook": "Déclenchement du webhook : {webhook}",
+    "directpublish_webhook_triggered": "Webhook {webhook} déclenché avec succès",
+    "directpublish_webhook_not_triggered": "Échec du déclenchement du webhook {webhook}. Code de statut : {status_code}",
+    "directpublish_webhook_error": "Erreur lors du déclenchement du webhook {webhook} : {error}",
+    "webhook_urls": "URLs des Webhooks (une par ligne, optionnel)",
+    "directpublish_no_webhooks": "Aucun webhook configuré",
 })
 
 def cut_string(text, limit=500):
@@ -95,6 +108,11 @@ class DirectpublishPlugin(Plugin):
                 "type": "textarea",
                 "label": t("publish_signature"),
                 "default": t("publish_signature_default")
+            },
+            "webhook_urls": {
+                "type": "textarea",
+                "label": t("webhook_urls"),
+                "default": ""
             },
         }
 
@@ -274,6 +292,7 @@ class DirectpublishPlugin(Plugin):
                                 title,
                                 f"{description}\n\n{addings}\n{signature}",
                                 selected_category,
+                                [],
                                 "unlisted"
                             )
                             st.success(t("directpublish_notags"))
@@ -281,5 +300,21 @@ class DirectpublishPlugin(Plugin):
                         st.success(t("directpublish_success").format(video_id=video_id))
                         print("Upload finished")
 
+                        webhook_urls = config['directpublish'].get('webhook_urls', '').strip().split('\n')
+                        webhook_urls = [url.strip() for url in webhook_urls if url.strip()]
+
+                        if webhook_urls:
+                            for webhook_url in webhook_urls:
+                                st.text(t("directpublish_triggering_webhook").format(webhook=webhook_url))
+                                try:
+                                    response = requests.post(webhook_url, json={"video_id": video_id})
+                                    if response.status_code == 200:
+                                        st.success(t("directpublish_webhook_triggered").format(webhook=webhook_url))
+                                    else:
+                                        st.error(t("directpublish_webhook_not_triggered").format(webhook=webhook_url, status_code=response.status_code))
+                                except Exception as e:
+                                    st.error(t("directpublish_webhook_error").format(webhook=webhook_url, error=str(e)))
+                        else:
+                            st.info(t("directpublish_no_webhooks"))
                     #except Exception as e:
                     #    st.error(t("directpublish_error").format(error=str(e)))
