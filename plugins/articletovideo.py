@@ -14,6 +14,7 @@ from moviepy.editor import *
 from PIL import Image
 import io
 import glob
+import re
 
 # Add translations for this plugin
 translations["en"].update({
@@ -155,19 +156,29 @@ class ArticletovideoPlugin(Plugin):
             if st.button(t("assemble_video"), key="assemble_video_button"):
                 self.assemble_final_video(config, use_zoom_and_transitions=True)
 
+        use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
         show_detailed_steps = st.checkbox(t("show_detailed_steps"), value=False, key="show_detailed_steps_checkbox")
 
         if show_detailed_steps:
             self.show_detailed_interface(config)
 
+    def get_sorted_files(self, directory, pattern):
+        files = []
+        for filename in os.listdir(directory):
+            match = re.match(pattern, filename)
+            if match:
+                index = int(match.group(1))
+                files.append((index, os.path.join(directory, filename)))
+        return [file for _, file in sorted(files)]
+
     def scan_files(self, config):
         output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
 
         # Scan for audio files
-        audio_files = sorted(glob.glob(os.path.join(output_dir, "audio_*.wav")))
+        audio_files = self.get_sorted_files(output_dir, r'audio_(\d+)\.wav')
 
         # Scan for image files
-        image_files = sorted(glob.glob(os.path.join(output_dir, "image_*.png")))
+        image_files = self.get_sorted_files(output_dir, r'image_(\d+)\.png')
 
         if not audio_files or not image_files:
             st.warning(t("no_files_found"))
@@ -211,7 +222,6 @@ class ArticletovideoPlugin(Plugin):
 
 
     def show_detailed_interface(self, config):
-        use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
 
         if st.button(t("retrieve"), key="retrieve_button"):
             article_text = self.retrieve_article(st.session_state.get('url', ''))
@@ -244,7 +254,7 @@ class ArticletovideoPlugin(Plugin):
 
     def convert_numbers_to_words(self, text, lang):
         sysprompt = f"You are an AI assistant that converts numbers including real numbers and percentages to words in {lang}. Maintain the original sentence structure and only convert the numbers and real numbers and percentages. DO NOT ADD COMMENTS"
-        prompt = f"Without comment, convert all numbers and real numbers and percentages in the following text to words in {lang}:\n\n{text}"
+        prompt = f"Without adding any comment, convert all numbers and real numbers and percentages in the following text to words in {lang}:\n\n{text}"
         ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         result = ragllm_plugin.call_llm(prompt, sysprompt)
         return result
@@ -446,10 +456,37 @@ class ArticletovideoPlugin(Plugin):
             else:
                 final_clips = video_clips
 
+            print("Concatenating video")
             final_video = concatenate_videoclips(final_clips, method="compose")
             output_path = os.path.join(output_dir, "final_video.mp4")
-            final_video.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=24)
+            print("Writing final video to file")
+
+            # Create a progress bar
+            progress_bar = st.progress(0)
+
+            # Create a custom logger
+            logger = StreamlitProgressBarLogger(progress_bar)
+
+            # Write the video file with the custom logger
+            final_video.write_videofile(
+                output_path,
+                codec="libx264",
+                audio_codec="aac",
+                fps=24,
+                logger=logger
+            )
 
         st.success(t("video_generated"))
         st.video(output_path)
-# Don't forget to register this plugin in your main application
+
+from proglog import ProgressBarLogger
+class StreamlitProgressBarLogger(ProgressBarLogger):
+    def __init__(self, progress_bar):
+        super().__init__()
+        self.progress_bar = progress_bar
+
+    def callback(self, **changes):
+        # This gets called when the progress of the video writing changes
+        if 'index' in changes and 'total' in changes:
+            progress = min(changes['index'] / changes['total'], 1.0)
+            self.progress_bar.progress(progress)
