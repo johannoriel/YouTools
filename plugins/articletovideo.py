@@ -15,6 +15,11 @@ from PIL import Image
 import io
 import glob
 import re
+from num2words import num2words
+from datetime import datetime
+import babel.numbers
+import locale
+import soundfile as sf
 
 # Add translations for this plugin
 translations["en"].update({
@@ -53,6 +58,17 @@ translations["en"].update({
     "files_scanned_successfully": "Files scanned successfully!",
     "scanned_files": "Scanned Files",
     "video_files_generated": "Video files generated successfully. You can now assemble the video.",
+    "regenerate_audio": "Regenerate Audio",
+    "regenerate_images": "Regenerate Images",
+    "audio_regenerated": "Audio files regenerated successfully!",
+    "images_regenerated": "Image files regenerated successfully!",
+    "regenerating_audio": "Regenerating audio files...",
+    "regenerating_images": "Regenerating image files...",
+    "percent": "percent",
+    "decimal_point": "point",
+    "decimal_comma": "comma",
+    "tts_model": "TTS Model",
+    "convert_numbers": "Convert numbers to words",
 })
 translations["fr"].update({
     "article_to_video": "Article vers Vidéo",
@@ -90,6 +106,17 @@ translations["fr"].update({
     "files_scanned_successfully": "Fichiers scannés avec succès !",
     "scanned_files": "Fichiers Scannés",
     "video_files_generated": "Fichiers vidéo générés avec succès. Vous pouvez maintenant assembler la vidéo.",
+    "regenerate_audio": "Régénérer l'Audio",
+    "regenerate_images": "Régénérer les Images",
+    "audio_regenerated": "Fichiers audio régénérés avec succès !",
+    "images_regenerated": "Fichiers image régénérés avec succès !",
+    "regenerating_audio": "Régénération des fichiers audio en cours...",
+    "regenerating_images": "Régénération des fichiers image en cours...",
+    "percent": "pourcent",
+    "decimal_point": "point",
+    "decimal_comma": "virgule",
+    "tts_model": "Modèle TTS",
+    "convert_numbers": "Convertir les nombres en mots"
 })
 
 class ArticletovideoPlugin(Plugin):
@@ -132,6 +159,22 @@ class ArticletovideoPlugin(Plugin):
                 "max": 0.1,
                 "step": 0.001
             },
+            "tts_model": {
+                "type": "select",
+                "label": t("tts_model"),
+                "options": [
+                    ("your_tts", "YourTTS"),
+                    ("tacotron", "Tacotron"),
+                    ("xtts_v2", "XTTS2"),
+                    ("bark", "Bark"),
+                ],
+                "default": "your_tts"
+            },
+            "convert_numbers": {
+                "type": "checkbox",
+                "label": t("convert_numbers"),
+                "default": True
+            },
         }
 
     def get_tabs(self):
@@ -139,8 +182,11 @@ class ArticletovideoPlugin(Plugin):
 
     def run(self, config):
         st.header(t("article_to_video"))
+        url = st.text_input(t("article_url"), key="url")
 
-        url = st.text_input(t("article_url"), key="article_url_input")
+        show_detailed_steps = st.checkbox(t("show_detailed_steps"), value=False, key="show_detailed_steps_checkbox")
+        if show_detailed_steps:
+            self.show_detailed_interface(config)
 
         col1, col2, col3 = st.columns(3)
 
@@ -153,14 +199,10 @@ class ArticletovideoPlugin(Plugin):
                 self.scan_files(config)
 
         with col3:
-            if st.button(t("assemble_video"), key="assemble_video_button"):
+            if st.button(t("assemble_video"), key="assemble_video_button1"):
                 self.assemble_final_video(config, use_zoom_and_transitions=True)
 
         use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
-        show_detailed_steps = st.checkbox(t("show_detailed_steps"), value=False, key="show_detailed_steps_checkbox")
-
-        if show_detailed_steps:
-            self.show_detailed_interface(config)
 
     def get_sorted_files(self, directory, pattern):
         files = []
@@ -231,19 +273,27 @@ class ArticletovideoPlugin(Plugin):
             article_text = st.text_area(t("article_text"), st.session_state.article_text, height=300, key="article_text_area")
 
             if st.button(t("translate"), key="translate_button"):
-                translated_text = self.translate_text(article_text, config['articletovideo']['target_language'])
+                translated_text = self.translate_text(article_text, config['articletovideo']['target_language'], config)
                 st.session_state.translated_text = translated_text
 
         if 'translated_text' in st.session_state:
             translated_text = st.text_area(t("translated_text"), st.session_state.translated_text, height=300, key="translated_text_area")
 
             if st.button(t("edit_prompts"), key="edit_prompts_button"):
-                self.generate_and_edit_prompts(translated_text, config)
+                st.session_state.edited_prompts = self.generate_and_edit_prompts(translated_text, config)
 
         if 'edited_prompts' in st.session_state:
             self.display_prompts(st.session_state.edited_prompts)
-            if st.button(t("generate_video"), key="generate_video_button_detailed"):
-                self.generate_video(st.session_state.translated_text, st.session_state.edited_prompts, config)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button(t("generate_video"), key="generate_video_button_detailed"):
+                    self.generate_video(st.session_state.translated_text, st.session_state.edited_prompts, config)
+            with col2:
+                if st.button(t("regenerate_audio"), key="regenerate_audio_button"):
+                    self.regenerate_audio(st.session_state.translated_text, config)
+            with col3:
+                if st.button(t("regenerate_images"), key="regenerate_images_button"):
+                    self.regenerate_images(st.session_state.edited_prompts, config)
 
         if 'image_paths' in st.session_state and 'prompts' in st.session_state and 'segments' in st.session_state:
             st.header(t("edit_images_and_prompts"))
@@ -252,12 +302,81 @@ class ArticletovideoPlugin(Plugin):
             if st.button(t("assemble_video"), key="assemble_video_button"):
                 self.assemble_final_video(config, use_zoom_and_transitions)
 
-    def convert_numbers_to_words(self, text, lang):
+    def regenerate_audio(self, text, config):
+        split_by = config['articletovideo']['split_by']
+        segments = self.split_text(text, split_by)
+        output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
+
+        with st.spinner(t("regenerating_audio")):
+            progress_bar = st.progress(0)
+            audio_paths = []
+            for i, segment in enumerate(segments):
+                audio_path = os.path.join(output_dir, f"audio_{i}.wav")
+                self.generate_audio(segment, audio_path, config)
+                audio_paths.append(audio_path)
+                progress_bar.progress((i + 1) / len(segments))
+
+        st.session_state.audio_paths = audio_paths
+        st.success(t("audio_regenerated"))
+
+    def regenerate_images(self, prompts, config):
+        output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
+
+        with st.spinner(t("regenerating_images")):
+            progress_bar = st.progress(0)
+            image_paths = []
+            for i, prompt in enumerate(prompts):
+                image_path = os.path.join(output_dir, f"image_{i}.png")
+                self.generate_image(prompt, image_path)
+                image_paths.append(image_path)
+                progress_bar.progress((i + 1) / len(prompts))
+
+        st.session_state.image_paths = image_paths
+        st.success(t("images_regenerated"))
+
+    def convert_numbers_to_words_llm(self, text, lang):
         sysprompt = f"You are an AI assistant that converts numbers including real numbers and percentages to words in {lang}. Maintain the original sentence structure and only convert the numbers and real numbers and percentages. DO NOT ADD COMMENTS"
         prompt = f"Without adding any comment, convert all numbers and real numbers and percentages in the following text to words in {lang}:\n\n{text}"
         ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         result = ragllm_plugin.call_llm(prompt, sysprompt)
         return result
+
+    def convert_numbers_to_words(self, text, lang):
+        def convert_number(match):
+            number = match.group(0)
+
+            # Convert percentages
+            if number == '%':
+                return t("percent")
+
+            if '%' in number:
+                num = float(number.replace('%', ''))
+                return num2words(num, lang=lang) + " " + t("percent")
+
+            # Convert dates
+            if re.match(r'\d{1,2}/\d{1,2}/\d{4}', number):
+                date = datetime.strptime(number, "%d/%m/%Y")
+                locale.setlocale(locale.LC_TIME, lang)
+                return date.strftime("%d %B %Y").lower()
+
+            # Convert decimal numbers
+            if '.' in number or ',' in number:
+                number = number.replace(',', '.')  # Normalize to dot as decimal separator
+                integer_part, decimal_part = number.split('.')
+                integer_words = num2words(int(integer_part), lang=lang)
+                decimal_words = ' '.join(num2words(int(digit), lang=lang) for digit in decimal_part)
+                decimal_separator = t("decimal_point") if lang.startswith('en') else t("decimal_comma")
+                return f"{integer_words} {decimal_separator} {decimal_words}"
+
+            # Convert integers
+            return num2words(int(number), lang=lang)
+
+        # Regular expression to match numbers, percentages, and dates
+        pattern = r'\b\d+(?:[.,]\d+)?%?|%|\b\d{1,2}/\d{1,2}/\d{4}\b'
+
+        return re.sub(pattern, convert_number, text)
+
+        return re.sub(pattern, convert_number, text)
 
     def retrieve_article(self, url):
         response = requests.get(url)
@@ -265,7 +384,7 @@ class ArticletovideoPlugin(Plugin):
         paragraphs = soup.find_all('p')
         return '\n\n'.join([p.text for p in paragraphs])
 
-    def translate_text(self, text, target_lang):
+    def translate_text(self, text, target_lang, config):
         if self.translator is None:
             model_name = f'Helsinki-NLP/opus-mt-en-{target_lang[:2]}'
             self.translator = MarianMTModel.from_pretrained(model_name)
@@ -275,19 +394,50 @@ class ArticletovideoPlugin(Plugin):
         translated_paragraphs = []
         progress_bar = st.progress(0)
 
+        print("Traductions")
         with st.spinner(t("processing")):
             for i, paragraph in enumerate(paragraphs):
+                print('--------------------------------')
                 sentences = paragraph.split('. ')
                 translated_sentences = []
 
                 for sentence in sentences:
+                    if not sentence.strip():
+                        continue
+
                     inputs = self.tokenizer(sentence, return_tensors="pt", padding=True, truncation=True)
                     translated = self.translator.generate(**inputs)
                     translated_sentence = self.tokenizer.decode(translated[0], skip_special_tokens=True)
-                    translated_sentences.append(translated_sentence)
+                    # Convert numbers to words after translation
+                    if config['articletovideo']['convert_numbers']:
+                        translated_sentence = self.convert_numbers_to_words(translated_sentence, target_lang)
+                    truncated_sentence = re.split(r'[.\n]', translated_sentence, maxsplit=1)[0]
+                    translated_sentences.append(truncated_sentence)
+                    print(f"\033[1m\033[31m{sentence}\033[0m")
+                    print(translated_sentence)
+
 
                 translated_paragraph = '. '.join(translated_sentences)
                 translated_paragraphs.append(translated_paragraph)
+                progress_bar.progress((i + 1) / len(paragraphs))
+
+        return '\n\n'.join(translated_paragraphs)
+
+    def translate_text_withllm(self, text, target_lang):
+        paragraphs = text.split('\n\n')
+        translated_paragraphs = []
+        progress_bar = st.progress(0)
+
+        with st.spinner(t("translating")):
+            for i, paragraph in enumerate(paragraphs):
+                sysprompt = f"You are a professional translator. Translate the given text from English to {target_lang}. Maintain the original tone and style. Convert all numbers, including real numbers and percentages, to words in the target language. DO NOT ADD COMMENTS OR EXPLANATIONS."
+                prompt = f"Translate the following text to {target_lang}, converting all numbers and real numbers and percent sign to words, do not add any comment:\n\n{paragraph}"
+
+                ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
+                translated_paragraph = ragllm_plugin.call_llm(prompt, sysprompt)
+
+                truncated_paragraph = translated_paragraph.split('\n\n', maxsplit=1)[0]
+                translated_paragraphs.append(truncated_paragraph)
                 progress_bar.progress((i + 1) / len(paragraphs))
 
         return '\n\n'.join(translated_paragraphs)
@@ -298,6 +448,7 @@ class ArticletovideoPlugin(Plugin):
 
         with st.spinner(t("generating_prompts")):
             prompts = self.generate_all_image_prompts(segments)
+            return prompts
 
     def display_prompts(self, prompts):
         prompts_text = "\n\n".join(prompts)
@@ -316,7 +467,7 @@ class ArticletovideoPlugin(Plugin):
             audio_paths = []
             for i, segment in enumerate(segments):
                 audio_path = os.path.join(output_dir, f"audio_{i}.wav")
-                self.generate_audio(segment, audio_path, config['articletovideo']['tts_speaker'], config['articletovideo']['target_language'])
+                self.generate_audio(segment, audio_path, config)
                 audio_paths.append(audio_path)
                 progress_bar.progress((i + 1) / len(segments))
 
@@ -336,13 +487,24 @@ class ArticletovideoPlugin(Plugin):
         st.session_state.prompts = prompts
         st.session_state.segments = segments
 
-    def generate_audio(self, text, output_path, speaker, lang='fr'):
-        if self.tts_model is None:
-            self.tts_model = TTS("tts_models/multilingual/multi-dataset/your_tts")
-        # Convert numbers and percentages to words
-        text_with_words = self.convert_numbers_to_words(text, lang)
+    def generate_audio(self, text, output_path, config):
+        # https://theroamingworkshop.cloud/b/en/2425/%F0%9F%90%B8coqui-ai-tts-ultra-fast-voice-generation-and-cloning-from-multilingual-text/
+        tts_model = config['articletovideo']['tts_model']
+        target_lang = config['articletovideo']['target_language'][:2]
 
-        self.tts_model.tts_to_file(text=text_with_words, file_path=output_path, speaker_wav=os.path.expanduser(speaker), language=lang)
+        if self.tts_model is None:
+            if tts_model == "your_tts":
+                self.tts_model = TTS("tts_models/multilingual/multi-dataset/your_tts")
+            elif tts_model == "xtts_v2":
+                self.tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+            elif tts_model == "tacotron":
+                self.tts_model = TTS("tts_models/fr/mai/tacotron2-DDC")
+            elif tts_model == "bark":
+                self.tts_model = TTS("tts_models/multilingual/multi-dataset/bark")
+            else:
+                raise ValueError(f"Unsupported TTS model: {tts_model}")
+        self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang)
+
 
     def split_text(self, text, split_by):
         if split_by == "sentence":
@@ -461,11 +623,11 @@ class ArticletovideoPlugin(Plugin):
             output_path = os.path.join(output_dir, "final_video.mp4")
             print("Writing final video to file")
 
-            # Create a progress bar
-            progress_bar = st.progress(0)
+            # Create a progress container
+            progress_container = st.empty()
 
             # Create a custom logger
-            logger = StreamlitProgressBarLogger(progress_bar)
+            logger = StreamlitProgressBarLogger(progress_container)
 
             # Write the video file with the custom logger
             final_video.write_videofile(
@@ -481,12 +643,11 @@ class ArticletovideoPlugin(Plugin):
 
 from proglog import ProgressBarLogger
 class StreamlitProgressBarLogger(ProgressBarLogger):
-    def __init__(self, progress_bar):
+    def __init__(self, progress_container):
         super().__init__()
-        self.progress_bar = progress_bar
+        self.progress_container = progress_container
 
     def callback(self, **changes):
-        # This gets called when the progress of the video writing changes
         if 'index' in changes and 'total' in changes:
             progress = min(changes['index'] / changes['total'], 1.0)
-            self.progress_bar.progress(progress)
+            self.progress_container.progress(progress)
