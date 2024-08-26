@@ -490,20 +490,25 @@ class ArticletovideoPlugin(Plugin):
     def generate_audio(self, text, output_path, config):
         # https://theroamingworkshop.cloud/b/en/2425/%F0%9F%90%B8coqui-ai-tts-ultra-fast-voice-generation-and-cloning-from-multilingual-text/
         tts_model = config['articletovideo']['tts_model']
-        target_lang = config['articletovideo']['target_language'][:2]
+        target_lang = config['articletovideo']['target_language']
 
+        os.environ['COQUI_TTS_CACHE_DIR'] = os.path.expanduser('~/.cache/coqui') # https://github.com/coqui-ai/TTS/issues/3608
         if self.tts_model is None:
-            if tts_model == "your_tts":
+            if tts_model == "your_tts": # fast but not best quality
                 self.tts_model = TTS("tts_models/multilingual/multi-dataset/your_tts")
-            elif tts_model == "xtts_v2":
+                self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang)
+            elif tts_model == "xtts_v2": # best quality but very slow
                 self.tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-            elif tts_model == "tacotron":
+                self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang[:2])
+            elif tts_model == "tacotron": # not very good quality and predermined voice
                 self.tts_model = TTS("tts_models/fr/mai/tacotron2-DDC")
+                self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']))
             elif tts_model == "bark":
-                self.tts_model = TTS("tts_models/multilingual/multi-dataset/bark")
+                self.tts_model = TTS("tts_models/multilingual/multi-dataset/bark")# https://github.com/coqui-ai/TTS/issues/3567
+                self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang)
             else:
                 raise ValueError(f"Unsupported TTS model: {tts_model}")
-        self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang)
+
 
 
     def split_text(self, text, split_by):
@@ -526,8 +531,8 @@ class ArticletovideoPlugin(Plugin):
         self.ragllm_plugin.free_llm()
 
     def generate_image_prompt(self, text):
-        sysprompt = "You are an AI assistant tasked with creating image prompts. The prompt should be vivid and descriptive, suitable for image generation."
-        prompt = f"Create an image prompt, 77 word max, based on this paragraph. Describe a scene that illustrate the following situation : {text}"
+        sysprompt = "You are an AI assistant tasked with creating image prompts. The prompt should be vivid and descriptive, suitable for image generation. Reply only the prompt."
+        prompt = f"Create an image prompt, 77 word max, based on this paragraph. Describe, without commenting, just give the prompt for a scene that illustrate the following situation : {text}"
         ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         result = ragllm_plugin.call_llm(prompt, sysprompt)
         return result.replace("\n", " ")
