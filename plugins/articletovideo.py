@@ -640,7 +640,7 @@ class ArticletovideoPlugin(Plugin):
                 codec="libx264",
                 audio_codec="aac",
                 fps=24,
-                logger=logger
+                #logger=logger
             )
 
         st.success(t("video_generated"))
