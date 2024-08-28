@@ -49,7 +49,7 @@ translations["en"].update({
     "translated_text": "Translated Text",
     "regenerate_image": "Regenerate Image",
     "upload_image": "Upload Image",
-    "generate_video_from_url": "Generate Video from URL",
+    "generate_video_from_url": "Generate Video in One Click",
     "show_detailed_steps": "Show Detailed Steps",
     "processing_video": "Processing video...",
     "scan_files": "Scan Files",
@@ -97,7 +97,7 @@ translations["fr"].update({
     "translated_text": "Texte Traduit",
     "regenerate_image": "Régénérer l'Image",
     "upload_image": "Télécharger une Image",
-    "generate_video_from_url": "Générer une Vidéo depuis l'URL",
+    "generate_video_from_url": "Générer une Vidéo en UN Click",
     "show_detailed_steps": "Afficher les Étapes Détaillées",
     "processing_video": "Traitement de la vidéo en cours...",
     "scan_files": "Scanner les Fichiers",
@@ -192,7 +192,7 @@ class ArticletovideoPlugin(Plugin):
 
         with col1:
             if st.button(t("generate_video_from_url"), key="generate_video_button"):
-                self.generate_video_from_url(url, config)
+                self.generate_video_one_click(url, config)
 
         with col2:
             if st.button(t("scan_files"), key="scan_files_button"):
@@ -240,8 +240,7 @@ class ArticletovideoPlugin(Plugin):
         st.write(f"Audio files: {len(audio_files)}")
         st.write(f"Image files: {len(image_files)}")
 
-
-    def generate_video_from_url(self, url, config):
+    def generate_video_one_click(self, url, config):
         with st.spinner(t("processing_video")):
             # Step 1: Retrieve article
             article_text = self.retrieve_article(url)
@@ -253,15 +252,14 @@ class ArticletovideoPlugin(Plugin):
 
             # Step 3: Generate prompts
             split_by = config['articletovideo']['split_by']
-            segments = self.split_text(translated_text, split_by)
+            segments = self.get_segments(translated_text, split_by)
             prompts = self.generate_all_image_prompts(segments)
             st.session_state.edited_prompts = prompts
 
             # Step 4: Generate video
-            self.generate_video(translated_text, prompts, config)
+            self.generate_all_images(translated_text, prompts, config)
 
         st.success(t("video_files_generated"))
-
 
     def show_detailed_interface(self, config):
 
@@ -287,10 +285,10 @@ class ArticletovideoPlugin(Plugin):
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button(t("generate_video"), key="generate_video_button_detailed"):
-                    self.generate_video(st.session_state.translated_text, st.session_state.edited_prompts, config)
+                    self.generate_all_images(st.session_state.translated_text, st.session_state.edited_prompts, config)
             with col2:
                 if st.button(t("regenerate_audio"), key="regenerate_audio_button"):
-                    self.regenerate_audio(st.session_state.translated_text, config)
+                    self.regenerate_audios(st.session_state.translated_text, config)
             with col3:
                 if st.button(t("regenerate_images"), key="regenerate_images_button"):
                     self.regenerate_images(st.session_state.edited_prompts, config)
@@ -302,9 +300,27 @@ class ArticletovideoPlugin(Plugin):
             if st.button(t("assemble_video"), key="assemble_video_button"):
                 self.assemble_final_video(config, use_zoom_and_transitions)
 
-    def regenerate_audio(self, text, config):
+    def get_segments(self, text, split_by):
+        if split_by == "sentence":
+            segments = text.split(". ")
+        else:
+            segments = text.split("\n\n")
+
+        # Filtrer les segments
+        filtered_segments = []
+        for segment in segments:
+            if segment is None:
+                continue
+            segment = segment.strip()
+            if not segment or ' ' not in segment:
+                continue
+            filtered_segments.append(segment)
+
+        return filtered_segments
+
+    def regenerate_audios(self, text, config):
         split_by = config['articletovideo']['split_by']
-        segments = self.split_text(text, split_by)
+        segments = self.get_segments(text, split_by)
         output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
 
         with st.spinner(t("regenerating_audio")):
@@ -312,7 +328,7 @@ class ArticletovideoPlugin(Plugin):
             audio_paths = []
             for i, segment in enumerate(segments):
                 audio_path = os.path.join(output_dir, f"audio_{i}.wav")
-                self.generate_audio(segment, audio_path, config)
+                self.generate_one_audio(segment, audio_path, config)
                 audio_paths.append(audio_path)
                 progress_bar.progress((i + 1) / len(segments))
 
@@ -444,7 +460,7 @@ class ArticletovideoPlugin(Plugin):
 
     def generate_and_edit_prompts(self, text, config):
         split_by = config['articletovideo']['split_by']
-        segments = self.split_text(text, split_by)
+        segments = self.get_segments(text, split_by)
 
         with st.spinner(t("generating_prompts")):
             prompts = self.generate_all_image_prompts(segments)
@@ -455,9 +471,9 @@ class ArticletovideoPlugin(Plugin):
         edited_prompts = st.text_area(t("edit_prompts"), prompts_text, height=300, key="edit_prompts_text_area")
         st.session_state.edited_prompts = edited_prompts.split("\n\n")
 
-    def generate_video(self, text, prompts, config):
+    def generate_all_images(self, text, prompts, config):
         split_by = config['articletovideo']['split_by']
-        segments = self.split_text(text, split_by)
+        segments = self.get_segments(text, split_by)
         output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
         os.makedirs(output_dir, exist_ok=True)
 
@@ -467,7 +483,7 @@ class ArticletovideoPlugin(Plugin):
             audio_paths = []
             for i, segment in enumerate(segments):
                 audio_path = os.path.join(output_dir, f"audio_{i}.wav")
-                self.generate_audio(segment, audio_path, config)
+                self.generate_one_audio(segment, audio_path, config)
                 audio_paths.append(audio_path)
                 progress_bar.progress((i + 1) / len(segments))
 
@@ -487,28 +503,32 @@ class ArticletovideoPlugin(Plugin):
         st.session_state.prompts = prompts
         st.session_state.segments = segments
 
-    def generate_audio(self, text, output_path, config):
+    def generate_one_audio(self, text, output_path, config):
+
         # https://theroamingworkshop.cloud/b/en/2425/%F0%9F%90%B8coqui-ai-tts-ultra-fast-voice-generation-and-cloning-from-multilingual-text/
         tts_model = config['articletovideo']['tts_model']
         target_lang = config['articletovideo']['target_language']
 
         os.environ['COQUI_TTS_CACHE_DIR'] = os.path.expanduser('~/.cache/coqui') # https://github.com/coqui-ai/TTS/issues/3608
-        if self.tts_model is None:
-            if tts_model == "your_tts": # fast but not best quality
-                self.tts_model = TTS("tts_models/multilingual/multi-dataset/your_tts")
-                self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang)
-            elif tts_model == "xtts_v2": # best quality but very slow
-                self.tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-                self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang[:2])
-            elif tts_model == "tacotron": # not very good quality and predermined voice
-                self.tts_model = TTS("tts_models/fr/mai/tacotron2-DDC")
-                self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']))
-            elif tts_model == "bark":
-                self.tts_model = TTS("tts_models/multilingual/multi-dataset/bark")# https://github.com/coqui-ai/TTS/issues/3567
-                self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang)
-            else:
-                raise ValueError(f"Unsupported TTS model: {tts_model}")
 
+        if tts_model == "your_tts": # fast but not best quality
+            if self.tts_model is None:
+                self.tts_model = TTS("tts_models/multilingual/multi-dataset/your_tts")
+            self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang)
+        elif tts_model == "xtts_v2": # best quality but very slow
+            if self.tts_model is None:
+                self.tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+            self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang[:2])
+        elif tts_model == "tacotron": # not very good quality and predermined voice
+            if self.tts_model is None:
+                self.tts_model = TTS("tts_models/fr/mai/tacotron2-DDC")
+            self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']))
+        elif tts_model == "bark":
+            if self.tts_model is None:
+                self.tts_model = TTS("tts_models/multilingual/multi-dataset/bark")# https://github.com/coqui-ai/TTS/issues/3567
+            self.tts_model.tts_to_file(text=text, file_path=output_path, speaker_wav=os.path.expanduser(config['articletovideo']['tts_speaker']), language=target_lang)
+        else:
+            raise ValueError(f"Unsupported TTS model: {tts_model}")
 
 
     def split_text(self, text, split_by):
