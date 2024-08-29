@@ -199,8 +199,11 @@ class ArticletovideoPlugin(Plugin):
                 self.scan_files(config)
 
         with col3:
-            if st.button(t("assemble_video"), key="assemble_video_button1"):
-                self.assemble_final_video(config, use_zoom_and_transitions=True)
+            if st.button(t("assemble_video"), key="assemble_video_button"):
+                audio_paths = st.session_state.audio_paths
+                image_paths = st.session_state.image_paths
+                output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
+                self.assemble_final_video(config, use_zoom_and_transitions=True, audio_paths=audio_paths, image_paths=image_paths, output_path=os.path.join(output_dir, "final_video.mp4") )
 
         use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
 
@@ -298,7 +301,10 @@ class ArticletovideoPlugin(Plugin):
             self.display_image_gallery()
 
             if st.button(t("assemble_video"), key="assemble_video_button"):
-                self.assemble_final_video(config, use_zoom_and_transitions)
+                audio_paths = st.session_state.audio_paths
+                image_paths = st.session_state.image_paths
+                output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
+                self.assemble_final_video(config, use_zoom_and_transitions=True, audio_paths=audio_paths, image_paths=image_paths, output_path=os.path.join(output_dir, "final_video.mp4") )
 
     def get_segments(self, text, split_by):
         if split_by == "sentence":
@@ -613,11 +619,7 @@ class ArticletovideoPlugin(Plugin):
         img.save(new_image_path)
         st.session_state.image_paths[index] = new_image_path
 
-    def assemble_final_video(self, config, use_zoom_and_transitions):
-        audio_paths = st.session_state.audio_paths
-        image_paths = st.session_state.image_paths
-        output_dir = os.path.expanduser(config['articletovideo']['output_dir'])
-
+    def assemble_final_video(self, use_zoom_and_transitions, audio_paths, image_paths, output_path):
         with st.spinner(t("creating_video")):
             video_clips = []
             for audio_path, image_path in zip(audio_paths, image_paths):
@@ -645,7 +647,6 @@ class ArticletovideoPlugin(Plugin):
 
             print("Concatenating video")
             final_video = concatenate_videoclips(final_clips, method="compose")
-            output_path = os.path.join(output_dir, "final_video.mp4")
             print("Writing final video to file")
 
             # Create a progress container
