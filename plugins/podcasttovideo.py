@@ -11,6 +11,12 @@ from plugins.articletovideo import ArticletovideoPlugin
 from plugins.imggen import ImggenPlugin
 from plugins.ragllm import RagllmPlugin
 import traceback
+import spacy
+from pyannote.audio import Pipeline
+
+from dotenv import load_dotenv
+load_dotenv()
+hf_token = os.getenv("YOUR_HF_TOKEN")
 
 # Add translations for this plugin
 translations["en"].update({
@@ -29,6 +35,7 @@ translations["en"].update({
     "step_generating_prompts": "Generating prompts for each transcription...",
     "step_generating_images": "Generating images for each transcription...",
     "generated_prompts": "Generated Prompts",
+    "cut_at_silence_or_phrase" : "Split at silence (or at paragraphs) ?",
 })
 
 translations["fr"].update({
@@ -47,6 +54,7 @@ translations["fr"].update({
     "step_generating_prompts": "Génération des prompts pour chaque transcription...",
     "step_generating_images": "Génération des images pour chaque transcription...",
     "generated_prompts": "Prompts générés",
+    "cut_at_silence_or_phrase" : "Découper aux silences (ou bien aux paragraphes) ?",
 })
 
 class PodcasttovideoPlugin(Plugin):
@@ -161,11 +169,93 @@ class PodcasttovideoPlugin(Plugin):
 
         return image_paths
 
+    def split_audio_files_by_silence(self, audio_file, output_dir, min_silence_len, silence_thresh):
+        chunks = self.split_audio(
+            audio_file,
+            min_silence_len,
+            silence_thresh
+        )
+        audio_paths = []
+        for i, chunk in enumerate(chunks):
+            chunk_path = os.path.join(output_dir, f"chunk_{i}.wav")
+            chunk.export(chunk_path, format="wav")
+            audio_paths.append(chunk_path)
+        return chunks, audio_paths
+
+    def split_audio_files_by_phrase(self, config, audio_file, output_dir, mode="sentence"):
+        # Transcription de l'audio complet
+        #transcript = self.transcribe_audio(audio_file, config)
+        #segments = self.articlevideo_plugin.get_segments(transcript, mode)
+
+        # Alignement de l'audio avec le texte découpé
+        sentence_timestamps = self.align_audio_with_text(audio_file)
+
+        print(sentence_timestamps)
+
+        # Découpage de l'audio à partir des timestamps
+        audio = AudioSegment.from_wav(audio_file)
+        audio_paths = []
+        chunks = []
+        for i, (start, end) in enumerate(sentence_timestamps):
+            chunk = audio[start:end]
+            chunk_path = os.path.join(output_dir, f"chunk_{i}.wav")
+            chunk.export(chunk_path, format="wav")
+            audio_paths.append(chunk_path)
+            chunks.append(chunk)
+
+        return chunks, audio_paths
+
+    def transcribe_audio(self, audio_file, config):
+        transcript = self.transcript_plugin.transcribe_video(
+            audio_file,
+            "txt",
+            config['transcript']['whisper_path'],
+            config['transcript']['whisper_model'],
+            config['transcript']['ffmpeg_path'],
+            config['common']['language']
+        )
+        return transcript
+
+    def split_text_into_sentences(self, transcript):
+        nlp = spacy.load("en_core_web_sm")  # Ou "fr_core_news_sm" pour le français
+        doc = nlp(transcript)
+        sentences = [sent for sent in doc.sents]
+        return sentences
+
+    def align_audio_with_text(self, audio_file):
+        # Utilisation de pyannote.audio pour l'alignement
+        pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=hf_token)
+
+        # Générer un alignement temporel des segments audio
+        diarization = pipeline({"uri": "audio", "audio": audio_file})
+
+        sentence_timestamps = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            start = turn.start * 1000  # Convertir en millisecondes
+            end = turn.end * 1000  # Convertir en millisecondes
+            sentence_timestamps.append((start, end))
+
+        return sentence_timestamps
+
     def run(self, config):
         st.header(t("podcasttovideo"))
 
         use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
+        cut_silence_or_phrase = st.checkbox(t("cut_at_silence_or_phrase"), value=False, key="silence_or_phrase")
         uploaded_file = st.file_uploader(t("select_podcast"), type=["mp3", "wav", "mp4", "avi", "mov", "mkv"])
+
+        if st.button("Scan and Assemble"):
+            output_dir = os.path.expanduser(config['podcasttovideo']['output_dir'])
+            audio_files = self.articlevideo_plugin.get_sorted_files(output_dir, r'chunk_(\d+)\.wav')
+            image_files = self.articlevideo_plugin.get_sorted_files(output_dir, r'image_(\d+)\.png')
+            output_path = os.path.join(output_dir, "final_video.mp4")
+            self.articlevideo_plugin.assemble_final_video(
+                config,
+                use_zoom_and_transitions=use_zoom_and_transitions,
+                audio_paths=audio_files,
+                image_paths=image_files,
+                output_path=output_path
+            )
 
         if uploaded_file is not None and st.button(t("process_podcast")):
             with st.spinner(t("processing")):
@@ -187,16 +277,10 @@ class PodcasttovideoPlugin(Plugin):
                     st.info(t("step_splitting_audio"))
                     min_silence_len = int(config['podcasttovideo']['min_silence_len'])
                     silence_thresh = int(config['podcasttovideo']['silence_thresh'])
-                    chunks = self.split_audio(
-                        audio_file,
-                        min_silence_len,
-                        silence_thresh
-                    )
-                    audio_paths = []
-                    for i, chunk in enumerate(chunks):
-                        chunk_path = os.path.join(output_dir, f"chunk_{i}.wav")
-                        chunk.export(chunk_path, format="wav")
-                        audio_paths.append(chunk_path)
+                    if cut_silence_or_phrase:
+                        chunks, audio_paths = self.split_audio_files_by_silence(audio_file, output_dir, min_silence_len, silence_thresh)
+                    else:
+                        chunks, audio_paths = self.split_audio_files_by_phrase(config, audio_file, output_dir, mode="sentence")
 
                     # Transcribe chunks
                     st.info(t("step_transcribing_audio"))
@@ -210,6 +294,7 @@ class PodcasttovideoPlugin(Plugin):
                     st.info(t("step_assembling_video"))
                     output_path = os.path.join(output_dir, "final_video.mp4")
                     self.articlevideo_plugin.assemble_final_video(
+                        config,
                         use_zoom_and_transitions=use_zoom_and_transitions,
                         audio_paths=audio_paths,
                         image_paths=image_paths,

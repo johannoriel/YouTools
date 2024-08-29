@@ -20,6 +20,9 @@ from datetime import datetime
 import babel.numbers
 import locale
 import soundfile as sf
+import random
+import math
+import cv2
 
 # Add translations for this plugin
 translations["en"].update({
@@ -42,6 +45,7 @@ translations["en"].update({
     "generating_images": "Generating images...",
     "creating_video": "Creating final video...",
     "zoom_factor": "Zoom Factor",
+    "speed_factor": "Speed Factor",
     "use_zoom_and_transitions": "Use Zoom and Transitions",
     "edit_images_and_prompts": "Edit Images and Prompts",
     "assemble_video": "Assemble Video",
@@ -90,6 +94,7 @@ translations["fr"].update({
     "generating_images": "Génération des images...",
     "creating_video": "Création de la vidéo finale...",
     "zoom_factor": "Facteur de Zoom",
+    "speed_factor": "Facteur de vitesse",
     "use_zoom_and_transitions": "Utiliser le Zoom et les Transitions",
     "edit_images_and_prompts": "Éditer les Images et les Prompts",
     "assemble_video": "Assembler la Vidéo",
@@ -156,7 +161,15 @@ class ArticletovideoPlugin(Plugin):
                 "label": t("zoom_factor"),
                 "default": 0.01,
                 "min": 0,
-                "max": 0.1,
+                "max": 0.2,
+                "step": 0.001
+            },
+            "speed_factor": {
+                "type": "number",
+                "label": t("speed_factor"),
+                "default": 0.01,
+                "min": 0,
+                "max": 0.2,
                 "step": 0.001
             },
             "tts_model": {
@@ -619,7 +632,7 @@ class ArticletovideoPlugin(Plugin):
         img.save(new_image_path)
         st.session_state.image_paths[index] = new_image_path
 
-    def assemble_final_video(self, use_zoom_and_transitions, audio_paths, image_paths, output_path):
+    def assemble_final_video(self, config, use_zoom_and_transitions, audio_paths, image_paths, output_path):
         with st.spinner(t("creating_video")):
             video_clips = []
             for audio_path, image_path in zip(audio_paths, image_paths):
@@ -628,7 +641,34 @@ class ArticletovideoPlugin(Plugin):
 
                 if use_zoom_and_transitions:
                     zoom_factor = float(config['articletovideo']['zoom_factor'])
-                    zoomed_clip = image_clip.resize(lambda t: 1 + zoom_factor * t)
+                    speed_factor = float(config['articletovideo']['speed_factor'])
+                    #zoomed_clip = image_clip.resize(lambda t: 1 + zoom_factor * t) # simple zoom
+                    #########
+                    def dynamic_zoom(get_frame, t):
+                        # Create a smooth, periodic motion for zoom
+                        zoom = 1 + zoom_factor * (1 + math.sin(t * math.pi/10)) / 2
+
+                        # Generate wandering motion
+                        x_shift = math.sin(t / 1.5) * speed_factor
+                        y_shift = math.cos(t / 1.2) * speed_factor
+
+                        # Create the transformation matrix
+                        center_x, center_y = 0.5 + x_shift, 0.5 + y_shift
+                        matrix = cv2.getRotationMatrix2D((center_x * image_clip.w, center_y * image_clip.h), 0, zoom)
+                        matrix[0, 2] += (0.5 - center_x) * image_clip.w
+                        matrix[1, 2] += (0.5 - center_y) * image_clip.h
+
+                        frame = get_frame(t)
+                        return cv2.warpAffine(
+                            frame,
+                            matrix,
+                            (frame.shape[1], frame.shape[0]),
+                            borderMode=cv2.BORDER_REFLECT_101
+                        )
+
+
+                    zoomed_clip = image_clip.fl(dynamic_zoom)
+                    #########
                     video_clip = zoomed_clip.set_audio(audio_clip)
                 else:
                     video_clip = image_clip.set_audio(audio_clip)
