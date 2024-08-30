@@ -9,6 +9,7 @@ from plugins.chromakey import ChromakeyPlugin
 from chromakey_background import replace_background
 import os
 import requests
+from plugins.common import yt_categories
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -149,46 +150,13 @@ class DirectpublishPlugin(Plugin):
             background_video = st.selectbox(t("directpublish_select_background"), background_files)
 
         # Sélection de la catégorie
-        categories = {
-            "1": "Film & Animation",
-            "2": "Autos & Vehicles",
-            "10": "Music",
-            "15": "Pets & Animals",
-            "17": "Sports",
-            "18": "Short Movies",
-            "19": "Travel & Events",
-            "20": "Gaming",
-            "21": "Videoblogging",
-            "22": "People & Blogs",
-            "23": "Comedy",
-            "24": "Entertainment",
-            "25": "News & Politics",
-            "26": "Howto & Style",
-            "27": "Education",
-            "28": "Science & Technology",
-            "29": "Nonprofits & Activism",
-            "30": "Movies",
-            "31": "Anime/Animation",
-            "32": "Action/Adventure",
-            "33": "Classics",
-            "34": "Comedy",
-            "35": "Documentary",
-            "36": "Drama",
-            "37": "Family",
-            "38": "Foreign",
-            "39": "Horror",
-            "40": "Sci-Fi/Fantasy",
-            "41": "Thriller",
-            "42": "Shorts",
-            "43": "Shows",
-            "44": "Trailers"
-        }
-        category_keys = list(categories.keys())
+
+        category_keys = list(yt_categories.keys())
         selected_category = st.selectbox(
             t("directpublish_video_category"),
-            options=list(categories.keys()),
+            options=list(yt_categories.keys()),
             index=category_keys.index("28"),
-            format_func=lambda x: categories[x]
+            format_func=lambda x: yt_categories[x]
         )
 
         if 'rag_question' not in st.session_state:

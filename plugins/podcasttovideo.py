@@ -208,7 +208,7 @@ class PodcasttovideoPlugin(Plugin):
     def transcribe_audio(self, audio_file, config):
         transcript = self.transcript_plugin.transcribe_video(
             audio_file,
-            "txt",
+            "srt",
             config['transcript']['whisper_path'],
             config['transcript']['whisper_model'],
             config['transcript']['ffmpeg_path'],
@@ -237,11 +237,60 @@ class PodcasttovideoPlugin(Plugin):
 
         return sentence_timestamps
 
+    def split_audio_files_whisper(self, config, audio_file, output_dir):
+        # Transcribe the audio using Whisper
+        transcript = self.transcribe_audio(audio_file, config)
+        print("-----------------------------")
+        print(transcript)
+        # Parse the transcript to extract timestamps and text
+        lines = transcript.strip().split('\n')
+        segments = []
+        i = 0
+        while i < len(lines):
+            # Check if the line is a number indicating the start of a new segment
+            if lines[i].isdigit():
+                i += 1
+                time_range = lines[i].strip()
+                i += 1
+                text = lines[i].strip()
+                start, end = time_range.split(' --> ')
+                start_ms = self.time_to_ms(start.replace(',', '.'))
+                end_ms = self.time_to_ms(end.replace(',', '.'))
+                segments.append((start_ms, end_ms, text))
+            i += 1
+
+        print(segments)
+        # Split the audio based on the timestamps
+        audio = AudioSegment.from_wav(audio_file)
+        chunks = []
+        audio_paths = []
+        for i, (start, end, _) in enumerate(segments):
+            chunk = audio[start:end]
+            chunks.append(chunk)
+            chunk_path = os.path.join(output_dir, f"chunk_{i}.wav")
+            chunk.export(chunk_path, format="wav")
+            audio_paths.append(chunk_path)
+
+        return chunks, audio_paths
+
+    def time_to_ms(self, time_str):
+        h, m, s = time_str.split(':')
+        s, ms = s.split('.')
+        return int(h) * 3600000 + int(m) * 60000 + int(s) * 1000 + int(ms)
+
     def run(self, config):
         st.header(t("podcasttovideo"))
 
         use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
-        cut_silence_or_phrase = st.checkbox(t("cut_at_silence_or_phrase"), value=False, key="silence_or_phrase")
+        split_method = st.selectbox(
+            t("split_method"),
+            ["silence", "phrase", "whisper"],
+            format_func=lambda x: {
+                "silence": t("split_by_silence"),
+                "phrase": t("split_by_phrase"),
+                "whisper": t("split_by_whisper")
+            }[x]
+        )
         uploaded_file = st.file_uploader(t("select_podcast"), type=["mp3", "wav", "mp4", "avi", "mov", "mkv"])
 
         if st.button("Scan and Assemble"):
@@ -275,12 +324,15 @@ class PodcasttovideoPlugin(Plugin):
 
                     # Split audio into chunks
                     st.info(t("step_splitting_audio"))
-                    min_silence_len = int(config['podcasttovideo']['min_silence_len'])
-                    silence_thresh = int(config['podcasttovideo']['silence_thresh'])
-                    if cut_silence_or_phrase:
+                    if split_method == "silence":
+                        min_silence_len = int(config['podcasttovideo']['min_silence_len'])
+                        silence_thresh = int(config['podcasttovideo']['silence_thresh'])
                         chunks, audio_paths = self.split_audio_files_by_silence(audio_file, output_dir, min_silence_len, silence_thresh)
-                    else:
+                    elif split_method == "phrase":
                         chunks, audio_paths = self.split_audio_files_by_phrase(config, audio_file, output_dir, mode="sentence")
+                    else:  # whisper
+                        chunks, audio_paths = self.split_audio_files_whisper(config, audio_file, output_dir)
+
 
                     # Transcribe chunks
                     st.info(t("step_transcribing_audio"))

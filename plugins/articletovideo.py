@@ -649,8 +649,8 @@ class ArticletovideoPlugin(Plugin):
                         zoom = 1 + zoom_factor * (1 + math.sin(t * math.pi/10)) / 2
 
                         # Generate wandering motion
-                        x_shift = math.sin(t / 1.5) * speed_factor
-                        y_shift = math.cos(t / 1.2) * speed_factor
+                        x_shift = math.sin(t / 3.0) * speed_factor
+                        y_shift = math.cos(t / 2.4) * speed_factor
 
                         # Create the transformation matrix
                         center_x, center_y = 0.5 + x_shift, 0.5 + y_shift

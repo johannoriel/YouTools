@@ -17,6 +17,8 @@ from pytube import YouTube
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
 import os
 
+from plugins.common import get_category_id
+
 def debug_youtube_object(yt):
     print("Available attributes and methods in the YouTube object:")
     for attr in dir(yt):
@@ -115,7 +117,7 @@ translations["en"].update({
     "autotranslator_download_success": "Video downloaded successfully : ",
     "autotranslator_translation_success": "Video translated successfully : ",
     "autotranslator_enhancement_success": "Video enhanced successfully!",
-    "autotranslator_upload_success": "Video uploaded successfully! Video ID: ",
+    "autotranslator_upload_success": "Video successfully published! Video URL: https://www.youtube.com/watch?v={video_id}, Edition : https://studio.youtube.com/video/{video_id}/edit",
     "autotranslator_error": "An error occurred: ",
     "autotranslator_translation_sonitranslate": "SoniTranslate directory:",
     "autotranslator_intro_video": "Select Intro Video (optional):",
@@ -126,6 +128,8 @@ translations["en"].update({
     "autotranslator_end_timecode": "End Timecode (mm : ss) (option):",
     "autotranslator_translate_prompt": "Traduis depuis l'anglais vers le français:\n\n",
     "autotranslator_no_comment": "Ne commente pas, n'ajoute rien à part ce qui est demandé.",
+    "autotranslator_direct_upload" : "Direct uplaod",
+    "autotranslator_uploading" : "Uploading..."
 })
 
 translations["fr"].update({
@@ -139,7 +143,7 @@ translations["fr"].update({
     "autotranslator_download_success": "Vidéo téléchargée avec succès : ",
     "autotranslator_translation_success": "Vidéo traduite avec succès : ",
     "autotranslator_enhancement_success": "Vidéo améliorée avec succès !",
-    "autotranslator_upload_success": "Vidéo uploadée avec succès ! ID de la vidéo : ",
+    "autotranslator_upload_success": "Vidéo publiée avec succès ! URL de la vidéo : https://www.youtube.com/watch?v={video_id}, édition : https://studio.youtube.com/video/{video_id}/edit",
     "autotranslator_error": "Une erreur s'est produite : ",
     "autotranslator_translation_sonitranslate": "Répertoire de SoniTranslate :",
     "autotranslator_intro_video": "Sélectionner une vidéo d'introduction (optionnel) :",
@@ -150,6 +154,8 @@ translations["fr"].update({
     "autotranslator_end_timecode": "Timecode de fin (mm : ss) (option):",
     "autotranslator_translate_prompt": "Translate from English to French:\n\n",
     "autotranslator_no_comment": "Do not comment, do not add anything beside what you are instructed to do.",
+    "autotranslator_direct_upload" : "Upload direct",
+    "autotranslator_uploading": "Téléversement..."
 })
 
 class AutotranslatorPlugin(Plugin):
@@ -403,12 +409,13 @@ class AutotranslatorPlugin(Plugin):
                         st.success(t("autotranslator_concat_success"))
 
                     # Upload video
-                    if do_upload_video:
+                    if do_upload_video :
                         # Get and translate video info
                         title = video_info['title']
                         description = video_info['description']
                         tags = video_info.get('tags', [])
-                        category = video_info.get('categories', ['22'])[0]  # Use original category or default to "22" (People & Blogs)
+                        category = get_category_id(video_info.get('categories')[0])  # Use original category or default to "22" (People & Blogs)
+                        print(category)
 
                         ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
                         translated_title = self.translate_text(title, ragllm_plugin, config)
@@ -416,15 +423,16 @@ class AutotranslatorPlugin(Plugin):
                         translated_tags = [self.translate_text(tag, ragllm_plugin, config) for tag in tags]
 
                         st.write(f"{translated_title}\n{translated_description}\n{translated_tags}")
+                        st.info(t("autotranslator_uploading"))
                         video_id = upload_video(
                             final_file,
                             translated_title,
                             translated_description,
                             category,
                             translated_tags,
-                            "protected"
+                            "unlisted"
                         )
-                        st.success(t("autotranslator_upload_success") + video_id)
+                        st.success(t("autotranslator_upload_success").format(video_id=video_id))
                     col1, _ = st.columns([1, 2])
                     col1.video(final_file)
                     st.success(t("autotranslator_upload_success"))
