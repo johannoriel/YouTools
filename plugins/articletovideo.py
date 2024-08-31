@@ -73,6 +73,7 @@ translations["en"].update({
     "decimal_comma": "comma",
     "tts_model": "TTS Model",
     "convert_numbers": "Convert numbers to words",
+    "image_sysprompt" : "Prompt système pour la génération d'images",
 })
 translations["fr"].update({
     "article_to_video": "Article vers Vidéo",
@@ -121,7 +122,8 @@ translations["fr"].update({
     "decimal_point": "point",
     "decimal_comma": "virgule",
     "tts_model": "Modèle TTS",
-    "convert_numbers": "Convertir les nombres en mots"
+    "convert_numbers": "Convertir les nombres en mots",
+    "image_sysprompt" : "Prompt système pour la génération d'images",
 })
 
 class ArticletovideoPlugin(Plugin):
@@ -187,6 +189,11 @@ class ArticletovideoPlugin(Plugin):
                 "type": "checkbox",
                 "label": t("convert_numbers"),
                 "default": True
+            },
+            "image_sysprompt": {
+                "type": "text",
+                "label": t("image_sysprompt"),
+                "default": "You are an AI assistant tasked with creating image prompts. The prompt should be vivid and descriptive, suitable for image generation. Reply only the prompt."
             },
         }
 
@@ -269,7 +276,7 @@ class ArticletovideoPlugin(Plugin):
             # Step 3: Generate prompts
             split_by = config['articletovideo']['split_by']
             segments = self.get_segments(translated_text, split_by)
-            prompts = self.generate_all_image_prompts(segments)
+            prompts = self.generate_all_image_prompts(segments, config['articletovideo']['image_sysprompt'])
             st.session_state.edited_prompts = prompts
 
             # Step 4: Generate video
@@ -482,7 +489,7 @@ class ArticletovideoPlugin(Plugin):
         segments = self.get_segments(text, split_by)
 
         with st.spinner(t("generating_prompts")):
-            prompts = self.generate_all_image_prompts(segments)
+            prompts = self.generate_all_image_prompts(segments, config['articletovideo']['image_sysprompt'])
             return prompts
 
     def display_prompts(self, prompts):
@@ -556,11 +563,11 @@ class ArticletovideoPlugin(Plugin):
         else:
             return text.split("\n\n")
 
-    def generate_all_image_prompts(self, paragraphs):
+    def generate_all_image_prompts(self, paragraphs, sysprompt):
         progress_bar = st.progress(0)
         prompts = []
         for i, paragraph in enumerate(paragraphs):
-            prompt = self.generate_image_prompt(paragraph)
+            prompt = self.generate_image_prompt(paragraph, sysprompt)
             prompts.append(prompt)
             progress_bar.progress((i + 1) / len(paragraphs))
         return prompts
@@ -569,9 +576,8 @@ class ArticletovideoPlugin(Plugin):
         # Effectuer un appel bidon à Ollama pour décharger le modèle
         self.ragllm_plugin.free_llm()
 
-    def generate_image_prompt(self, text):
-        sysprompt = "You are an AI assistant tasked with creating image prompts. The prompt should be vivid and descriptive, suitable for image generation. Reply only the prompt."
-        prompt = f"Create an image prompt, 77 word max, based on this paragraph. Describe, without commenting, just give the prompt for a scene that illustrate the following situation : {text}"
+    def generate_image_prompt(self, text, sysprompt):
+        prompt = f"Create an image prompt, 77 word max. Describe, without commenting, just give the prompt for a scene that illustrate the following situation : {text}"
         ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         result = ragllm_plugin.call_llm(prompt, sysprompt)
         return result.replace("\n", " ")
