@@ -1,3 +1,4 @@
+from sys import hexversion
 import streamlit as st
 from app import Plugin
 from global_vars import t, translations
@@ -291,6 +292,7 @@ class PodcasttovideoPlugin(Plugin):
         )
 
     def run(self, config):
+        self.articlevideo_plugin.unload_ollama_model()
         st.header(t("podcasttovideo"))
         output_dir = os.path.expanduser(config['podcasttovideo']['output_dir'])
         os.makedirs(output_dir, exist_ok=True)
@@ -322,22 +324,16 @@ class PodcasttovideoPlugin(Plugin):
             with st.spinner(t("processing")):
                 input_file, audio_file, chunks, audio_paths = self.prepare_audio(config, uploaded_file, output_dir, split_method)
                 st.session_state.transcriptions = self.transcribe_chunks(chunks, config)
-                st.session_state.prompts = self.generate_prompts(st.session_state.transcriptions, config)
+                st.session_state.summary, st.session_state.prompts = self.generate_prompts(st.session_state.transcriptions, config, None)
                 st.session_state.chunks = chunks
                 st.session_state.audio_paths = audio_paths
 
-        # st.session_state.edited_prompts =  self.edit_prompts(st.session_state.prompts)
-        # if 'edited_prompts' in st.session_state:
-        #     if st.button(t("continue_processing")):
-        #         with st.spinner(t("generating_images")):
-        #             st.session_state.image_paths = self.generate_images_from_prompts(st.session_state.edited_prompts, config)
-        #         with st.spinner(t("assembling_video")):
-        #             self.assemble_video(config, use_zoom_and_transitions, st.session_state.audio_paths, st.session_state.image_paths, output_dir)
-        #             st.success(t("video_generated"))
+
         if 'prompts' in st.session_state and 'transcriptions' in st.session_state:
+            st.text_area("Summary", height=200, key="summary")
             edited_prompts = self.edit_prompts(st.session_state.prompts, st.session_state.transcriptions)
             if edited_prompts is None and st.session_state.get('regenerate_prompts', False):
-                st.session_state.prompts = self.generate_prompts(st.session_state.transcriptions, config)
+                _, st.session_state.prompts = self.generate_prompts(st.session_state.transcriptions, config, st.session_state.summary)
                 st.session_state.regenerate_prompts = False
                 st.rerun()
             elif edited_prompts is not None:
@@ -387,14 +383,17 @@ class PodcasttovideoPlugin(Plugin):
 
         return input_file, audio_file, chunks, audio_paths
 
-    def generate_prompts(self, transcriptions, config):
+    def generate_prompts(self, transcriptions, config, summary):
         st.info(t('step_generating_prompts'))
         prompts = []
         transcript = " ".join(transcriptions)
-        resume = self.ragllm_plugin.call_llm(
-            config['podcasttovideo']['summurize_transcript'].format(transcript=transcript),
-            config['articletovideo']['image_sysprompt']
-        )
+        if summary is None:
+            resume = self.ragllm_plugin.call_llm(
+                config['podcasttovideo']['summurize_transcript'].format(transcript=transcript),
+                config['articletovideo']['image_sysprompt']
+            )
+        else:
+            resume = summary
         st.info(f"Context for the prompt : {resume}")
         progress_bar = st.progress(0)
         total_prompts = len(transcriptions)
@@ -404,7 +403,7 @@ class PodcasttovideoPlugin(Plugin):
             prompt = self.articlevideo_plugin.generate_image_prompt(context, config['articletovideo']['image_sysprompt'])
             prompts.append(prompt)
             progress_bar.progress((i + 1) / total_prompts)
-        return prompts
+        return resume, prompts
 
     # def edit_prompts(self, prompts):
     #     st.write(t("edit_prompts_instruction"))
