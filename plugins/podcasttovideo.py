@@ -419,7 +419,7 @@ class PodcasttovideoPlugin(Plugin):
             st.subheader(f"Prompt {i+1}")
             #st.text_area(f"Transcription {i+1}", value=transcription, height=100, key=f"transcription_{i}", disabled=True)
             st.write(transcription)
-            edited_prompt = st.text_area(f"Edit prompt {i+1}", value=prompt, height=200, key=f"prompt_{i}")
+            edited_prompt = st.text_area(f"Edit prompt {i+1}", value=prompt, height=100, key=f"prompt_{i}")
             edited_prompts.append(edited_prompt)
 
         if st.button(t("regenerate_prompts")):
