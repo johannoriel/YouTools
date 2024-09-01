@@ -15,3 +15,8 @@ yt-dlp
 ffmpeg-python
 diffusers
 rembg
+pydub
+beautifulsoup4
+TTS
+pyannote.audio
+pytube
