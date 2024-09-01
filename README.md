@@ -70,7 +70,7 @@ After installation, run the command :
 
 ## Using YouTools
 
-you can access the url `http://localhost:8502/`
+you can access the url `http://localhost:8501/`
 
 ![YouTools Page](./docs/img/YouTools_page.png)
 
