@@ -49,6 +49,14 @@ translations["en"].update({
     "split_by_phrase": "Phrase (less images)",
     "summurize_transcript": "Prompt to summurize transcript to give context for image preprompt",
     "regenerate_prompts": "Regenerate Prompts",
+    "scan_and_edit": "Scan and Edit",
+    "retranscribe_audio_chunks": "Retranscribe audio chunks",
+    "regenerate_prompts": "Regenerate prompts",
+    "edit_image": "Edit Image {0}",
+    "transcription": "Transcription {0}",
+    "edit_prompt": "Edit prompt {0}",
+    "regenerate_image": "Regenerate Image {0}",
+    "assemble_video": "Assemble Video"
 })
 
 translations["fr"].update({
@@ -80,6 +88,14 @@ translations["fr"].update({
     "split_by_phrase": "Phrase (moins d'images)",
     "summurize_transcript": "Prompt pour résumer le transcript de contexte de génération de preprompt d'image",
     "regenerate_prompts": "Régénérer les prompts",
+    "scan_and_edit": "Scanner et Éditer",
+    "retranscribe_audio_chunks": "Retranscrire les segments audio",
+    "regenerate_prompts": "Régénérer les prompts",
+    "edit_image": "Éditer l'image {0}",
+    "transcription": "Transcription {0}",
+    "edit_prompt": "Éditer le prompt {0}",
+    "regenerate_image": "Régénérer l'image {0}",
+    "assemble_video": "Assembler la vidéo"
 })
 
 class PodcasttovideoPlugin(Plugin):
@@ -313,6 +329,14 @@ class PodcasttovideoPlugin(Plugin):
         if st.button(t("scan_and_assemble")):
             self.scan_and_assemble()
 
+        retranscribe = st.checkbox(t("retranscribe_audio_chunks"))
+        regenerate_prompts = st.checkbox(t("regenerate_prompts"))
+        if st.button(t("scan_and_edit"), key="scan_and_edit") :
+            self.scan_and_edit(config, use_zoom_and_transitions, retranscribe, regenerate_prompts)
+
+        if 'scan_and_edit' in st.session_state:
+            self.editable_gallery(config, use_zoom_and_transitions)
+
         if st.button(t('process_podcast_step_by_step')):
             st.session_state.edited_prompts = None
             st.session_state.prompts = None
@@ -339,9 +363,8 @@ class PodcasttovideoPlugin(Plugin):
             elif edited_prompts is not None:
                 with st.spinner(t("generating_images")):
                     st.session_state.image_paths = self.generate_images_from_prompts(edited_prompts, config)
-                with st.spinner(t("assembling_video")):
-                    self.assemble_video(config, use_zoom_and_transitions, st.session_state.audio_paths, st.session_state.image_paths, output_dir)
-                    st.success(t("video_generated"))
+                self.assemble_video(config, use_zoom_and_transitions, st.session_state.audio_paths, st.session_state.image_paths, output_dir)
+                st.success(t("video_generated"))
 
     def process_podcast_one_click(self, uploaded_file, config, use_zoom_and_transitions, split_method):
         if uploaded_file is None:
@@ -469,3 +492,103 @@ class PodcasttovideoPlugin(Plugin):
             os.unlink(input_file)
         if os.path.exists(audio_file):
             os.unlink(audio_file)
+
+    def run1(self, config):
+        self.articlevideo_plugin.unload_ollama_model()
+        st.header(t("podcasttovideo"))
+        output_dir = os.path.expanduser(config['podcasttovideo']['output_dir'])
+        os.makedirs(output_dir, exist_ok=True)
+        uploaded_file = st.file_uploader(t("select_podcast"), type=["mp3", "wav", "mp4", "avi", "mov", "mkv"])
+        use_zoom_and_transitions = st.checkbox(t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
+        split_method = st.selectbox(
+            t("split_method"),
+            ["whisper", "silence", "phrase"],
+            format_func=lambda x: {
+                "whisper": t("split_by_whisper"),
+                "silence": t("split_by_silence"),
+                "phrase": t("split_by_phrase"),
+            }[x]
+        )
+        if st.button(t("process_podcast_one_click")):
+            self.process_podcast_one_click(uploaded_file, config, use_zoom_and_transitions, split_method)
+
+        if st.button(t("scan_and_assemble")):
+            self.scan_and_assemble()
+
+        retranscribe = st.checkbox(t("retranscribe_audio_chunks"))
+        regenerate_prompts = st.checkbox(t("regenerate_prompts"))
+        if st.button(t("scan_and_edit"), key="scan_and_edit") :
+            self.scan_and_edit(config, use_zoom_and_transitions, retranscribe, regenerate_prompts)
+
+        if 'scan_and_edit' in st.session_state:
+            self.editable_gallery(config, use_zoom_and_transitions)
+
+        if st.button(t('process_podcast_step_by_step')):
+            self.process_podcast_step_by_step(uploaded_file, config, use_zoom_and_transitions, split_method)
+
+    def process_podcast_step_by_step(self, uploaded_file, config, use_zoom_and_transitions, split_method):
+        st.session_state.edited_prompts = None
+        st.session_state.prompts = None
+        st.session_state.transcriptions = None
+        if uploaded_file is None:
+            st.warning(t("please_upload_file"))
+            return
+
+        with st.spinner(t("processing")):
+            input_file, audio_file, chunks, audio_paths = self.prepare_audio(config, uploaded_file, os.path.expanduser(config['podcasttovideo']['output_dir']), split_method)
+            st.session_state.transcriptions = self.transcribe_chunks(chunks, config)
+            st.session_state.summary, st.session_state.prompts = self.generate_prompts(st.session_state.transcriptions, config, None)
+            st.session_state.chunks = chunks
+            st.session_state.audio_paths = audio_paths
+
+        if 'prompts' in st.session_state and 'transcriptions' in st.session_state:
+            st.text_area("Summary", height=200, key="summary")
+            self.editable_gallery(config, use_zoom_and_transitions)
+
+    def scan_and_edit(self, config, use_zoom_and_transitions, retranscribe, regenerate_prompts):
+        output_dir = os.path.expanduser(config['podcasttovideo']['output_dir'])
+        audio_files = self.articlevideo_plugin.get_sorted_files(output_dir, r'chunk_(\d+)\.wav')
+        image_files = self.articlevideo_plugin.get_sorted_files(output_dir, r'image_(\d+)\.png')
+
+        st.session_state.audio_paths = audio_files
+        st.session_state.image_paths = image_files
+
+        if retranscribe and not 'transcriptions' in st.session_state:
+            st.session_state.transcriptions = self.transcribe_chunks([AudioSegment.from_wav(audio_file) for audio_file in audio_files], config)
+
+        if regenerate_prompts and not 'prompts' in st.session_state:
+            st.session_state.summary, st.session_state.prompts = self.generate_prompts(st.session_state.transcriptions, config, None)
+
+        self.editable_gallery(config, use_zoom_and_transitions)
+
+    def editable_gallery(self, config, use_zoom_and_transitions):
+        cols = st.columns(3)
+        for i, (image_path, audio_path, transcription, prompt) in enumerate(zip(
+            st.session_state.image_paths,
+            st.session_state.audio_paths,
+            st.session_state.transcriptions,
+            st.session_state.prompts
+        )):
+            with cols[i % 3]:
+                #st.write(transcription)
+                st.markdown(
+                    f"""
+                    <div style="border: 1px solid #e6e6e6; padding: 10px; width: 100%; height: 100px; overflow-y: scroll;">
+                        {transcription}
+
+                    """,
+                    unsafe_allow_html=True
+                )
+                st.image(image_path)
+                with st.expander(t("edit_image").format(i+1)):
+                    st.audio(audio_path)
+                    #st.text_area(t("transcription").format(i+1), value=transcription, height=100, key=f"transcription_{i}")
+                    edited_prompt = st.text_area(t("edit_prompt").format(i+1), value=prompt, height=100, key=f"gprompt_{i}")
+                    if st.button(t("regenerate_image").format(i+1), key=f"regen_{i}"):
+                        self.articlevideo_plugin.unload_ollama_model()
+                        self.articlevideo_plugin.generate_image(edited_prompt, image_path)
+                        st.rerun()
+
+        if st.button(t("assemble_video")):
+            self.assemble_video(config, use_zoom_and_transitions, st.session_state.audio_paths, st.session_state.image_paths, os.path.expanduser(config['podcasttovideo']['output_dir']))
+            st.success(t("video_generated"))
