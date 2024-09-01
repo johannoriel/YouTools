@@ -609,7 +609,6 @@ class ArticletovideoPlugin(Plugin):
                 st.markdown(f"""
                     <div style="border: 1px solid #e6e6e6; padding: 10px; width: 100%; height: 100px; overflow-y: scroll;">
                         {segment}
-                    </div>
                     """, unsafe_allow_html=True)
 
 
@@ -648,6 +647,8 @@ class ArticletovideoPlugin(Plugin):
                 if use_zoom_and_transitions:
                     zoom_factor = float(config['articletovideo']['zoom_factor'])
                     speed_factor = float(config['articletovideo']['speed_factor'])
+                    initial_x_shift = random.uniform(1, 100)
+                    initial_y_shift = random.uniform(1, 100)
                     #zoomed_clip = image_clip.resize(lambda t: 1 + zoom_factor * t) # simple zoom
                     #########
                     def dynamic_zoom(get_frame, t):
@@ -655,8 +656,8 @@ class ArticletovideoPlugin(Plugin):
                         zoom = 1 + zoom_factor * (1 + math.sin(t * math.pi/10)) / 2
 
                         # Generate wandering motion
-                        x_shift = math.sin(t / 3.0) * speed_factor
-                        y_shift = math.cos(t / 2.4) * speed_factor
+                        x_shift = math.sin((t + initial_x_shift) / 3.0) * speed_factor
+                        y_shift = math.cos((t + initial_y_shift) / 2.4) * speed_factor
 
                         # Create the transformation matrix
                         center_x, center_y = 0.5 + x_shift, 0.5 + y_shift
