@@ -44,6 +44,8 @@ translations["en"].update({
     "directpublish_webhook_error": "Error triggering webhook {webhook}: {error}",
     "webhook_urls": "Webhook URLs (one per line, optional)",
     "directpublish_no_webhooks": "No webhooks configured",
+    "directpublish_do_llm": "Use LLM to summerize",
+    "directpublish_title": "Title of the video",
 })
 
 translations["fr"].update({
@@ -78,6 +80,8 @@ translations["fr"].update({
     "directpublish_webhook_error": "Erreur lors du déclenchement du webhook {webhook} : {error}",
     "webhook_urls": "URLs des Webhooks (une par ligne, optionnel)",
     "directpublish_no_webhooks": "Aucun webhook configuré",
+    "directpublish_do_llm": "Utiliser le LLM pour résumer",
+    "directpublish_title": "Titre de la vidéo",
 })
 
 def cut_string(text, limit=500):
@@ -140,6 +144,9 @@ class DirectpublishPlugin(Plugin):
         # Option pour retirer les silences
         remove_silences = st.checkbox(t("directpublish_remove_silences"))
         replace_green_screen = st.checkbox(t("directpublish_replace_green_screen"))
+        do_llm = st.checkbox(t("directpublish_do_llm"), value=True)
+        if not do_llm:
+            title = st.text_input(t("directpublish_title"))
         do_publish = st.checkbox(t("directpublish_dopublish"), value=True)
 
         # Sélection du fond si le remplacement du fond vert est activé
@@ -202,46 +209,50 @@ class DirectpublishPlugin(Plugin):
 
                     if do_publish:
                         # 3. Transcrire la vidéo
-                        st.text(t("directpublish_generating_transcription"))
-                        transcript = self.transcript_plugin.transcribe_video(
-                            video_to_process,
-                            "txt",
-                            config['transcript']['whisper_path'],
-                            config['transcript']['whisper_model'],
-                            config['transcript']['ffmpeg_path'],
-                            config['common']['language']
-                        )
-                        st.code(transcript)
-                        st.session_state.transcript = transcript # May bu used by other plugins
-
-                        # 4. Générer un résumé du transcript
-                        st.text(t("directpublish_generating_description"))
-                        description = self.ragllm_plugin.process_with_llm(
-                            user_prompt,
-                            config['ragllm']['llm_sys_prompt'],
-                            transcript
-                        )
-                        st.code(description)
                         signature = config['directpublish']['signature']
+                        if do_llm:
+                            st.text(t("directpublish_generating_transcription"))
+                            transcript = self.transcript_plugin.transcribe_video(
+                                video_to_process,
+                                "txt",
+                                config['transcript']['whisper_path'],
+                                config['transcript']['whisper_model'],
+                                config['transcript']['ffmpeg_path'],
+                                config['common']['language']
+                            )
+                            st.code(transcript)
+                            st.session_state.transcript = transcript # May bu used by other plugins
 
-                        # 5. Générer un titre pour la vidéo
-                        st.text(t("directpublish_generating_title"))
-                        title_prompt = t("directpublish_title_generator")
-                        title = remove_quotes(self.ragllm_plugin.process_with_llm(
-                            title_prompt,
-                            config['ragllm']['llm_sys_prompt'],
-                            transcript
-                        )).split('\n')[0].strip()
-                        st.code(title)
+                            # 4. Générer un résumé du transcript
+                            st.text(t("directpublish_generating_description"))
+                            description = self.ragllm_plugin.process_with_llm(
+                                user_prompt,
+                                config['ragllm']['llm_sys_prompt'],
+                                transcript
+                            )
+                            st.code(description)
 
-                        # 5. Générer un titre pour la vidéo
-                        tag_prompt = t("directpublish_tag_generator")
-                        tags = remove_quotes(cut_string(self.ragllm_plugin.process_with_llm(
-                            tag_prompt,
-                            config['ragllm']['llm_sys_prompt'],
-                            transcript
-                        )))
-                        st.code(tags)
+                            # 5. Générer un titre pour la vidéo
+                            st.text(t("directpublish_generating_title"))
+                            title_prompt = t("directpublish_title_generator")
+                            title = remove_quotes(self.ragllm_plugin.process_with_llm(
+                                title_prompt,
+                                config['ragllm']['llm_sys_prompt'],
+                                transcript
+                            )).split('\n')[0].strip()
+                            st.code(title)
+
+                            # 5. Générer un titre pour la vidéo
+                            tag_prompt = t("directpublish_tag_generator")
+                            tags = remove_quotes(cut_string(self.ragllm_plugin.process_with_llm(
+                                tag_prompt,
+                                config['ragllm']['llm_sys_prompt'],
+                                transcript
+                            )))
+                            st.code(tags)
+                        else:
+                            tags = []
+                            description = ""
 
                         # 6. Uploader la vidéo sur YouTube
                         st.text(t("directpublish_upload"))
