@@ -238,7 +238,7 @@ class RagllmPlugin(Plugin):
     def call_llm(self, prompt: str, sysprompt: str) -> str:
         try:
             llm_model = st.session_state.ragllm_llm_model
-            #print(f"---------------------------------------\nCalling LLM {llm_model} \n with sysprompt {sysprompt} \n and prompt {prompt} \n and context len of {len(context)}")
+            #print(f"---------------------------------------\nCalling LLM {llm_model} \n with sysprompt {sysprompt} \n and prompt {prompt}")
             messages = [
                 {"role": "system", "content": sysprompt},
                 {"role": "user", "content": prompt}
@@ -266,7 +266,7 @@ class RagllmPlugin(Plugin):
             return f"{t('rag_error_calling_llm')}{str(e)}"
 
     def process_with_llm(self, prompt: str, sysprompt: str, context: str) -> str:
-        return self.call_llm(f"Contexte : {context}\n\nQuestion : {prompt}", sysprompt)
+        return self.call_llm(f"{context}\n\n{prompt}", sysprompt)
 
     def run(self, config):
         st.write(t("rag_plugin_loaded"))

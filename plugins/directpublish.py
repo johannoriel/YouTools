@@ -207,53 +207,53 @@ class DirectpublishPlugin(Plugin):
                         video_to_process = result_path
                         st.text(video_to_process)
 
+                    # 3. Transcrire la vidéo
+                    signature = config['directpublish']['signature']
+                    if do_llm:
+                        st.text(t("directpublish_generating_transcription"))
+                        transcript = self.transcript_plugin.transcribe_video(
+                            video_to_process,
+                            "txt",
+                            config['transcript']['whisper_path'],
+                            config['transcript']['whisper_model'],
+                            config['transcript']['ffmpeg_path'],
+                            config['common']['language']
+                        )
+                        st.code(transcript)
+                        st.session_state.transcript = transcript # May bu used by other plugins
+
+                        # 4. Générer un résumé du transcript
+                        st.text(t("directpublish_generating_description"))
+                        description = self.ragllm_plugin.process_with_llm(
+                            user_prompt,
+                            config['ragllm']['llm_sys_prompt'],
+                            transcript
+                        )
+                        st.code(description)
+
+                        # 5. Générer un titre pour la vidéo
+                        st.text(t("directpublish_generating_title"))
+                        title_prompt = t("directpublish_title_generator")
+                        title = remove_quotes(self.ragllm_plugin.process_with_llm(
+                            title_prompt,
+                            config['ragllm']['llm_sys_prompt'],
+                            transcript
+                        )).split('\n')[0].strip()
+                        st.code(title)
+
+                        # 5. Générer un titre pour la vidéo
+                        tag_prompt = t("directpublish_tag_generator")
+                        tags = remove_quotes(cut_string(self.ragllm_plugin.process_with_llm(
+                            tag_prompt,
+                            config['ragllm']['llm_sys_prompt'],
+                            transcript
+                        )))
+                        st.code(tags)
+                    else:
+                        tags = []
+                        description = ""
+
                     if do_publish:
-                        # 3. Transcrire la vidéo
-                        signature = config['directpublish']['signature']
-                        if do_llm:
-                            st.text(t("directpublish_generating_transcription"))
-                            transcript = self.transcript_plugin.transcribe_video(
-                                video_to_process,
-                                "txt",
-                                config['transcript']['whisper_path'],
-                                config['transcript']['whisper_model'],
-                                config['transcript']['ffmpeg_path'],
-                                config['common']['language']
-                            )
-                            st.code(transcript)
-                            st.session_state.transcript = transcript # May bu used by other plugins
-
-                            # 4. Générer un résumé du transcript
-                            st.text(t("directpublish_generating_description"))
-                            description = self.ragllm_plugin.process_with_llm(
-                                user_prompt,
-                                config['ragllm']['llm_sys_prompt'],
-                                transcript
-                            )
-                            st.code(description)
-
-                            # 5. Générer un titre pour la vidéo
-                            st.text(t("directpublish_generating_title"))
-                            title_prompt = t("directpublish_title_generator")
-                            title = remove_quotes(self.ragllm_plugin.process_with_llm(
-                                title_prompt,
-                                config['ragllm']['llm_sys_prompt'],
-                                transcript
-                            )).split('\n')[0].strip()
-                            st.code(title)
-
-                            # 5. Générer un titre pour la vidéo
-                            tag_prompt = t("directpublish_tag_generator")
-                            tags = remove_quotes(cut_string(self.ragllm_plugin.process_with_llm(
-                                tag_prompt,
-                                config['ragllm']['llm_sys_prompt'],
-                                transcript
-                            )))
-                            st.code(tags)
-                        else:
-                            tags = []
-                            description = ""
-
                         # 6. Uploader la vidéo sur YouTube
                         st.text(t("directpublish_upload"))
                         try:

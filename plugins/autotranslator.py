@@ -432,9 +432,10 @@ class AutotranslatorPlugin(Plugin):
                             translated_tags,
                             "unlisted"
                         )
+                        st.success(t("autotranslator_upload_success").format(video_id=video_id))
                     col1, _ = st.columns([1, 2])
                     col1.video(final_file)
-                    st.success(t("autotranslator_upload_success").format(video_id=video_id))
+
 
                 #except Exception as e:
                 #    st.error(t("autotranslator_error") + str(e))

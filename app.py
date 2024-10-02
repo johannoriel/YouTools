@@ -35,6 +35,9 @@ class Plugin:
     def get_config_fields(self) -> Dict[str, Any]:
         return {}
 
+    def get_config(self, config_value):
+        return self.plugin_manager.config[self.name][config_value]
+
     def get_config_ui(self, config):
         updated_config = {}
         for field, params in self.get_config_fields().items():
@@ -68,9 +71,10 @@ class Plugin:
         return {}
 
 class PluginManager:
-    def __init__(self):
+    def __init__(self, config):
         self.plugins: Dict[str, Plugin] = {}
         self.starred_plugins: Set[str] = set()
+        self.config = config
 
     def load_plugins(self):
         plugins_dir = 'plugins'
@@ -126,11 +130,11 @@ class PluginManager:
 def main():
     st.set_page_config(page_title="YoutTools", layout="wide")
     # Initialisation du gestionnaire de plugins
-    plugin_manager = PluginManager()
+    config = load_config()
+    plugin_manager = PluginManager(config)
     plugin_manager.load_plugins()
 
     # Chargement de la configuration
-    config = load_config()
     plugin_manager.load_starred_plugins(config)
 
     # Initialisation de la langue dans st.session_state
