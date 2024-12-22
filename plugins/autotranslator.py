@@ -19,6 +19,8 @@ import os
 
 from plugins.common import get_category_id
 
+from frdubb import VideoDubber
+
 def debug_youtube_object(yt):
     print("Available attributes and methods in the YouTube object:")
     for attr in dir(yt):
@@ -183,9 +185,8 @@ class AutotranslatorPlugin(Plugin):
     def translate_video(self, input_file, config):
         work_directory = config['common']['work_directory']
         output_file = os.path.join(work_directory,'translated_video.mp4')
-        translation_sonitranslate = config['autotranslator']['translation_sonitranslate']
-        command = f"./autotranslate.sh {input_file} {output_file} {translation_sonitranslate}"
-        subprocess.run(command, shell=True, check=True)
+        dubber = VideoDubber(input_file, output_file, st.session_state.ragllm_llm_model, -30)
+        dubber.create_dubbed_video()
         return output_file
 
     def enhance_video_complex(self, input_file, max_zoom, max_rotation):

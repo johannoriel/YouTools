@@ -29,6 +29,8 @@ translations["en"].update({
     "directpublish_upload": "Uploading...",
     "publish_signature": "Signature to add in video description",
     "publish_signature_default": "",
+    "publish_introduction": "Introduction to add in video description",
+    "publish_introduction_default": "",
     "directpublish_replace_green_screen": "Replace green screen background",
     "directpublish_select_background": "Select a background video",
     "directpublish_replacing_background": "Replacing green screen background...",
@@ -65,6 +67,8 @@ translations["fr"].update({
     "directpublish_upload": "Téléversement...",
     "publish_signature": "Signature à ajouter à la description de la vidéo",
     "publish_signature_default": "",
+    "publish_introduction": "Introduction à ajouter à la description de la vidéo",
+    "publish_introduction_default": "",
     "directpublish_replace_green_screen": "Remplacer le fond vert",
     "directpublish_select_background": "Sélectionner une vidéo de fond",
     "directpublish_replacing_background": "Remplacement du fond vert...",
@@ -109,6 +113,11 @@ class DirectpublishPlugin(Plugin):
 
     def get_config_fields(self):
         return {
+            "introduction": {
+                "type": "textarea",
+                "label": t("publish_introduction"),
+                "default": t("publish_introduction_default")
+            },
             "signature": {
                 "type": "textarea",
                 "label": t("publish_signature"),
@@ -209,6 +218,7 @@ class DirectpublishPlugin(Plugin):
 
                     # 3. Transcrire la vidéo
                     signature = config['directpublish']['signature']
+                    introduction = config['directpublish']['introduction']
                     if do_llm:
                         st.text(t("directpublish_generating_transcription"))
                         transcript = self.transcript_plugin.transcribe_video(
@@ -260,7 +270,7 @@ class DirectpublishPlugin(Plugin):
                             video_id = upload_video(
                                 video_to_process,
                                 title,
-                                f"{description}\n\n{addings}\n{signature}",
+                                f"{introduction}\n\n{description}\n\n{addings}\n{signature}",
                                 selected_category,
                                 tags.split(','),  # keywords (optionnel)
                                 "unlisted"
