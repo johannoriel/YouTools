@@ -186,7 +186,8 @@ class AutotranslatorPlugin(Plugin):
         work_directory = config['common']['work_directory']
         output_file = os.path.join(work_directory,'translated_video.mp4')
         dubber = VideoDubber(input_file, output_file, st.session_state.ragllm_llm_model, -30)
-        dubber.create_dubbed_video()
+        #dubber.create_dubbed_video()
+        dubber.process_video()
         return output_file
 
     def enhance_video_complex(self, input_file, max_zoom, max_rotation):
@@ -389,6 +390,8 @@ class AutotranslatorPlugin(Plugin):
 
                     # Translate video
                     if do_translate:
+                        ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
+                        ragllm_plugin.free_llm()
                         translated_file = self.translate_video(input_file, config)
                     else:
                         work_directory = config['common']['work_directory']
