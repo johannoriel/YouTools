@@ -474,7 +474,7 @@ class ShortextractorPlugin(Plugin):
 
 
             # Assurez-vous que les valeurs sont des floats
-            default_zoom = float(config['shortextractor'].get('zoom_factor', 1))
+            default_zoom = float(config['shortextractor'].get('zoom_factor', 1.5))
             default_center_x = float(config['shortextractor'].get('center_x', 0))
             default_center_y = float(config['shortextractor'].get('center_y', 0))
 
