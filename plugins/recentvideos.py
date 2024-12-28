@@ -3,10 +3,12 @@ from app import Plugin
 
 import streamlit as st
 import os
+import re
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
+import yt_dlp
 
 from plugins.common import get_credentials
 
@@ -31,7 +33,10 @@ translations["en"].update({
     "recent_videos_transcripts_disabled": "Transcripts are disabled for this video.",
     "recent_videos_no_transcript_available": "No transcript is available for this video.",
     "recent_videos_transcript_error": "An error occurred while retrieving the transcript: ",
-    "recent_videos_configure_channel_id": "Please configure the channel ID in the Configuration tab."
+    "recent_videos_configure_channel_id": "Please configure the channel ID in the Configuration tab.",
+    "recent_videos_download_button": "Download Video",
+    "recent_videos_download_success": "Video downloaded successfully!",
+    "recent_videos_download_error": "An error occurred while downloading the video: "
 })
 
 translations["fr"].update({
@@ -54,7 +59,10 @@ translations["fr"].update({
     "recent_videos_transcripts_disabled": "Les transcriptions sont désactivées pour cette vidéo.",
     "recent_videos_no_transcript_available": "Aucune transcription n'est disponible pour cette vidéo.",
     "recent_videos_transcript_error": "Une erreur s'est produite lors de la récupération du transcript : ",
-    "recent_videos_configure_channel_id": "Veuillez configurer l'ID de la chaîne dans l'onglet Configuration."
+    "recent_videos_configure_channel_id": "Veuillez configurer l'ID de la chaîne dans l'onglet Configuration.",
+    "recent_videos_download_button": "Télécharger la vidéo",
+    "recent_videos_download_success": "Vidéo téléchargée avec succès !",
+    "recent_videos_download_error": "Une erreur s'est produite lors du téléchargement de la vidéo : "
 })
 
 class RecentvideosPlugin(Plugin):
@@ -155,6 +163,25 @@ class RecentvideosPlugin(Plugin):
             st.error(f"Une erreur s'est produite : {e}")
             return [], None, None
 
+    def download_video(self, video_url, work_directory, title):
+        # Nettoyer le titre pour enlever les caractères spéciaux et tout ce qui suit "|"
+        clean_title = re.sub(r'[^\w\-_\. ]', '', title.split('|')[0].strip())
+
+        # Chemin complet du fichier
+        file_path = os.path.join(work_directory, f"{clean_title}.mp4")
+
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'outtmpl': file_path,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_url])
+            return True, file_path
+        except Exception as e:
+            return False, str(e)
+
     def run(self, config):
         st.header(t("recent_videos_header"))
         api_key = config['api_key']
@@ -181,6 +208,16 @@ class RecentvideosPlugin(Plugin):
                         st.session_state.transcript_lang = lang
                         st.session_state.show_transcript = True
                         st.session_state.current_video_id = video['video_id']
+
+                    # Bouton pour télécharger la vidéo
+                    if st.button(t("recent_videos_download_button"), key=f"download_{video['video_id']}"):
+                        work_directory = config['common']['work_directory']
+                        video_url = f"https://www.youtube.com/watch?v={video['video_id']}"
+                        success, result = self.download_video(video_url, work_directory, video['title'])
+                        if success:
+                            st.success(t("recent_videos_download_success"))
+                        else:
+                            st.error(f"{t('recent_videos_download_error')}{result}")
 
             # Afficher les boutons de pagination
             col1, col2, col3 = st.columns([1, 1, 1])
