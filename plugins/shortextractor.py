@@ -181,31 +181,34 @@ class ShortextractorPlugin(Plugin):
         zoom_file = os.path.join(videos_dir, zoom_filename)
         print(zoom_file)
 
-        ffmpeg_command = [
-            "ffmpeg", "-y",
+        def build_ffmpeg_command(input, output, extra_options=None):
+            command = [
+                "ffmpeg", "-y",
+                "-i", input,
+                #"-c:v", "libx264",  # Encodage vidéo en H.264
+                #"-preset", "medium",  # Vitesse d'encodage
+                #"-crf", "23",  # Qualité de la vidéo
+                "-c:a", "aac",
+            ]
+            if extra_options:
+                command.extend(extra_options)
+            command.append(output)
+            return command
+
+        zoom_options = [
             "-ss", f"{start_seconds:.3f}",
-            "-i", input_file,
             "-t", f"{duration:.3f}",
             "-vf", f"scale=iw/{zoom_factor}:ih/{zoom_factor}, pad=iw*{zoom_factor}:ih*{zoom_factor}:(ow-iw)/2:(oh-ih)/2",
-            "-c:a", "copy",
-            zoom_file
         ]
+        ffmpeg_command = build_ffmpeg_command(input_file, zoom_file, zoom_options)
         self.ffmpeg(ffmpeg_command)
         if format_916:
-            ffmpeg_command = [
-                "ffmpeg", "-y",
-                "-i", zoom_file,
+            crop_options = [
                 "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'",
-                "-c:a", "copy",
-                output_file
             ]
+            ffmpeg_command = build_ffmpeg_command(zoom_file, output_file, crop_options)
         else:
-            ffmpeg_command = [
-                "ffmpeg", "-y",
-                "-i", zoom_file,
-                "-c:a", "copy",
-                output_file
-            ]
+            ffmpeg_command = build_ffmpeg_command(zoom_file, output_file)
         self.ffmpeg(ffmpeg_command)
         os.remove(zoom_file)
         return output_file
@@ -422,8 +425,15 @@ class ShortextractorPlugin(Plugin):
                     output_file = os.path.join(work_directory, f"short_{os.path.splitext(selected_video)[0]}.mp4")
                     st.write(f"Extracting {st.session_state.start_time} -> {st.session_state.end_time}")
                     result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time, output_file, zoom_factor, center_x, center_y, format_916)
+                    _, center, _ = st.columns([1, 1, 1])
                     if result == output_file:
                         st.success("Short extracted successfully!")
-                        col2.video(output_file, muted=False)
+                        #center.markdown(f"""
+                        #<video width="100%" controls onloadedmetadata="this.muted = true">
+                        #    <source src="file://{output_file}" type="video/mp4">
+                        #    Your browser does not support the video tag.
+                        #</video>
+                        #""", unsafe_allow_html=True)
+                        center.video(output_file, muted=False)
                     else:
                         st.error(result)
