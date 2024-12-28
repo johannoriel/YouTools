@@ -50,6 +50,12 @@ Provide the start and end timecodes in the format HH:MM:SS,mmm.
 Please respond with two timecodes: a start time and an end time, along with a brief explanation of why this segment would make a good short video.
 """,
     "shortextractor_searchfor" : "Search speifically around the thematic or following subject : '{suggestion}'",
+    "shortextractor_add_subtitles": "Add subtitles",
+    "shortextractor_subtitle_position": "Subtitles position",
+    "shortextractor_subtitle_top": "Top",
+    "shortextractor_subtitle_bottom": "Bottom",
+    "shortextractor_subtitle_size": "Subtitles size",
+    "shortextractor_subtitle_bold": "Bold subtitles",
 })
 
 translations["fr"].update({
@@ -93,6 +99,12 @@ Fournis les codes temporels de début et de fin au format HH:MM,mmm.
 Réponds avec deux codes temporels : un code temporel de début et un code temporel de fin, accompagnés d'une brève explication de pourquoi ce segment ferait une bonne courte vidéo.
 """,
     "shortextractor_searchfor" : "Recherche spécifiquement autour des thématiques suivantes : '{suggestion}'",
+    "shortextractor_add_subtitles": "Ajouter les sous-titres",
+    "shortextractor_subtitle_position": "Position des sous-titres",
+    "shortextractor_subtitle_top": "Haut",
+    "shortextractor_subtitle_bottom": "Bas",
+    "shortextractor_subtitle_size": "Taille des sous-titres",
+    "shortextractor_subtitle_bold": "Sous-titres en gras",
 })
 
 class ShortextractorPlugin(Plugin):
@@ -169,25 +181,21 @@ class ShortextractorPlugin(Plugin):
                 closest_index = i
         return closest_index
 
-    def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y, format_916):
+    def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y, format_916,
+        add_subtitles=False, subtitle_position="top", subtitle_size=24, subtitle_bold=False):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
         end_seconds = self.convert_srt_time_to_seconds(end_time)
         duration = end_seconds - start_seconds
-        print(f"Durée: {duration}, début : {start_seconds}")
 
-        videos_dir =  os.path.dirname(input_file)
+        videos_dir = os.path.dirname(input_file)
         input_filename = os.path.basename(input_file)
         zoom_filename = f"zoom_{input_filename}"
         zoom_file = os.path.join(videos_dir, zoom_filename)
-        print(zoom_file)
 
         def build_ffmpeg_command(input, output, extra_options=None):
             command = [
                 "ffmpeg", "-y",
                 "-i", input,
-                #"-c:v", "libx264",  # Encodage vidéo en H.264
-                #"-preset", "medium",  # Vitesse d'encodage
-                #"-crf", "23",  # Qualité de la vidéo
                 "-c:a", "aac",
             ]
             if extra_options:
@@ -195,6 +203,29 @@ class ShortextractorPlugin(Plugin):
             command.append(output)
             return command
 
+        # Créer un fichier SRT temporaire pour le segment
+        if add_subtitles and 'transcript' in st.session_state:
+            temp_srt = os.path.join(videos_dir, "temp_segment.srt")
+            parsed_transcript = self.parse_transcript(st.session_state.transcript)
+
+            # Filtrer et ajuster les sous-titres pour le segment
+            with open(temp_srt, 'w', encoding='utf-8') as f:
+                subtitle_index = 1
+                for entry in parsed_transcript:
+                    entry_start = self.convert_srt_time_to_seconds(entry['start'])
+                    entry_end = self.convert_srt_time_to_seconds(entry['end'])
+
+                    if entry_start >= start_seconds and entry_end <= end_seconds:
+                        # Ajuster les temps relatifs au début du segment
+                        adjusted_start = self.format_srt_time(entry_start - start_seconds)
+                        adjusted_end = self.format_srt_time(entry_end - start_seconds)
+
+                        f.write(f"{subtitle_index}\n")
+                        f.write(f"{adjusted_start} --> {adjusted_end}\n")
+                        f.write(f"{entry['text']}\n\n")
+                        subtitle_index += 1
+
+        # Commande de zoom
         zoom_options = [
             "-ss", f"{start_seconds:.3f}",
             "-t", f"{duration:.3f}",
@@ -202,16 +233,50 @@ class ShortextractorPlugin(Plugin):
         ]
         ffmpeg_command = build_ffmpeg_command(input_file, zoom_file, zoom_options)
         self.ffmpeg(ffmpeg_command)
+
+        # Commande finale avec sous-titres si nécessaire
         if format_916:
-            crop_options = [
-                "-vf", f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'",
-            ]
-            ffmpeg_command = build_ffmpeg_command(zoom_file, output_file, crop_options)
+            # Pour la position "top", on utilise Alignment=8 (haut-centre)
+            # Pour la position "bottom", on utilise Alignment=2 (bas-centre)
+            alignment = "6" if subtitle_position == "top" else "2"
+            subtitle_y = "0" if subtitle_position == "top" else "(h-th-20)"
+            bold_style = ",Bold=1" if subtitle_bold else ""
+            subtitle_filter = f"subtitles='{temp_srt}':force_style='FontSize={subtitle_size},Alignment={alignment},MarginV={subtitle_y}{bold_style}'" if add_subtitles else ""
+            crop_filter = f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'"
+
+            vf_filters = [crop_filter]
+            if add_subtitles:
+                vf_filters.append(subtitle_filter)
+
+            final_options = ["-vf", ",".join(vf_filters)]
+            ffmpeg_command = build_ffmpeg_command(zoom_file, output_file, final_options)
         else:
-            ffmpeg_command = build_ffmpeg_command(zoom_file, output_file)
-        self.ffmpeg(ffmpeg_command)
+            alignment = "6" if subtitle_position == "top" else "2"
+            subtitle_y = "0" if subtitle_position == "top" else "(h-th-20)"
+            bold_style = ",Bold=1" if subtitle_bold else ""
+            if add_subtitles:
+                final_options = ["-vf", f"subtitles='{temp_srt}':force_style='FontSize={subtitle_size},Alignment={alignment}{bold_style}'"]
+                ffmpeg_command = build_ffmpeg_command(zoom_file, output_file, final_options)
+            else:
+                ffmpeg_command = build_ffmpeg_command(zoom_file, output_file)
+
+        result = self.ffmpeg(ffmpeg_command)
+
+        # Nettoyage
         os.remove(zoom_file)
+        if add_subtitles:
+            os.remove(temp_srt)
+
         return output_file
+
+    def format_srt_time(self, seconds):
+        """Convert seconds to SRT time format."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        seconds = seconds % 60
+        milliseconds = int((seconds - int(seconds)) * 1000)
+        seconds = int(seconds)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
 
     def parse_transcript(self, transcript):
@@ -418,22 +483,37 @@ class ShortextractorPlugin(Plugin):
             center_x = col2.slider(t("shortextractor_center_x"), min_value=-1.0, max_value=1.0, value=default_center_x, step=0.1)
             center_y = col3.slider(t("shortextractor_center_y"), min_value=-1.0, max_value=1.0, value=default_center_y, step=0.1)
 
-            format_916 = st.checkbox(t("shortextractor_format916"), value=True)
+            add_subtitles = col1.checkbox(t("shortextractor_add_subtitles"), value=True)
+            subtitle_position = col2.selectbox(
+                t("shortextractor_subtitle_position"),
+                options=["top", "bottom"],
+                format_func=lambda x: t(f"shortextractor_subtitle_{x}"),
+                disabled=not add_subtitles
+            )
+            format_916 = col3.checkbox(t("shortextractor_format916"), value=True)
+            if add_subtitles:
+
+                subtitle_size = col2.slider(
+                    t("shortextractor_subtitle_size"),
+                    min_value=12,
+                    max_value=36,
+                    value=18,
+                    step=2
+                )
+                subtitle_bold = col3.checkbox(t("shortextractor_subtitle_bold"), value=False)
+            else:
+                subtitle_size = 18
+                subtitle_bold = True
 
             if st.button(t("shortextractor_extract")):
                 with st.spinner(t("shortextractor_extracting")):
                     output_file = os.path.join(work_directory, f"short_{os.path.splitext(selected_video)[0]}.mp4")
                     st.write(f"Extracting {st.session_state.start_time} -> {st.session_state.end_time}")
-                    result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time, output_file, zoom_factor, center_x, center_y, format_916)
+                    result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time,
+                        output_file, zoom_factor, center_x, center_y, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
                     _, center, _ = st.columns([1, 1, 1])
                     if result == output_file:
                         st.success("Short extracted successfully!")
-                        #center.markdown(f"""
-                        #<video width="100%" controls onloadedmetadata="this.muted = true">
-                        #    <source src="file://{output_file}" type="video/mp4">
-                        #    Your browser does not support the video tag.
-                        #</video>
-                        #""", unsafe_allow_html=True)
                         center.video(output_file, muted=False)
                     else:
                         st.error(result)
