@@ -36,7 +36,9 @@ translations["en"].update({
     "recent_videos_configure_channel_id": "Please configure the channel ID in the Configuration tab.",
     "recent_videos_download_button": "Download Video",
     "recent_videos_download_success": "Video downloaded successfully!",
-    "recent_videos_download_error": "An error occurred while downloading the video: "
+    "recent_videos_download_error": "An error occurred while downloading the video: ",
+    "recent_videos_save_success": "Transcript saved successfully!",
+    "recent_videos_save_transcript": "Save transcript",
 })
 
 translations["fr"].update({
@@ -62,7 +64,9 @@ translations["fr"].update({
     "recent_videos_configure_channel_id": "Veuillez configurer l'ID de la chaîne dans l'onglet Configuration.",
     "recent_videos_download_button": "Télécharger la vidéo",
     "recent_videos_download_success": "Vidéo téléchargée avec succès !",
-    "recent_videos_download_error": "Une erreur s'est produite lors du téléchargement de la vidéo : "
+    "recent_videos_download_error": "Une erreur s'est produite lors du téléchargement de la vidéo : ",
+    "recent_videos_save_success": "Transcript sauvée avec succès!",
+    "recent_videos_save_transcript": "Sauver le transcript",
 })
 
 class RecentvideosPlugin(Plugin):
@@ -240,7 +244,7 @@ class RecentvideosPlugin(Plugin):
             st.header(t("recent_videos_transcript_header"))
             st.write(f"{t('recent_videos_transcript_language')} {st.session_state.transcript_lang}")
             st.text_area(t("recent_videos_transcript_content"), st.session_state.transcript, height=300)
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 if st.button(t("recent_videos_copy_transcript_button")):
                     st.code(st.session_state.transcript)
@@ -253,6 +257,14 @@ class RecentvideosPlugin(Plugin):
                     mime="text/plain"
                 )
             with col3:
+                if st.button(t("recent_videos_save_transcript")):
+                    work_directory = config['common']['work_directory']
+                    with open(os.path.join(work_directory, "transcript.txt"), "w", encoding="utf-8") as f:
+                        f.write(st.session_state.transcript)
+                    with open(os.path.join(work_directory, "url.txt"), "w", encoding="utf-8") as f:
+                        f.write(f"https://www.youtube.com/watch?v={st.session_state.current_video_id}")
+                    st.success(t("recent_videos_save_success"))
+            with col4:
                 llm_plugin = self.plugin_manager.get_plugin('llm')
                 llm_config = config.get('llm', {})
                 prompt = llm_config.get('llm_prompt', '')

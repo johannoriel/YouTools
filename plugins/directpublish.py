@@ -231,6 +231,8 @@ class DirectpublishPlugin(Plugin):
                         )
                         st.code(transcript)
                         st.session_state.transcript = transcript # May bu used by other plugins
+                        with open(os.path.join(work_directory, "transcript.txt"), "w", encoding="utf-8") as f:
+                            f.write(transcript)
 
                         # 4. Générer un résumé du transcript
                         st.text(t("directpublish_generating_description"))
@@ -291,6 +293,8 @@ class DirectpublishPlugin(Plugin):
 
                         webhook_urls = config['directpublish'].get('webhook_urls', '').strip().split('\n')
                         webhook_urls = [url.strip() for url in webhook_urls if url.strip()]
+                        with open(os.path.join(work_directory, "url.txt"), "w", encoding="utf-8") as f:
+                            f.write(f"https://www.youtube.com/watch?v={video_id}")
 
                         if webhook_urls:
                             for webhook_url in webhook_urls:
