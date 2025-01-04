@@ -28,6 +28,11 @@ translations["en"].update({
     "social_bluesky": "Bluesky",
     "social_telegram": "Telegram",
     "social_add_post": "Add Post",
+    "social_manual_start": "Manual Start Post",
+    "social_manual_end": "Manual End Post",
+    "social_select_all": "Select All",
+    "social_deselect_all": "Deselect All",
+    "social_validate": "Validate Character Count",
 })
 
 translations["fr"].update({
@@ -48,6 +53,11 @@ translations["fr"].update({
     "social_bluesky": "Bluesky",
     "social_telegram": "Telegram",
     "social_add_post": "Ajouter un post",
+    "social_manual_start": "Post manuel de début",
+    "social_manual_end": "Post manuel de fin",
+    "social_select_all": "Tout sélectionner",
+    "social_deselect_all": "Tout désélectionner",
+    "social_validate": "Vérifier le nombre de caractères",
 })
 
 class SocialPlugin(Plugin):
@@ -61,6 +71,12 @@ class SocialPlugin(Plugin):
             st.session_state.manual_post_start = ""
         if 'manual_post_end' not in st.session_state:
             st.session_state.manual_post_end = ""
+        if 'platform_select_all' not in st.session_state:
+            st.session_state.platform_select_all = {
+                'twitter': False,
+                'bluesky': False,
+                'telegram': False
+            }
 
     def get_config_fields(self):
         return {
@@ -296,13 +312,11 @@ Chaque tweet doit faire maximum 280 caractères."""
         else:
             url = st.text_input(t("social_url"))
 
-
         # Generate posts
         prompt = st.text_area(t("social_prompt"), value=config['social']['default_prompt'])
 
-
         # Manual post at start
-        st.subheader("Post manuel de début")
+        st.subheader(t("social_manual_start"))
         manual_post_start = st.text_area("", key="manual_post_start", height=100)
         cols = st.columns(3)
         with cols[0]:
@@ -311,18 +325,6 @@ Chaque tweet doit faire maximum 280 caractères."""
             start_bluesky = st.checkbox(t("social_bluesky"), key="start_bluesky")
         with cols[2]:
             start_telegram = st.checkbox(t("social_telegram"), key="start_telegram")
-
-        # Manual post at end
-        st.subheader("Post manuel de fin")
-        manual_post_end = st.text_area("", key="manual_post_end", height=100)
-        cols = st.columns(3)
-        with cols[0]:
-            end_twitter = st.checkbox(t("social_twitter"), key="end_twitter")
-        with cols[1]:
-            end_bluesky = st.checkbox(t("social_bluesky"), key="end_bluesky")
-        with cols[2]:
-            end_telegram = st.checkbox(t("social_telegram"), key="end_telegram")
-
 
         if st.button(t("social_generate")) and transcript:
             with st.spinner(t("social_generating")):
@@ -348,44 +350,105 @@ Chaque tweet doit faire maximum 280 caractères."""
                     url_suffix = config['social']['url_suffix_template'].format(url=url)
                     st.session_state.generated_posts.append(url_suffix)
 
-                # Add manual end post if present
-                if st.session_state.manual_post_end:
-                    st.session_state.generated_posts.append(st.session_state.manual_post_end)
-
                 st.session_state.selected_platforms = {}
-
 
         # Display and edit posts
         if st.session_state.generated_posts:
             st.subheader(t("social_preview"))
+
+            # Select All / Deselect All buttons for each platform
+            cols = st.columns(3)
+            with cols[0]:
+                twitter_select_all = st.checkbox(t("social_select_all"), key="twitter_select_all")
+                if twitter_select_all != st.session_state.platform_select_all['twitter']:
+                    st.session_state.platform_select_all['twitter'] = twitter_select_all
+                    for i in range(len(st.session_state.generated_posts)):
+                        if st.session_state.generated_posts[i].strip():  # Only select non-empty posts
+                            if i not in st.session_state.selected_platforms:
+                                st.session_state.selected_platforms[i] = {}
+                            st.session_state.selected_platforms[i]['twitter'] = twitter_select_all
+
+            with cols[1]:
+                bluesky_select_all = st.checkbox(t("social_select_all"), key="bluesky_select_all")
+                if bluesky_select_all != st.session_state.platform_select_all['bluesky']:
+                    st.session_state.platform_select_all['bluesky'] = bluesky_select_all
+                    for i in range(len(st.session_state.generated_posts)):
+                        if st.session_state.generated_posts[i].strip():  # Only select non-empty posts
+                            if i not in st.session_state.selected_platforms:
+                                st.session_state.selected_platforms[i] = {}
+                            st.session_state.selected_platforms[i]['bluesky'] = bluesky_select_all
+
+            with cols[2]:
+                telegram_select_all = st.checkbox(t("social_select_all"), key="telegram_select_all")
+                if telegram_select_all != st.session_state.platform_select_all['telegram']:
+                    st.session_state.platform_select_all['telegram'] = telegram_select_all
+                    for i in range(len(st.session_state.generated_posts)):
+                        if st.session_state.generated_posts[i].strip():  # Only select non-empty posts
+                            if i not in st.session_state.selected_platforms:
+                                st.session_state.selected_platforms[i] = {}
+                            st.session_state.selected_platforms[i]['telegram'] = telegram_select_all
+
+            # Display generated posts
             for i, post in enumerate(st.session_state.generated_posts):
                 st.text_area(f"Post {i+1}", post, key=f"post_{i}", height=100)
 
                 cols = st.columns(3)
                 is_manual_start = i == 0 and manual_post_start
-                is_manual_end = i == len(st.session_state.generated_posts) - 1 and manual_post_end
 
                 with cols[0]:
                     twitter = st.checkbox(t("social_twitter"),
                                        key=f"twitter_{i}",
-                                       value=start_twitter if is_manual_start else (
-                                           end_twitter if is_manual_end else False))
+                                       value=start_twitter if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('twitter', False))
                 with cols[1]:
                     bluesky = st.checkbox(t("social_bluesky"),
                                         key=f"bluesky_{i}",
-                                        value=start_bluesky if is_manual_start else (
-                                            end_bluesky if is_manual_end else False))
+                                        value=start_bluesky if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('bluesky', False))
                 with cols[2]:
                     telegram = st.checkbox(t("social_telegram"),
                                          key=f"telegram_{i}",
-                                         value=start_telegram if is_manual_start else (
-                                             end_telegram if is_manual_end else False))
+                                         value=start_telegram if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('telegram', False))
 
                 st.session_state.selected_platforms[i] = {
                     'twitter': twitter,
                     'bluesky': bluesky,
                     'telegram': telegram
                 }
+
+        # Manual post at end (moved after generated posts)
+        st.subheader(t("social_manual_end"))
+        manual_post_end = st.text_area("", key="manual_post_end", height=100)
+        cols = st.columns(3)
+        with cols[0]:
+            end_twitter = st.checkbox(t("social_twitter"), key="end_twitter")
+        with cols[1]:
+            end_bluesky = st.checkbox(t("social_bluesky"), key="end_bluesky")
+        with cols[2]:
+            end_telegram = st.checkbox(t("social_telegram"), key="end_telegram")
+
+        # Add manual end post if present and update selected_platforms
+        if manual_post_end and st.session_state.generated_posts:
+            st.session_state.generated_posts.append(manual_post_end)
+            last_index = len(st.session_state.generated_posts) - 1
+            st.session_state.selected_platforms[last_index] = {
+                'twitter': end_twitter,
+                'bluesky': end_bluesky,
+                'telegram': end_telegram
+            }
+
+        # Validate character count
+        if st.button(t("social_validate")):
+            problematic_posts = []
+            for i, post in enumerate(st.session_state.generated_posts):
+                platforms = st.session_state.selected_platforms.get(i, {})
+                # Only check if the post is selected for Twitter or Bluesky
+                if platforms.get('twitter') or platforms.get('bluesky'):
+                    if len(post) > 280:
+                        problematic_posts.append(i)
+
+            if problematic_posts:
+                st.error(f"Les posts suivants dépassent 280 caractères : {', '.join(map(str, problematic_posts))}")
+            else:
+                st.success("Tous les posts sélectionnés respectent la limite de 280 caractères.")
 
 
         # Posting
