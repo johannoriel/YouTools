@@ -449,9 +449,9 @@ class ShortextractorPlugin(Plugin):
                     if suggestion != "":
                         suggest_theme = t("shortextractor_searchfor").format(suggestion=suggestion)
 
-                    print(suggest_theme)
-                    prompt = t("shortextractor_suggest_timecode_prompt") + suggest_theme
 
+                    prompt = t("shortextractor_suggest_timecode_prompt") + suggest_theme
+                    print(prompt)
                     llm_response = ragllm_plugin.process_with_llm(prompt, config['ragllm']['llm_sys_prompt'], st.session_state.transcript)
 
                     st.text(t("shortextractor_llm_response"))
