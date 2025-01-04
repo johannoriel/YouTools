@@ -144,12 +144,6 @@ class ImggenPlugin(Plugin):
                 st.session_state.imggen_remove_background = False
                 st.session_state.imggen_use_face = False
 
-        st.subheader(t("prompt_history"))
-        selected_history_prompt = st.selectbox("", [""] + self.prompt_history)
-        if selected_history_prompt:
-            st.session_state.imggen_prompt = selected_history_prompt
-
-        prompt = st.text_area(t("prompt"), key="imggen_prompt", height=150)
         aspect_ratio = st.selectbox(t("aspect_ratio"), ["1:1", "16:9"], key="imggen_aspect_ratio")
         remove_background = st.checkbox(t("remove_background"), key="imggen_remove_background")
         background_removal_method = st.selectbox(t("background_removal_method"), ["ai", "color"], key="imggen_background_removal_method")
@@ -161,6 +155,12 @@ class ImggenPlugin(Plugin):
 
         styles = config['imggen']['styles'].split(',')
         style = st.selectbox(t("style"), [""] + [s.strip() for s in styles], key="imggen_style")
+
+        st.subheader(t("prompt_history"))
+        selected_history_prompt = st.selectbox("", [""] + self.prompt_history)
+        if selected_history_prompt:
+            st.session_state.imggen_prompt = selected_history_prompt
+        prompt = st.text_area(t("prompt"), key="imggen_prompt", height=150)
 
         if st.button(t("generate")):
             with st.spinner(t("imggen_processing")):
