@@ -14,7 +14,7 @@ from plugins.common import get_credentials
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
-    "recent_videos_tab": "10 Latest YouTube Videos",
+    "recent_videos_tab": "Recent YouTube Videos",
     "recent_videos_header": "10 Latest Videos",
     "recent_videos_transcript_button": "Transcript",
     "recent_videos_transcript_header": "Transcript",
@@ -42,7 +42,7 @@ translations["en"].update({
 })
 
 translations["fr"].update({
-    "recent_videos_tab": "10 dernières vidéos Youtube",
+    "recent_videos_tab": "Vidéos récentes",
     "recent_videos_header": "10 dernières vidéos",
     "recent_videos_transcript_button": "Transcript",
     "recent_videos_transcript_header": "Transcript",
