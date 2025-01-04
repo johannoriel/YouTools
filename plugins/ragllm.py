@@ -2,6 +2,7 @@ from global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import yaml
+import litellm
 from litellm import completion, embedding
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances, manhattan_distances
@@ -14,6 +15,7 @@ from transformers import AutoTokenizer, AutoModel
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 MAX_LENGTH = 512
 CHUNK_SIZE = 200  # Nombre de mots par chunk
+#litellm.set_verbose=True
 
 def mean_pooling(model_output, attention_mask):
     token_embeddings = model_output[0]
@@ -200,7 +202,7 @@ class RagllmPlugin(Plugin):
                 st.error(f"{t('rag_error_fetching_models_ollama')}{str(e)}")
                 return ["ollama/qwen2"]
         elif provider == 'groq':
-            return ["groq/llama3-70b-8192", "groq/mixtral-8x7b-32768"]
+            return ["groq/llama3-70b-8192", "groq/mixtral-8x7b-32768", "groq/llama-3.3-70b-versatile", "deepseek/deepseek-chat"]
         else:
             return ["none"]
 
