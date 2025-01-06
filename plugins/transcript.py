@@ -284,6 +284,8 @@ class TranscriptPlugin(Plugin):
                 transcript = self.transcribe_video(selected_video_path, output_format, whisper_path, whisper_model, ffmpeg_path, config['common']['language'])
                 st.session_state.transcript = transcript
                 st.session_state.show_transcript = True
+                with open(os.path.join(work_directory, "transcript.txt"), "w", encoding="utf-8") as f:
+                    f.write(transcript)
 
         if st.session_state.get('show_transcript', False):
             st.success(t("transcript_transcription_done"))
