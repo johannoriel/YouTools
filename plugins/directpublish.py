@@ -48,6 +48,7 @@ translations["en"].update({
     "directpublish_no_webhooks": "No webhooks configured",
     "directpublish_do_llm": "Use LLM to summerize",
     "directpublish_title": "Title of the video",
+    "directpublish_keywords": "Keywords to add to the video (comma-separated)",
 })
 
 translations["fr"].update({
@@ -86,6 +87,7 @@ translations["fr"].update({
     "directpublish_no_webhooks": "Aucun webhook configuré",
     "directpublish_do_llm": "Utiliser le LLM pour résumer",
     "directpublish_title": "Titre de la vidéo",
+    "directpublish_keywords": "Mots-clés à ajouter à la vidéo (séparés par des virgules)",
 })
 
 def cut_string(text, limit=500):
@@ -128,7 +130,11 @@ class DirectpublishPlugin(Plugin):
                 "label": t("webhook_urls"),
                 "default": ""
             },
-        }
+            "keywords": {
+                "type": "textarea",
+                "label": t("directpublish_keywords"),
+                "default": ""
+            },        }
 
     def get_tabs(self):
         return [{"name": t("directpublish_tab"), "plugin": "directpublish"}]
@@ -219,6 +225,7 @@ class DirectpublishPlugin(Plugin):
                     # 3. Transcrire la vidéo
                     signature = config['directpublish']['signature']
                     introduction = config['directpublish']['introduction']
+                    tags = config['directpublish'].get('keywords', '').strip()
                     if do_llm:
                         st.text(t("directpublish_generating_transcription"))
                         transcript = self.transcript_plugin.transcribe_video(
@@ -253,21 +260,20 @@ class DirectpublishPlugin(Plugin):
                         )).split('\n')[0].strip()
                         st.code(title)
 
-                        # 5. Générer un titre pour la vidéo
                         tag_prompt = t("directpublish_tag_generator")
-                        tags = remove_quotes(cut_string(self.ragllm_plugin.process_with_llm(
+                        tags += ", "+self.ragllm_plugin.process_with_llm(
                             tag_prompt,
                             config['ragllm']['llm_sys_prompt'],
                             transcript
-                        )))
-                        st.code(tags)
+                        )
                     else:
-                        tags = []
                         description = ""
 
                     if do_publish:
                         # 6. Uploader la vidéo sur YouTube
                         st.text(t("directpublish_upload"))
+                        tags = remove_quotes(cut_string(tags))
+                        st.code(tags)
                         try:
                             video_id = upload_video(
                                 video_to_process,
