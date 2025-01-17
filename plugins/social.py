@@ -10,6 +10,10 @@ import telegram
 import json
 import re
 import asyncio
+import requests
+import jwt
+from datetime import datetime as date
+
 
 translations["en"].update({
     "social_tab": "Social Networks",
@@ -34,6 +38,7 @@ translations["en"].update({
     "social_select_all": "Select All",
     "social_deselect_all": "Deselect All",
     "social_validate": "Validate Character Count",
+    "social_ghost": "Ghost",
 })
 
 translations["fr"].update({
@@ -59,6 +64,7 @@ translations["fr"].update({
     "social_select_all": "Tout sélectionner",
     "social_deselect_all": "Tout désélectionner",
     "social_validate": "Vérifier le nombre de caractères",
+    "social_ghost": "Ghost",
 })
 
 class SocialPlugin(Plugin):
@@ -76,7 +82,8 @@ class SocialPlugin(Plugin):
             st.session_state.platform_select_all = {
                 'twitter': False,
                 'bluesky': False,
-                'telegram': False
+                'telegram': False,
+                'ghost' : False,
             }
         if 'has_generated' not in st.session_state:
             st.session_state.has_generated = False
@@ -149,6 +156,16 @@ Chaque tweet doit faire maximum 280 caractères."""
             "telegram_channel_id": {
                 "type": "text",
                 "label": "Telegram Channel ID",
+                "default": ""
+            },
+            "ghost_url": {
+                "type": "text",
+                "label": "Ghost URL",
+                "default": ""
+            },
+            "ghost_api_key": {
+                "type": "text",
+                "label": "Ghost API Key",
                 "default": ""
             }
         }
@@ -323,6 +340,59 @@ Chaque tweet doit faire maximum 280 caractères."""
         finally:
             loop.close()
 
+    def post_to_ghost(self, title, content, config):
+        try:
+            ghost_url = config['social']['ghost_url']
+            ghost_api_key = config['social']['ghost_api_key']
+
+            if not ghost_url or not ghost_api_key:
+                st.error("Ghost URL or API Key is missing in configuration.")
+                return None
+
+            # Split the key into ID and SECRET
+            id, secret = ghost_api_key.split(':')
+
+            # Prepare header and payload
+            iat = int(date.now().timestamp())
+
+            header = {'alg': 'HS256', 'typ': 'JWT', 'kid': id}
+            payload = {
+                'iat': iat,
+                'exp': iat + 5 * 60,  # Token expires in 5 minutes
+                'aud': '/admin/'
+            }
+
+            # Create the token (including decoding secret)
+            token = jwt.encode(payload, bytes.fromhex(secret), algorithm='HS256', headers=header)
+
+            # Prepare the request headers and body
+            headers = {'Authorization': f'Ghost {token}'}
+            body = {
+                'posts': [{
+                    'title': title,
+                    'html': content,
+                    'status': 'published'
+                }]
+            }
+            print(body)
+
+            # Make the POST request to Ghost API
+            response = requests.post(
+                f"{ghost_url}/ghost/api/admin/posts/?source=html",
+                headers=headers,
+                json=body
+            )
+
+            # Check the response status code
+            if response.status_code == 201:
+                return response.json()
+            else:
+                st.error(f"Ghost API Error: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            st.error(f"Ghost: {str(e)}")
+            return None
+
     def run(self, config):
         st.header(t("social_header"))
 
@@ -351,13 +421,15 @@ Chaque tweet doit faire maximum 280 caractères."""
         # Manual post at start
         st.subheader(t("social_manual_start"))
         manual_post_start = st.text_area("", key="manual_post_start", height=100)
-        cols = st.columns(3)
+        cols = st.columns(4)
         with cols[0]:
             start_twitter = st.checkbox(t("social_twitter"), key="start_twitter")
         with cols[1]:
             start_bluesky = st.checkbox(t("social_bluesky"), key="start_bluesky")
         with cols[2]:
             start_telegram = st.checkbox(t("social_telegram"), key="start_telegram")
+        with cols[3]:  # Ajoutez une nouvelle colonne pour Ghost
+            start_ghost = st.checkbox(t("social_ghost"), key="start_ghost")
 
         # Gérer le post manuel de début
         if not st.session_state.has_generated:
@@ -367,7 +439,8 @@ Chaque tweet doit faire maximum 280 caractères."""
                     0: {
                         'twitter': start_twitter,
                         'bluesky': start_bluesky,
-                        'telegram': start_telegram
+                        'telegram': start_telegram,
+                        'ghost' : start_ghost,
                     }
                 }
 
@@ -388,7 +461,8 @@ Chaque tweet doit faire maximum 280 caractères."""
                     st.session_state.selected_platforms[0] = {
                         'twitter': start_twitter,
                         'bluesky': start_bluesky,
-                        'telegram': start_telegram
+                        'telegram': start_telegram,
+                        'ghost': start_ghost,
                     }
 
                 # Add generated posts
@@ -405,7 +479,7 @@ Chaque tweet doit faire maximum 280 caractères."""
 
             # Select All / Deselect All buttons for each platform
             if st.session_state.has_generated:  # N'afficher les boutons que si on a des posts générés
-                cols = st.columns(3)
+                cols = st.columns(4)
                 with cols[0]:
                     twitter_select_all = st.checkbox(t("social_select_all"), key="twitter_select_all")
                     if twitter_select_all != st.session_state.platform_select_all['twitter']:
@@ -435,16 +509,26 @@ Chaque tweet doit faire maximum 280 caractères."""
                                 if i not in st.session_state.selected_platforms:
                                     st.session_state.selected_platforms[i] = {}
                                 st.session_state.selected_platforms[i]['telegram'] = telegram_select_all
+                with cols[3]:
+                    ghost_select_all = st.checkbox(t("social_select_all"), key="ghost_select_all")
+                    if ghost_select_all != st.session_state.platform_select_all['ghost']:
+                        st.session_state.platform_select_all['ghost'] = ghost_select_all
+                        for i in range(len(st.session_state.generated_posts)):
+                            if st.session_state.generated_posts[i].strip():
+                                if i not in st.session_state.selected_platforms:
+                                    st.session_state.selected_platforms[i] = {}
+                                st.session_state.selected_platforms[i]['ghost'] = ghost_select_all
 
             # Display posts
             for i, post in enumerate(st.session_state.generated_posts):
                 # Si c'est un post manuel (premier post sans génération) ou un post généré
-                if st.session_state.has_generated and (manual_post_start and not i==0):
+                if st.session_state.has_generated and not (manual_post_start and i==0):
                     # N'afficher le numéro que pour les posts générés
                     post_label = "" if (not st.session_state.has_generated and i == 0) else f"Post {i+1}"
-                    st.text_area(post_label, post, key=f"post_{i}", height=100)
+                    edited_post = st.text_area(post_label, post, key=f"post_{i}", height=100)
+                    st.session_state.generated_posts[i] = edited_post
 
-                    cols = st.columns(3)
+                    cols = st.columns(4)
                     is_manual_start = i == 0 and manual_post_start
 
                     with cols[0]:
@@ -459,23 +543,29 @@ Chaque tweet doit faire maximum 280 caractères."""
                         telegram = st.checkbox(t("social_telegram"),
                                             key=f"telegram_{i}",
                                             value=start_telegram if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('telegram', False))
-
+                    with cols[3]:  # Ajoutez une nouvelle colonne pour Ghost
+                        ghost = st.checkbox("Ghost",
+                                            key=f"ghost_{i}",
+                                            value=start_ghost if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('ghost', False))
                     st.session_state.selected_platforms[i] = {
                         'twitter': twitter,
                         'bluesky': bluesky,
-                        'telegram': telegram
+                        'telegram': telegram,
+                        'ghost' : ghost,
                     }
 
         # Manual post at end (moved after generated posts)
         st.subheader(t("social_manual_end"))
         manual_post_end = st.text_area("", key="manual_post_end", height=100)
-        cols = st.columns(3)
+        cols = st.columns(4)
         with cols[0]:
             end_twitter = st.checkbox(t("social_twitter"), key="end_twitter")
         with cols[1]:
             end_bluesky = st.checkbox(t("social_bluesky"), key="end_bluesky")
         with cols[2]:
             end_telegram = st.checkbox(t("social_telegram"), key="end_telegram")
+        with cols[3]:  # Ajoutez une nouvelle colonne pour Ghost
+            end_ghost = st.checkbox("Ghost", key="end_ghost")
 
         # Add manual end post if present and update selected_platforms
         if manual_post_end and st.session_state.generated_posts:
@@ -484,7 +574,8 @@ Chaque tweet doit faire maximum 280 caractères."""
             st.session_state.selected_platforms[last_index] = {
                 'twitter': end_twitter,
                 'bluesky': end_bluesky,
-                'telegram': end_telegram
+                'telegram': end_telegram,
+                'ghost' : end_ghost,
             }
 
         # Validate character count
@@ -495,13 +586,17 @@ Chaque tweet doit faire maximum 280 caractères."""
                 # Only check if the post is selected for Twitter or Bluesky
                 if platforms.get('twitter') or platforms.get('bluesky'):
                     if len(post) > 280:
-                        problematic_posts.append(i)
+                        problematic_posts.append(i+1)
+                        st.warning(post+" longueur : "+str(len(post)))
 
             if problematic_posts:
                 st.error(f"Les posts suivants dépassent 280 caractères : {', '.join(map(str, problematic_posts))}")
             else:
                 st.success("Tous les posts sélectionnés respectent la limite de 280 caractères.")
 
+        if st.button("Debug"):
+            for i, post in enumerate(st.session_state.generated_posts):
+                st.info(post)
 
         # Posting
         if st.button(t("social_post")):
@@ -509,6 +604,7 @@ Chaque tweet doit faire maximum 280 caractères."""
                 # Collect posts by platform
                 twitter_posts = []
                 bluesky_posts = []
+                ghost_posts = []
 
                 for i, post in enumerate(st.session_state.generated_posts):
                     platforms = st.session_state.selected_platforms.get(i, {})
@@ -518,11 +614,16 @@ Chaque tweet doit faire maximum 280 caractères."""
                         bluesky_posts.append(post)
                     if platforms.get('telegram'):
                         self.post_to_telegram(post, config)
+                    if platforms.get('ghost'):
+                        ghost_posts.append(post)
 
                 # Send threaded posts
                 if twitter_posts:
                     self.create_twitter_thread(twitter_posts, config)
                 if bluesky_posts:
                     self.create_bluesky_thread(bluesky_posts, config)
+                if ghost_posts:
+                    for post in ghost_posts:
+                        self.post_to_ghost("Generated Post", post, config)
 
                 st.success(t("social_success"))
