@@ -13,7 +13,7 @@ import ast
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
-    "transcript_tab": "Post-Transcription tools",
+    "transcript_tab": "Transcription tools",
     "transcript_header": "Local Video Transcription",
     "transcript_no_videos": "No videos found in the directory",
     "transcript_select_video": "Select a video to transcribe",
@@ -51,7 +51,7 @@ translations["en"].update({
 })
 
 translations["fr"].update({
-    "transcript_tab": "Outils post-transcription",
+    "transcript_tab": "Outils de transcription",
     "transcript_header": "Transcription locale de vidéos",
     "transcript_no_videos": "Aucune vidéo trouvée dans le répertoire",
     "transcript_select_video": "Sélectionnez une vidéo à transcrire",
