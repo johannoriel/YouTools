@@ -2,18 +2,9 @@ from global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import os
-import tweepy
-from atproto import Client as AtprotoClient, models
-from atproto import client_utils
 from plugins.ragllm import RagllmPlugin
-import telegram
-import json
-import re
-import asyncio
-import requests
-import jwt
-from datetime import datetime as date
-
+from typing import List, Dict, Any, Optional
+from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI
 
 translations["en"].update({
     "social_tab": "Social Networks",
@@ -67,9 +58,23 @@ translations["fr"].update({
     "social_ghost": "Ghost",
 })
 
+
+class SocialNetwork:
+    def __init__(self, name: str, api_class: Any, config_fields: Dict[str, Dict[str, Any]],
+                 post_method: str = 'post', max_chars: Optional[int] = None):
+        self.name = name
+        self.api_class = api_class
+        self.config_fields = config_fields
+        self.post_method = post_method
+        self.max_chars = max_chars
+
 class SocialPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
+        self._initialize_session_state()
+        self._setup_social_networks()
+
+    def _initialize_session_state(self):
         if 'generated_posts' not in st.session_state:
             st.session_state.generated_posts = []
         if 'selected_platforms' not in st.session_state:
@@ -79,17 +84,104 @@ class SocialPlugin(Plugin):
         if 'manual_post_end' not in st.session_state:
             st.session_state.manual_post_end = ""
         if 'platform_select_all' not in st.session_state:
-            st.session_state.platform_select_all = {
-                'twitter': False,
-                'bluesky': False,
-                'telegram': False,
-                'ghost' : False,
-            }
+            st.session_state.platform_select_all = {}
         if 'has_generated' not in st.session_state:
             st.session_state.has_generated = False
 
+    def _setup_social_networks(self):
+        self.social_networks = [
+            SocialNetwork(
+                name="twitter",
+                api_class=TwitterAPI,
+                config_fields={
+                    "twitter_bearer_token": {
+                        "type": "text",
+                        "label": "Twitter Bearer Token",
+                        "default": ""
+                    },
+                    "twitter_api_key": {
+                        "type": "text",
+                        "label": "Twitter API Key",
+                        "default": ""
+                    },
+                    "twitter_api_secret": {
+                        "type": "text",
+                        "label": "Twitter API Secret",
+                        "default": ""
+                    },
+                    "twitter_access_token": {
+                        "type": "text",
+                        "label": "Twitter Access Token",
+                        "default": ""
+                    },
+                    "twitter_access_token_secret": {
+                        "type": "text",
+                        "label": "Twitter Access Token Secret",
+                        "default": ""
+                    }
+                },
+                post_method='create_thread',
+                max_chars=280
+            ),
+            SocialNetwork(
+                name="bluesky",
+                api_class=BlueskyAPI,
+                config_fields={
+                    "bluesky_handle": {
+                        "type": "text",
+                        "label": "Bluesky Handle",
+                        "default": ""
+                    },
+                    "bluesky_password": {
+                        "type": "text",
+                        "label": "Bluesky App Password",
+                        "default": ""
+                    }
+                },
+                post_method='create_thread',
+                max_chars=280
+            ),
+            SocialNetwork(
+                name="telegram",
+                api_class=TelegramAPI,
+                config_fields={
+                    "telegram_bot_token": {
+                        "type": "text",
+                        "label": "Telegram Bot Token",
+                        "default": ""
+                    },
+                    "telegram_channel_id": {
+                        "type": "text",
+                        "label": "Telegram Channel ID",
+                        "default": ""
+                    }
+                }
+            ),
+            SocialNetwork(
+                name="ghost",
+                api_class=GhostAPI,
+                config_fields={
+                    "ghost_url": {
+                        "type": "text",
+                        "label": "Ghost URL",
+                        "default": ""
+                    },
+                    "ghost_api_key": {
+                        "type": "text",
+                        "label": "Ghost API Key",
+                        "default": ""
+                    }
+                }
+            )
+        ]
+
+        # Initialize platform_select_all for each network
+        for network in self.social_networks:
+            if network.name not in st.session_state.platform_select_all:
+                st.session_state.platform_select_all[network.name] = False
+
     def get_config_fields(self):
-        return {
+        config_fields = {
             "default_prompt": {
                 "type": "text",
                 "label": "Default LLM Prompt",
@@ -112,63 +204,15 @@ Chaque tweet doit faire maximum 280 caractères."""
                 "type": "text",
                 "label": "URL Suffix Template",
                 "default": "Voir plus dans la vidéo : {url}"
-            },
-            "twitter_bearer_token": {
-                "type": "text",
-                "label": "Twitter Bearer Token",
-                "default": ""
-            },
-            "twitter_api_key": {
-                "type": "text",
-                "label": "Twitter API Key",
-                "default": ""
-            },
-            "twitter_api_secret": {
-                "type": "text",
-                "label": "Twitter API Secret",
-                "default": ""
-            },
-            "twitter_access_token": {
-                "type": "text",
-                "label": "Twitter Access Token",
-                "default": ""
-            },
-            "twitter_access_token_secret": {
-                "type": "text",
-                "label": "Twitter Access Token Secret",
-                "default": ""
-            },
-            "bluesky_handle": {
-                "type": "text",
-                "label": "Bluesky Handle",
-                "default": ""
-            },
-            "bluesky_password": {
-                "type": "text",
-                "label": "Bluesky App Password",
-                "default": ""
-            },
-            "telegram_bot_token": {
-                "type": "text",
-                "label": "Telegram Bot Token",
-                "default": ""
-            },
-            "telegram_channel_id": {
-                "type": "text",
-                "label": "Telegram Channel ID",
-                "default": ""
-            },
-            "ghost_url": {
-                "type": "text",
-                "label": "Ghost URL",
-                "default": ""
-            },
-            "ghost_api_key": {
-                "type": "text",
-                "label": "Ghost API Key",
-                "default": ""
             }
         }
+
+        # Add config fields for each social network
+        for network in self.social_networks:
+            for field_name, field_config in network.config_fields.items():
+                config_fields[field_name] = field_config
+
+        return config_fields
 
     def get_tabs(self):
         return [{"name": t("social_tab"), "plugin": "social"}]
@@ -181,217 +225,95 @@ Chaque tweet doit faire maximum 280 caractères."""
                 posts.append(clean_post)
         return posts
 
-    def simple_post_to_twitter(self, text, config):
-        try:
-            client = tweepy.Client(
-                bearer_token=config['social']['twitter_bearer_token'],
-                consumer_key=config['social']['twitter_api_key'],
-                consumer_secret=config['social']['twitter_api_secret'],
-                access_token=config['social']['twitter_access_token'],
-                access_token_secret=config['social']['twitter_access_token_secret']
-            )
-            response = client.create_tweet(text=text)
-            return response
-        except Exception as e:
-            st.error(f"Twitter: {str(e)}")
-            return None
+    def create_platform_columns(self):
+        num_networks = len(self.social_networks)
+        return st.columns(num_networks)
 
-    def create_twitter_thread(self, posts, config):
-        try:
-            client = tweepy.Client(
-                bearer_token=config['social']['twitter_bearer_token'],
-                consumer_key=config['social']['twitter_api_key'],
-                consumer_secret=config['social']['twitter_api_secret'],
-                access_token=config['social']['twitter_access_token'],
-                access_token_secret=config['social']['twitter_access_token_secret']
-            )
-
-            previous_tweet_id = None
-            responses = []
-
-            for post in posts:
-                if previous_tweet_id:
-                    response = client.create_tweet(
-                        text=post,
-                        in_reply_to_tweet_id=previous_tweet_id
-                    )
+    def render_platform_checkboxes(self, cols, post_index: int, is_manual: bool = False):
+        platforms = {}
+        for col, network in zip(cols, self.social_networks):
+            with col:
+                if is_manual:
+                    key = f"{network.name}_manual_{post_index}"
                 else:
-                    response = client.create_tweet(text=post)
+                    key = f"{network.name}_{post_index}"
+                checked = st.checkbox(
+                    t(f"social_{network.name}"),
+                    key=key,
+                    value=st.session_state.selected_platforms.get(post_index, {}).get(network.name, False)
+                )
+                platforms[network.name] = checked
+        return platforms
 
-                previous_tweet_id = response.data['id']
-                responses.append(response)
+    def render_select_all_buttons(self, cols):
+        for col, network in zip(cols, self.social_networks):
+            with col:
+                select_all = st.checkbox(
+                    t("social_select_all"),
+                    key=f"{network.name}_select_all"
+                )
+                if select_all != st.session_state.platform_select_all[network.name]:
+                    st.session_state.platform_select_all[network.name] = select_all
+                    for i in range(len(st.session_state.generated_posts)):
+                        if st.session_state.generated_posts[i].strip():
+                            if i not in st.session_state.selected_platforms:
+                                st.session_state.selected_platforms[i] = {}
+                            st.session_state.selected_platforms[i][network.name] = select_all
 
-            return responses
-        except Exception as e:
-            st.error(f"Twitter: {str(e)}")
-            return None
+    def post_content(self, config):
+        with st.spinner(t("social_posting")):
+            # Initialize API instances
+            api_instances = {}
+            for network in self.social_networks:
+                api_config = {
+                    key.replace(f"{network.name}_", ""): value
+                    for key, value in config['social'].items()
+                    if key.startswith(f"{network.name}_")
+                }
+                api_instances[network.name] = network.api_class(config)
 
-    def simple_post_to_bluesky(self, text, config):
-        try:
-            client = AtprotoClient()
-            client.login(config['social']['bluesky_handle'], config['social']['bluesky_password'])
-            response = client.send_post(text=text)
-            return response
-        except Exception as e:
-            st.error(f"Bluesky: {str(e)}")
-            return None
+            # Collect posts by platform
+            platform_posts = {network.name: [] for network in self.social_networks}
 
-    def prepare_bluesky_post(self, text):
-        # URL pattern matching
-        url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+            for i, post in enumerate(st.session_state.generated_posts):
+                platforms = st.session_state.selected_platforms.get(i, {})
+                for network in self.social_networks:
+                    if platforms.get(network.name, False):
+                        platform_posts[network.name].append(post)
 
-        # Find all URLs in the text
-        urls = re.findall(url_pattern, text)
-
-        if not urls:
-            return text
-
-        # Use TextBuilder to properly handle URLs
-        builder = client_utils.TextBuilder()
-
-        # Split text by URLs and rebuild with proper formatting
-        segments = re.split(url_pattern, text)
-        for i, segment in enumerate(segments):
-            if segment:
-                builder.text(segment)
-            if i < len(urls):
-                builder.link(urls[i], urls[i])
-
-        return builder
-
-    def create_bluesky_thread(self, posts, config):
-        try:
-            client = AtprotoClient()
-            client.login(config['social']['bluesky_handle'], config['social']['bluesky_password'])
-
-            responses = []
-            root_ref = None
-            parent_ref = None
-
-            for i, post in enumerate(posts):
-                # Prepare post content with proper URL handling
-                prepared_text = self.prepare_bluesky_post(post)
-
-                # Create the post
-                if root_ref is None:
-                    # First post in thread
-                    if isinstance(prepared_text, client_utils.TextBuilder):
-                        response = client.send_post(text_builder=prepared_text)
+            # Send posts to each platform
+            for network in self.social_networks:
+                posts = platform_posts[network.name]
+                if posts:
+                    api = api_instances[network.name]
+                    if network.post_method == 'create_thread':
+                        getattr(api, network.post_method)(posts)
                     else:
-                        response = client.send_post(text=prepared_text)
-                    root_ref = models.create_strong_ref(response)
-                    parent_ref = root_ref
-                else:
-                    # Reply posts
-                    reply_ref = models.AppBskyFeedPost.ReplyRef(
-                        root=root_ref,
-                        parent=parent_ref
-                    )
+                        for post in posts:
+                            if network.name == 'ghost':
+                                api.post("Generated Post", post)
+                            else:
+                                api.post(post)
 
-                    if isinstance(prepared_text, client_utils.TextBuilder):
-                        response = client.send_post(text=prepared_text, reply_to=reply_ref)
-                    else:
-                        response = client.send_post(text=prepared_text, reply_to=reply_ref)
-                    parent_ref = models.create_strong_ref(response)
+            st.success(t("social_success"))
 
-                responses.append(response)
+    def validate_posts(self):
+        problematic_posts = []
+        for i, post in enumerate(st.session_state.generated_posts):
+            platforms = st.session_state.selected_platforms.get(i, {})
+            for network in self.social_networks:
+                if platforms.get(network.name) and network.max_chars:
+                    if len(post) > network.max_chars:
+                        problematic_posts.append((i+1, network.name))
+                        st.warning(f"{post} length: {len(post)}")
 
-            return responses
-        except Exception as e:
-            st.error(f"Bluesky: {str(e)}")
-            return None
-
-    async def post_to_telegram_async(self, text, config):
-        try:
-            bot = telegram.Bot(token=config['social']['telegram_bot_token'])
-
-            # Log des informations de debug
-            #st.write(f"Tentative d'envoi sur Telegram avec channel_id: {config['social']['telegram_channel_id']}")
-
-            # Envoyer le message de manière asynchrone
-            response = await bot.send_message(
-                chat_id=config['social']['telegram_channel_id'],
-                text=text,
-                parse_mode='HTML'  # Permet le formatage HTML basique si nécessaire
-            )
-
-            # Log de la réponse
-            st.write(f"Réponse Telegram: {response}")
-
-            return response
-        except telegram.error.TelegramError as e:
-            st.error(f"Erreur Telegram détaillée: {str(e)}")
-            if "chat not found" in str(e).lower():
-                st.error("Le channel_id n'est pas valide ou le bot n'a pas accès à ce channel")
-            elif "unauthorized" in str(e).lower():
-                st.error("Le token du bot n'est pas valide")
-            elif "administrator rights" in str(e).lower():
-                st.error("Le bot doit être administrateur du channel pour pouvoir poster")
-            return None
-        except Exception as e:
-            st.error(f"Erreur inattendue Telegram: {str(e)}")
-            return None
-
-    def post_to_telegram(self, text, config):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(self.post_to_telegram_async(text, config))
-        finally:
-            loop.close()
-
-    def post_to_ghost(self, title, content, config):
-        try:
-            ghost_url = config['social']['ghost_url']
-            ghost_api_key = config['social']['ghost_api_key']
-
-            if not ghost_url or not ghost_api_key:
-                st.error("Ghost URL or API Key is missing in configuration.")
-                return None
-
-            # Split the key into ID and SECRET
-            id, secret = ghost_api_key.split(':')
-
-            # Prepare header and payload
-            iat = int(date.now().timestamp())
-
-            header = {'alg': 'HS256', 'typ': 'JWT', 'kid': id}
-            payload = {
-                'iat': iat,
-                'exp': iat + 5 * 60,  # Token expires in 5 minutes
-                'aud': '/admin/'
-            }
-
-            # Create the token (including decoding secret)
-            token = jwt.encode(payload, bytes.fromhex(secret), algorithm='HS256', headers=header)
-
-            # Prepare the request headers and body
-            headers = {'Authorization': f'Ghost {token}'}
-            body = {
-                'posts': [{
-                    'title': title,
-                    'html': content,
-                    'status': 'published'
-                }]
-            }
-            print(body)
-
-            # Make the POST request to Ghost API
-            response = requests.post(
-                f"{ghost_url}/ghost/api/admin/posts/?source=html",
-                headers=headers,
-                json=body
-            )
-
-            # Check the response status code
-            if response.status_code == 201:
-                return response.json()
-            else:
-                st.error(f"Ghost API Error: {response.status_code} - {response.text}")
-                return None
-        except Exception as e:
-            st.error(f"Ghost: {str(e)}")
-            return None
+        if problematic_posts:
+            error_msg = "The following posts exceed character limits:\n"
+            for post_num, network in problematic_posts:
+                error_msg += f"Post {post_num} exceeds {network} limit\n"
+            st.error(error_msg)
+        else:
+            st.success("All selected posts respect character limits.")
 
     def run(self, config):
         st.header(t("social_header"))
@@ -421,29 +343,16 @@ Chaque tweet doit faire maximum 280 caractères."""
         # Manual post at start
         st.subheader(t("social_manual_start"))
         manual_post_start = st.text_area("", key="manual_post_start", height=100)
-        cols = st.columns(4)
-        with cols[0]:
-            start_twitter = st.checkbox(t("social_twitter"), key="start_twitter")
-        with cols[1]:
-            start_bluesky = st.checkbox(t("social_bluesky"), key="start_bluesky")
-        with cols[2]:
-            start_telegram = st.checkbox(t("social_telegram"), key="start_telegram")
-        with cols[3]:  # Ajoutez une nouvelle colonne pour Ghost
-            start_ghost = st.checkbox(t("social_ghost"), key="start_ghost")
+        cols = self.create_platform_columns()
+        start_platforms = self.render_platform_checkboxes(cols, "start", True)
 
-        # Gérer le post manuel de début
+        # Handle manual start post
         if not st.session_state.has_generated:
             if manual_post_start:
                 st.session_state.generated_posts = [manual_post_start]
-                st.session_state.selected_platforms = {
-                    0: {
-                        'twitter': start_twitter,
-                        'bluesky': start_bluesky,
-                        'telegram': start_telegram,
-                        'ghost' : start_ghost,
-                    }
-                }
+                st.session_state.selected_platforms = {0: start_platforms}
 
+        # Generate button
         if st.button(t("social_generate")) and transcript:
             st.session_state.has_generated = True
             with st.spinner(t("social_generating")):
@@ -458,12 +367,7 @@ Chaque tweet doit faire maximum 280 caractères."""
                 st.session_state.generated_posts = []
                 if manual_post_start:
                     st.session_state.generated_posts.append(manual_post_start)
-                    st.session_state.selected_platforms[0] = {
-                        'twitter': start_twitter,
-                        'bluesky': start_bluesky,
-                        'telegram': start_telegram,
-                        'ghost': start_ghost,
-                    }
+                    st.session_state.selected_platforms[0] = start_platforms
 
                 # Add generated posts
                 st.session_state.generated_posts.extend(self.parse_posts(llm_response))
@@ -477,153 +381,44 @@ Chaque tweet doit faire maximum 280 caractères."""
         if st.session_state.generated_posts:
             st.subheader(t("social_preview"))
 
-            # Select All / Deselect All buttons for each platform
-            if st.session_state.has_generated:  # N'afficher les boutons que si on a des posts générés
-                cols = st.columns(4)
-                with cols[0]:
-                    twitter_select_all = st.checkbox(t("social_select_all"), key="twitter_select_all")
-                    if twitter_select_all != st.session_state.platform_select_all['twitter']:
-                        st.session_state.platform_select_all['twitter'] = twitter_select_all
-                        for i in range(len(st.session_state.generated_posts)):
-                            if st.session_state.generated_posts[i].strip():  # Only select non-empty posts
-                                if i not in st.session_state.selected_platforms:
-                                    st.session_state.selected_platforms[i] = {}
-                                st.session_state.selected_platforms[i]['twitter'] = twitter_select_all
-
-                with cols[1]:
-                    bluesky_select_all = st.checkbox(t("social_select_all"), key="bluesky_select_all")
-                    if bluesky_select_all != st.session_state.platform_select_all['bluesky']:
-                        st.session_state.platform_select_all['bluesky'] = bluesky_select_all
-                        for i in range(len(st.session_state.generated_posts)):
-                            if st.session_state.generated_posts[i].strip():  # Only select non-empty posts
-                                if i not in st.session_state.selected_platforms:
-                                    st.session_state.selected_platforms[i] = {}
-                                st.session_state.selected_platforms[i]['bluesky'] = bluesky_select_all
-
-                with cols[2]:
-                    telegram_select_all = st.checkbox(t("social_select_all"), key="telegram_select_all")
-                    if telegram_select_all != st.session_state.platform_select_all['telegram']:
-                        st.session_state.platform_select_all['telegram'] = telegram_select_all
-                        for i in range(len(st.session_state.generated_posts)):
-                            if st.session_state.generated_posts[i].strip():  # Only select non-empty posts
-                                if i not in st.session_state.selected_platforms:
-                                    st.session_state.selected_platforms[i] = {}
-                                st.session_state.selected_platforms[i]['telegram'] = telegram_select_all
-                with cols[3]:
-                    ghost_select_all = st.checkbox(t("social_select_all"), key="ghost_select_all")
-                    if ghost_select_all != st.session_state.platform_select_all['ghost']:
-                        st.session_state.platform_select_all['ghost'] = ghost_select_all
-                        for i in range(len(st.session_state.generated_posts)):
-                            if st.session_state.generated_posts[i].strip():
-                                if i not in st.session_state.selected_platforms:
-                                    st.session_state.selected_platforms[i] = {}
-                                st.session_state.selected_platforms[i]['ghost'] = ghost_select_all
+            # Select All / Deselect All buttons
+            if st.session_state.has_generated:
+                cols = self.create_platform_columns()
+                self.render_select_all_buttons(cols)
 
             # Display posts
             for i, post in enumerate(st.session_state.generated_posts):
-                # Si c'est un post manuel (premier post sans génération) ou un post généré
-                if st.session_state.has_generated and not (manual_post_start and i==0):
-                    # N'afficher le numéro que pour les posts générés
+                if st.session_state.has_generated and not (manual_post_start and i == 0):
                     post_label = "" if (not st.session_state.has_generated and i == 0) else f"Post {i+1}"
                     edited_post = st.text_area(post_label, post, key=f"post_{i}", height=100)
                     st.session_state.generated_posts[i] = edited_post
 
-                    cols = st.columns(4)
+                    cols = self.create_platform_columns()
                     is_manual_start = i == 0 and manual_post_start
+                    platforms = self.render_platform_checkboxes(cols, i)
+                    st.session_state.selected_platforms[i] = platforms
 
-                    with cols[0]:
-                        twitter = st.checkbox(t("social_twitter"),
-                                        key=f"twitter_{i}",
-                                        value=start_twitter if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('twitter', False))
-                    with cols[1]:
-                        bluesky = st.checkbox(t("social_bluesky"),
-                                            key=f"bluesky_{i}",
-                                            value=start_bluesky if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('bluesky', False))
-                    with cols[2]:
-                        telegram = st.checkbox(t("social_telegram"),
-                                            key=f"telegram_{i}",
-                                            value=start_telegram if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('telegram', False))
-                    with cols[3]:  # Ajoutez une nouvelle colonne pour Ghost
-                        ghost = st.checkbox("Ghost",
-                                            key=f"ghost_{i}",
-                                            value=start_ghost if is_manual_start else st.session_state.selected_platforms.get(i, {}).get('ghost', False))
-                    st.session_state.selected_platforms[i] = {
-                        'twitter': twitter,
-                        'bluesky': bluesky,
-                        'telegram': telegram,
-                        'ghost' : ghost,
-                    }
-
-        # Manual post at end (moved after generated posts)
+        # Manual post at end
         st.subheader(t("social_manual_end"))
         manual_post_end = st.text_area("", key="manual_post_end", height=100)
-        cols = st.columns(4)
-        with cols[0]:
-            end_twitter = st.checkbox(t("social_twitter"), key="end_twitter")
-        with cols[1]:
-            end_bluesky = st.checkbox(t("social_bluesky"), key="end_bluesky")
-        with cols[2]:
-            end_telegram = st.checkbox(t("social_telegram"), key="end_telegram")
-        with cols[3]:  # Ajoutez une nouvelle colonne pour Ghost
-            end_ghost = st.checkbox("Ghost", key="end_ghost")
+        cols = self.create_platform_columns()
+        end_platforms = self.render_platform_checkboxes(cols, "end", True)
 
-        # Add manual end post if present and update selected_platforms
+        # Add manual end post if present
         if manual_post_end and st.session_state.generated_posts:
             st.session_state.generated_posts.append(manual_post_end)
             last_index = len(st.session_state.generated_posts) - 1
-            st.session_state.selected_platforms[last_index] = {
-                'twitter': end_twitter,
-                'bluesky': end_bluesky,
-                'telegram': end_telegram,
-                'ghost' : end_ghost,
-            }
+            st.session_state.selected_platforms[last_index] = end_platforms
 
         # Validate character count
         if st.button(t("social_validate")):
-            problematic_posts = []
-            for i, post in enumerate(st.session_state.generated_posts):
-                platforms = st.session_state.selected_platforms.get(i, {})
-                # Only check if the post is selected for Twitter or Bluesky
-                if platforms.get('twitter') or platforms.get('bluesky'):
-                    if len(post) > 280:
-                        problematic_posts.append(i+1)
-                        st.warning(post+" longueur : "+str(len(post)))
+            self.validate_posts()
 
-            if problematic_posts:
-                st.error(f"Les posts suivants dépassent 280 caractères : {', '.join(map(str, problematic_posts))}")
-            else:
-                st.success("Tous les posts sélectionnés respectent la limite de 280 caractères.")
-
+        # Debug button
         if st.button("Debug"):
             for i, post in enumerate(st.session_state.generated_posts):
                 st.info(post)
 
-        # Posting
+        # Post button
         if st.button(t("social_post")):
-            with st.spinner(t("social_posting")):
-                # Collect posts by platform
-                twitter_posts = []
-                bluesky_posts = []
-                ghost_posts = []
-
-                for i, post in enumerate(st.session_state.generated_posts):
-                    platforms = st.session_state.selected_platforms.get(i, {})
-                    if platforms.get('twitter'):
-                        twitter_posts.append(post)
-                    if platforms.get('bluesky'):
-                        bluesky_posts.append(post)
-                    if platforms.get('telegram'):
-                        self.post_to_telegram(post, config)
-                    if platforms.get('ghost'):
-                        ghost_posts.append(post)
-
-                # Send threaded posts
-                if twitter_posts:
-                    self.create_twitter_thread(twitter_posts, config)
-                if bluesky_posts:
-                    self.create_bluesky_thread(bluesky_posts, config)
-                if ghost_posts:
-                    for post in ghost_posts:
-                        self.post_to_ghost("Generated Post", post, config)
-
-                st.success(t("social_success"))
+            self.post_content(config)
