@@ -138,11 +138,14 @@ class ImggenPlugin(Plugin):
                 st.session_state.imggen_use_face = True
                 st.session_state.imggen_seed = 3212316546
                 st.session_state.imggen_use_random_seed = False
+                st.session_state.immgen_style = "oil painting"
         with col2:
             if st.button(t("thumbnail_preset")):
                 st.session_state.imggen_aspect_ratio = "16:9"
                 st.session_state.imggen_remove_background = False
                 st.session_state.imggen_use_face = False
+                st.session_state.imggen_use_random_seed = True
+                st.session_state.immgen_style = "oil painting"
 
         aspect_ratio = st.selectbox(t("aspect_ratio"), ["1:1", "16:9"], key="imggen_aspect_ratio")
         remove_background = st.checkbox(t("remove_background"), key="imggen_remove_background")
