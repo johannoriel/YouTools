@@ -77,6 +77,61 @@ class CommonPlugin(Plugin):
                 "options": [("fr", "Français"), ("en", "Anglais")],
                 "default": "fr"
             },
+            "twitter_bearer_token": {
+                "type": "text",
+                "label": "Twitter Bearer Token",
+                "default": ""
+            },
+            "twitter_api_key": {
+                "type": "text",
+                "label": "Twitter API Key",
+                "default": ""
+            },
+            "twitter_api_secret": {
+                "type": "text",
+                "label": "Twitter API Secret",
+                "default": ""
+            },
+            "twitter_access_token": {
+                "type": "text",
+                "label": "Twitter Access Token",
+                "default": ""
+            },
+            "twitter_access_token_secret": {
+                "type": "text",
+                "label": "Twitter Access Token Secret",
+                "default": ""
+            },
+            "bluesky_handle": {
+                "type": "text",
+                "label": "Bluesky Handle",
+                "default": ""
+            },
+            "bluesky_password": {
+                "type": "text",
+                "label": "Bluesky App Password",
+                "default": ""
+            },
+            "telegram_bot_token": {
+                "type": "text",
+                "label": "Telegram Bot Token",
+                "default": ""
+            },
+            "telegram_channel_id": {
+                "type": "text",
+                "label": "Telegram Channel ID",
+                "default": ""
+            },
+            "ghost_url": {
+                "type": "text",
+                "label": "Ghost URL",
+                "default": ""
+            },
+            "ghost_api_key": {
+                "type": "text",
+                "label": "Ghost API Key",
+                "default": ""
+            },
         }
 
     def get_tabs(self):

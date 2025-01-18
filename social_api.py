@@ -9,15 +9,18 @@ import jwt
 import re
 from datetime import datetime
 import streamlit as st
+from typing import List, Dict, Any, Optional
+from plugins.common import get_credentials
+from googleapiclient.discovery import build
 
 class TwitterAPI:
     def __init__(self, config):
         self.client = tweepy.Client(
-            bearer_token=config['social']['twitter_bearer_token'],
-            consumer_key=config['social']['twitter_api_key'],
-            consumer_secret=config['social']['twitter_api_secret'],
-            access_token=config['social']['twitter_access_token'],
-            access_token_secret=config['social']['twitter_access_token_secret']
+            bearer_token=config['common']['twitter_bearer_token'],
+            consumer_key=config['common']['twitter_api_key'],
+            consumer_secret=config['common']['twitter_api_secret'],
+            access_token=config['common']['twitter_access_token'],
+            access_token_secret=config['common']['twitter_access_token_secret']
         )
 
     def create_thread(self, posts: List[str]) -> Optional[List[Any]]:
@@ -45,7 +48,7 @@ class TwitterAPI:
 class BlueskyAPI:
     def __init__(self, config):
         self.client = AtprotoClient()
-        self.client.login(config['social']['bluesky_handle'], config['social']['bluesky_password'])
+        self.client.login(config['common']['bluesky_handle'], config['common']['bluesky_password'])
 
     def _prepare_post(self, text: str) -> Any:
         url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
@@ -101,8 +104,8 @@ class BlueskyAPI:
 
 class TelegramAPI:
     def __init__(self, config):
-        self.bot_token = config['social']['telegram_bot_token']
-        self.channel_id = config['social']['telegram_channel_id']
+        self.bot_token = config['common']['telegram_bot_token']
+        self.channel_id = config['common']['telegram_channel_id']
 
     async def _post_async(self, text: str) -> Optional[Any]:
         try:
@@ -127,8 +130,8 @@ class TelegramAPI:
 
 class GhostAPI:
     def __init__(self, config):
-        self.ghost_url = config['social']['ghost_url']
-        self.ghost_api_key = config['social']['ghost_api_key']
+        self.ghost_url = config['common']['ghost_url']
+        self.ghost_api_key = config['common']['ghost_api_key']
 
     def post(self, title: str, content: str) -> Optional[Dict[str, Any]]:
         try:
@@ -169,4 +172,34 @@ class GhostAPI:
                 return None
         except Exception as e:
             st.error(f"Ghost: {str(e)}")
+            return None
+
+class YoutubePostAPI:
+    def __init__(self, config):
+        credentials = get_credentials()
+        self.youtube = build('youtube', 'v3', credentials=credentials)
+        self.channel_id = config['common']['channel_id']
+
+    def post(self, content: str) -> Optional[Dict[str, Any]]:
+        try:
+            if not self.channel_id:
+                st.error("YouTube Channel ID is missing in configuration.")
+                return None
+
+            body = {
+                'snippet': {
+                    'channelId': self.channel_id,
+                    'description': content,
+                    'type': 'bulletin'  # Type pour les posts communautaires
+                }
+            }
+
+            response = self.youtube.activities().insert(
+                part='snippet',
+                body=body
+            ).execute()
+
+            return response
+        except Exception as e:
+            st.error(f"YouTube Post: {str(e)}")
             return None

@@ -4,7 +4,7 @@ import streamlit as st
 import os
 from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
-from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI
+from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI, YoutubePostAPI
 
 translations["en"].update({
     "social_tab": "Social Networks",
@@ -30,6 +30,7 @@ translations["en"].update({
     "social_deselect_all": "Deselect All",
     "social_validate": "Validate Character Count",
     "social_ghost": "Ghost",
+    "social_youtube": "YouTube",
 })
 
 translations["fr"].update({
@@ -56,6 +57,7 @@ translations["fr"].update({
     "social_deselect_all": "Tout désélectionner",
     "social_validate": "Vérifier le nombre de caractères",
     "social_ghost": "Ghost",
+    "social_youtube": "YouTube",
 })
 
 
@@ -94,31 +96,7 @@ class SocialPlugin(Plugin):
                 name="twitter",
                 api_class=TwitterAPI,
                 config_fields={
-                    "twitter_bearer_token": {
-                        "type": "text",
-                        "label": "Twitter Bearer Token",
-                        "default": ""
-                    },
-                    "twitter_api_key": {
-                        "type": "text",
-                        "label": "Twitter API Key",
-                        "default": ""
-                    },
-                    "twitter_api_secret": {
-                        "type": "text",
-                        "label": "Twitter API Secret",
-                        "default": ""
-                    },
-                    "twitter_access_token": {
-                        "type": "text",
-                        "label": "Twitter Access Token",
-                        "default": ""
-                    },
-                    "twitter_access_token_secret": {
-                        "type": "text",
-                        "label": "Twitter Access Token Secret",
-                        "default": ""
-                    }
+
                 },
                 post_method='create_thread',
                 max_chars=280
@@ -127,16 +105,7 @@ class SocialPlugin(Plugin):
                 name="bluesky",
                 api_class=BlueskyAPI,
                 config_fields={
-                    "bluesky_handle": {
-                        "type": "text",
-                        "label": "Bluesky Handle",
-                        "default": ""
-                    },
-                    "bluesky_password": {
-                        "type": "text",
-                        "label": "Bluesky App Password",
-                        "default": ""
-                    }
+
                 },
                 post_method='create_thread',
                 max_chars=280
@@ -145,34 +114,23 @@ class SocialPlugin(Plugin):
                 name="telegram",
                 api_class=TelegramAPI,
                 config_fields={
-                    "telegram_bot_token": {
-                        "type": "text",
-                        "label": "Telegram Bot Token",
-                        "default": ""
-                    },
-                    "telegram_channel_id": {
-                        "type": "text",
-                        "label": "Telegram Channel ID",
-                        "default": ""
-                    }
+
                 }
             ),
             SocialNetwork(
                 name="ghost",
                 api_class=GhostAPI,
                 config_fields={
-                    "ghost_url": {
-                        "type": "text",
-                        "label": "Ghost URL",
-                        "default": ""
-                    },
-                    "ghost_api_key": {
-                        "type": "text",
-                        "label": "Ghost API Key",
-                        "default": ""
-                    }
+
                 }
-            )
+            ),
+            SocialNetwork(
+                name="youtube",
+                api_class=YoutubePostAPI,
+                config_fields={},  # Pas besoin de champs supplémentaires car on utilise ceux de common
+                post_method='post',
+                max_chars=10000  # Limite approximative pour les posts communautaires YouTube
+            ),
         ]
 
         # Initialize platform_select_all for each network
