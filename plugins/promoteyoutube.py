@@ -194,7 +194,8 @@ class PromoteyoutubePlugin(Plugin):
                 for video in videos:
                     video_comments = youtube_api.get_comments(video['id'], max_comments_per_video)
                     for comment in video_comments:
-                        comment['video_title'] = video['title']  # Ajouter le titre de la vidéo au commentaire
+                        comment['video_title'] = video['title']
+                        comment['channel_title'] = video['channel_title']  # Ajouter le nom de la chaîne
                     comments.extend(video_comments)
 
                 st.session_state.comments = comments  # Stocker les commentaires dans session_state
@@ -204,14 +205,22 @@ class PromoteyoutubePlugin(Plugin):
             st.subheader("Vidéos trouvées")
             for video in st.session_state.videos:
                 st.write(f"**{video['title']}**")
+                st.markdown(f"Chaîne : **[{video['channel_title']}](https://www.youtube.com/channel/{video['channel_id']})**")  # Lien vers la chaîne
                 st.markdown(f"[Voir la vidéo]({video['url']})")
 
         # Afficher les commentaires
         if 'comments' in st.session_state and st.session_state.comments:
             st.subheader(t("promoteyoutube_comments"))
             for i, comment in enumerate(st.session_state.comments):
-                st.write(f"**{comment['author']}** (sur la vidéo : *{comment['video_title']}*) :")
-                st.write(comment['text'])
+                st.markdown(
+                    f"""
+                    <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                        <p><strong>{comment['author']}</strong> (sur la vidéo : <em>{comment['video_title']}</em>) :</p>
+                        <p>{comment['text']}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
                 # Mettre à jour la sélection dans st.session_state.selected_comments
                 if i not in st.session_state.selected_comments:
@@ -227,6 +236,15 @@ class PromoteyoutubePlugin(Plugin):
                 # Mettre à jour la sélection dans st.session_state.selected_comments
                 st.session_state.selected_comments[i] = selected
 
+        # Bouton "Select All" pour les commentaires
+        if 'comments' in st.session_state and st.session_state.comments:
+            if st.button("Select All Comments"):
+                for i in range(len(st.session_state.comments)):
+                    st.session_state.selected_comments[i] = True
+            if st.button("Deselect All Comments"):
+                for i in range(len(st.session_state.comments)):
+                    st.session_state.selected_comments[i] = False
+
         # Generate responses button
         if st.button(t("promoteyoutube_generate_responses")) and st.session_state.selected_comments:
             with st.spinner(t("promoteyoutube_generating")):
@@ -239,15 +257,23 @@ class PromoteyoutubePlugin(Plugin):
         if 'generated_responses' in st.session_state and st.session_state.generated_responses:
             st.subheader(t("promoteyoutube_responses"))
             for i, response in enumerate(st.session_state.generated_responses):
-                st.write(f"**Response to Comment {i+1}**:")
+                comment_index = response['comment_index']  # Récupérer l'index du commentaire associé
+                comment = st.session_state.comments[comment_index]
 
-                # Initialiser la réponse dans session_state si nécessaire
-                if f"response_{i}" not in st.session_state:
-                    st.session_state[f"response_{i}"] = response['response']
+                st.markdown(
+                    f"""
+                    <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                        <p><strong>{comment['author']}</strong> (sur la vidéo : <em>{comment['video_title']}</em>) :</p>
+                        <p>{comment['text']}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
+                st.write(f"**Response to Comment {comment_index+1}**:")
                 edited_response = st.text_area(
                     f"Edit Response {i+1}",
-                    value=st.session_state[f"response_{i}"],  # Utiliser la valeur stockée
+                    value=response['response'],  # Utiliser la valeur stockée
                     key=f"response_{i}",
                     height=100
                 )
@@ -269,6 +295,15 @@ class PromoteyoutubePlugin(Plugin):
 
                 # Mettre à jour la sélection dans st.session_state.selected_responses
                 st.session_state.selected_responses[i] = selected
+
+        # Bouton "Select All" pour les réponses
+        if 'generated_responses' in st.session_state and st.session_state.generated_responses:
+            if st.button("Select All Responses"):
+                for i in range(len(st.session_state.generated_responses)):
+                    st.session_state.selected_responses[i] = True
+            if st.button("Deselect All Responses"):
+                for i in range(len(st.session_state.generated_responses)):
+                    st.session_state.selected_responses[i] = False
 
         # Post responses button
         if st.button(t("promoteyoutube_post_responses")) and st.session_state.selected_responses:

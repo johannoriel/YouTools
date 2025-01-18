@@ -287,9 +287,13 @@ class YoutubeAPI:
             for item in response['items']:
                 video_id = item['id']['videoId']
                 title = item['snippet']['title']
+                channel_title = item['snippet']['channelTitle']  # Nom de la chaîne
+                channel_id = item['snippet']['channelId']  # ID de la chaîne
                 videos.append({
                     'id': video_id,
                     'title': title,
+                    'channel_title': channel_title,  # Ajouter le nom de la chaîne
+                    'channel_id': channel_id,  # Ajouter l'ID de la chaîne
                     'url': f"https://www.youtube.com/watch?v={video_id}"
                 })
 
