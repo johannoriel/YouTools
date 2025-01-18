@@ -218,7 +218,9 @@ class DirectpublishPlugin(Plugin):
                         background_path = os.path.join(config['chromakey']['background_directory'], background_video)
                         result_filename = f"chroma_{os.path.basename(video_to_process)}"
                         result_path = os.path.join(work_directory, result_filename)
-                        replace_background(video_to_process, background_path, result_path)
+                        target_color_rgb = config['chromakey']["default_target_color"]
+                        target_color_rgb = [int(target_color_rgb.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)]
+                        replace_background(video_to_process, background_path, result_path, target_color_rgb)
                         video_to_process = result_path
                         st.text(video_to_process)
 

@@ -193,16 +193,50 @@ def find_dominant_color(image_bgr, target_color_rgb=[0, 255, 0], threshold=30):
 
     return np.mean(filtered_pixels, axis=0)
 
-def replace_background(video_file, background, result_file):
+def find_dominant_color_kmeans(image_bgr, k=1):
+    """
+    Trouve la couleur dominante dans l'image en utilisant KMeans.
+    """
+    # Convertir l'image en RGB
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+    # Redimensionner l'image pour accélérer le traitement
+    pixels = image_rgb.reshape(-1, 3)
+
+    # Appliquer KMeans pour trouver les couleurs dominantes
+    kmeans = KMeans(n_clusters=k)
+    kmeans.fit(pixels)
+
+    # Retourner la couleur dominante
+    return kmeans.cluster_centers_[0]
+
+def sample_video_colors_kmeans(video_path, samples=10):
+    """Échantillonne des frames de la vidéo et trouve la couleur dominante dans chaque frame en utilisant KMeans."""
+    cap = cv2.VideoCapture(video_path)
+    frames_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    step = frames_count // samples
+
+    dominant_colors = []
+
+    for i in range(0, frames_count, step):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+        ret, frame = cap.read()
+        if ret:
+            dominant_color = find_dominant_color_kmeans(frame, k=1)
+            dominant_colors.append(dominant_color)
+
+    cap.release()
+    return np.mean(dominant_colors, axis=0)
+
+def replace_background(video_file, background, result_file, target_color_rgb=[0, 255, 0]):
     print(f"Chromakey background replacement : {video_file}, {background}, {result_file}")
-    dominant_color = sample_video_colors(video_file, target_color_rgb=[0, 255, 0], samples=10, threshold=30)
-    if dominant_color is not None:
-        print(f"Couleur dominante trouvée : {dominant_color}")
-        chroma_key(video_file, background, result_file, dominant_color)
-    else:
-        print("Impossible de détecter la couleur verte. Vérifiez le seuil ou la vidéo.")    #dominant_color = [20, 255, 78]
-    #dominant_color = [0, 255, 0]
-    #dominant_color = [0, 128, 0]
+    dominant_color = sample_video_colors(video_file, target_color_rgb=target_color_rgb, samples=10, threshold=30)
+
+    # Utiliser une valeur par défaut si la couleur cible n'est pas détectée
+    if dominant_color is None:
+        print(f"Impossible de détecter la couleur cible {target_color_rgb}. Utilisation de la couleur par défaut.")
+        dominant_color = target_color_rgb  # Utiliser la couleur cible fournie par l'utilisateur
+
     print(f"Couleur dominante trouvée : {dominant_color}")
     chroma_key(video_file, background, result_file, dominant_color)
 
