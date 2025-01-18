@@ -239,7 +239,7 @@ class GhostAPI:
             st.error(f"Ghost: {str(e)}")
             return None
 
-class YoutubePostAPI:
+class YoutubeAPI:
     def __init__(self, config):
         credentials = get_credentials()
         self.youtube = build('youtube', 'v3', credentials=credentials)
@@ -269,13 +269,46 @@ class YoutubePostAPI:
             st.error(f"YouTube Post: {str(e)}")
             return None
 
-    def get_comments(self, video_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
+    def search_videos(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        Recherche des vidéos sur YouTube en fonction des mots-clés.
+        """
+        try:
+            request = self.youtube.search().list(
+                part="snippet",
+                q=query,
+                maxResults=max_results,
+                type="video",
+                order="relevance"
+            )
+            response = request.execute()
+
+            videos = []
+            for item in response['items']:
+                video_id = item['id']['videoId']
+                title = item['snippet']['title']
+                videos.append({
+                    'id': video_id,
+                    'title': title,
+                    'url': f"https://www.youtube.com/watch?v={video_id}"
+                })
+
+            return videos
+        except Exception as e:
+            st.error(f"YouTube API Error (search_videos): {str(e)}")
+            return []
+
+    def get_comments(self, video_id: str, max_results: int = 2) -> List[Dict[str, Any]]:
+        """
+        Récupère les derniers commentaires d'une vidéo.
+        """
         try:
             request = self.youtube.commentThreads().list(
                 part="snippet",
                 videoId=video_id,
                 maxResults=max_results,
-                textFormat="plainText"
+                textFormat="plainText",
+                order="relevance"
             )
             response = request.execute()
 
@@ -286,15 +319,19 @@ class YoutubePostAPI:
                     'id': item['id'],
                     'text': comment['textDisplay'],
                     'author': comment['authorDisplayName'],
-                    'published_at': comment['publishedAt']
+                    'video_id': video_id,
+                    'video_title': "N/A"  # On peut ajouter le titre de la vidéo plus tard si nécessaire
                 })
 
             return comments
         except Exception as e:
-            st.error(f"YouTube API Error: {str(e)}")
+            st.error(f"YouTube API Error (get_comments): {str(e)}")
             return []
 
     def post_comment_reply(self, comment_id: str, text: str) -> Optional[Dict[str, Any]]:
+        """
+        Poste une réponse à un commentaire.
+        """
         try:
             request = self.youtube.comments().insert(
                 part="snippet",
@@ -308,5 +345,5 @@ class YoutubePostAPI:
             response = request.execute()
             return response
         except Exception as e:
-            st.error(f"YouTube API Error: {str(e)}")
+            st.error(f"YouTube API Error (post_comment_reply): {str(e)}")
             return None
