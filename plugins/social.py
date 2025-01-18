@@ -4,7 +4,7 @@ import streamlit as st
 import os
 from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
-from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI, YoutubePostAPI
+from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI, YoutubeAPI
 
 translations["en"].update({
     "social_tab": "Social Networks",
@@ -126,7 +126,7 @@ class SocialPlugin(Plugin):
             ),
             SocialNetwork(
                 name="youtube",
-                api_class=YoutubePostAPI,
+                api_class=YoutubeAPI,
                 config_fields={},  # Pas besoin de champs supplémentaires car on utilise ceux de common
                 post_method='post',
                 max_chars=10000  # Limite approximative pour les posts communautaires YouTube
