@@ -178,21 +178,51 @@ class PromoteyoutubePlugin(Plugin):
             st.warning("Please enter keywords to search for videos.")
             return
 
+        # Input pour le nombre de vidéos et de commentaires
+        max_videos = st.number_input(
+            "Nombre de vidéos à rechercher",
+            min_value=1,
+            max_value=50,
+            value=5,  # Valeur par défaut
+            key="max_videos"
+        )
+
+        max_comments_per_video = st.number_input(
+            "Nombre de commentaires par vidéo",
+            min_value=1,
+            max_value=10,
+            value=2,  # Valeur par défaut
+            key="max_comments_per_video"
+        )
+
+        # Sélecteur pour l'ordre des vidéos
+        video_order = st.selectbox(
+            "Ordre des vidéos",
+            options=["date", "relevance"],  # Options disponibles
+            index=1,  # Par défaut, "date" (les plus récentes)
+            key="video_order"
+        )
+
+        # Sélecteur pour l'ordre des commentaires
+        comment_order = st.selectbox(
+            "Ordre des commentaires",
+            options=["relevance", "time"],  # Options disponibles
+            index=1,  # Par défaut, "relevance"
+            key="comment_order"
+        )
         # Search videos and comments button
         if st.button(t("promoteyoutube_search")):
             with st.spinner(t("promoteyoutube_searching")):
-                max_videos = config['promoteyoutube']['max_videos']
-                max_comments_per_video = config['promoteyoutube']['max_comments_per_video']
                 youtube_api = YoutubeAPI(self.plugin_manager.config)
 
                 # Rechercher les vidéos
-                videos = youtube_api.search_videos(keywords, max_videos)
+                videos = youtube_api.search_videos(keywords, max_videos, order=video_order)
                 st.session_state.videos = videos  # Stocker les vidéos dans session_state
 
                 # Récupérer les commentaires pour chaque vidéo
                 comments = []
                 for video in videos:
-                    video_comments = youtube_api.get_comments(video['id'], max_comments_per_video)
+                    video_comments = youtube_api.get_comments(video['id'], max_comments_per_video, order=comment_order)
                     for comment in video_comments:
                         comment['video_title'] = video['title']
                         comment['channel_title'] = video['channel_title']  # Ajouter le nom de la chaîne
@@ -213,14 +243,15 @@ class PromoteyoutubePlugin(Plugin):
             st.subheader(t("promoteyoutube_comments"))
             for i, comment in enumerate(st.session_state.comments):
                 st.markdown(
-                    f"""
-                    <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
-                        <p><strong>{comment['author']}</strong> (sur la vidéo : <em>{comment['video_title']}</em>) :</p>
-                        <p>{comment['text']}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                            f"""
+                            <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                                <p><strong>{comment['author']}</strong> (sur la vidéo : <em>{comment['video_title']}</em>) :</p>
+                                <p>{comment['text']}</p>
+                                <p><a href="https://www.youtube.com/watch?v={comment['video_id']}&lc={comment['id']}" target="_blank">Voir le commentaire en contexte</a></p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
                 # Mettre à jour la sélection dans st.session_state.selected_comments
                 if i not in st.session_state.selected_comments:

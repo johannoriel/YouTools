@@ -269,9 +269,12 @@ class YoutubeAPI:
             st.error(f"YouTube Post: {str(e)}")
             return None
 
-    def search_videos(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    def search_videos(self, query: str, max_results: int = 5, order: str = "date") -> List[Dict[str, Any]]:
         """
         Recherche des vidéos sur YouTube en fonction des mots-clés.
+        :param query: Mots-clés de recherche
+        :param max_results: Nombre maximum de vidéos à récupérer
+        :param order: Ordre des résultats ("date" pour les plus récentes, "relevance" pour la pertinence)
         """
         try:
             request = self.youtube.search().list(
@@ -279,7 +282,7 @@ class YoutubeAPI:
                 q=query,
                 maxResults=max_results,
                 type="video",
-                order="relevance"
+                order=order  # Utiliser l'ordre spécifié
             )
             response = request.execute()
 
@@ -302,9 +305,12 @@ class YoutubeAPI:
             st.error(f"YouTube API Error (search_videos): {str(e)}")
             return []
 
-    def get_comments(self, video_id: str, max_results: int = 2) -> List[Dict[str, Any]]:
+    def get_comments(self, video_id: str, max_results: int = 2, order: str = "relevance") -> List[Dict[str, Any]]:
         """
         Récupère les derniers commentaires d'une vidéo.
+        :param video_id: ID de la vidéo
+        :param max_results: Nombre maximum de commentaires à récupérer
+        :param order: Ordre des commentaires ("relevance" ou "time")
         """
         try:
             request = self.youtube.commentThreads().list(
@@ -312,7 +318,7 @@ class YoutubeAPI:
                 videoId=video_id,
                 maxResults=max_results,
                 textFormat="plainText",
-                order="relevance"
+                order=order  # Utiliser l'ordre spécifié
             )
             response = request.execute()
 
@@ -323,6 +329,7 @@ class YoutubeAPI:
                     'id': item['id'],
                     'text': comment['textDisplay'],
                     'author': comment['authorDisplayName'],
+                    'published_at': comment['publishedAt'],  # Ajouter la date de publication
                     'video_id': video_id,
                     'video_title': "N/A"  # On peut ajouter le titre de la vidéo plus tard si nécessaire
                 })
