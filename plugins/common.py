@@ -132,6 +132,31 @@ class CommonPlugin(Plugin):
                 "label": "Ghost API Key",
                 "default": ""
             },
+            "twitter_api_v1_enabled": {
+                "type": "checkbox",
+                "label": "Enable Twitter API v1",
+                "default": False
+            },
+            "twitter_api_v1_consumer_key": {
+                "type": "text",
+                "label": "Twitter API v1 Consumer Key",
+                "default": ""
+            },
+            "twitter_api_v1_consumer_secret": {
+                "type": "text",
+                "label": "Twitter API v1 Consumer Secret",
+                "default": ""
+            },
+            "twitter_api_v1_access_token": {
+                "type": "text",
+                "label": "Twitter API v1 Access Token",
+                "default": ""
+            },
+            "twitter_api_v1_access_token_secret": {
+                "type": "text",
+                "label": "Twitter API v1 Access Token Secret",
+                "default": ""
+            }
         }
 
     def get_tabs(self):

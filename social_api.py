@@ -22,6 +22,18 @@ class TwitterAPI:
             access_token=config['common']['twitter_access_token'],
             access_token_secret=config['common']['twitter_access_token_secret']
         )
+        # Initialisation de l'API v1 si activée
+        if config['common'].get('twitter_api_v1_enabled', False):
+            self.client_v1 = tweepy.API(
+                tweepy.OAuth1UserHandler(
+                    config['common']['twitter_api_v1_consumer_key'],
+                    config['common']['twitter_api_v1_consumer_secret'],
+                    config['common']['twitter_api_v1_access_token'],
+                    config['common']['twitter_api_v1_access_token_secret']
+                )
+            )
+        else:
+            self.client_v1 = None
 
     def create_thread(self, posts: List[str]) -> Optional[List[Any]]:
         try:
@@ -43,6 +55,59 @@ class TwitterAPI:
             return responses
         except Exception as e:
             st.error(f"Twitter: {str(e)}")
+            return None
+
+    def search_v2(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        try:
+            response = self.client.search_recent_tweets(
+                query=query,
+                max_results=max_results,
+                tweet_fields=["author_id", "text"],
+                expansions=["author_id"]
+            )
+
+            tweets = []
+            for tweet in response.data:
+                user = next(u for u in response.includes['users'] if u.id == tweet.author_id)
+                tweet_url = f"https://twitter.com/{user.username}/status/{tweet.id}"
+                tweets.append({
+                    'id': tweet.id,
+                    'text': tweet.text,
+                    'user': user.username,
+                    'url': tweet_url  # Ajout de l'URL du tweet
+                })
+
+            return tweets
+        except Exception as e:
+            st.error(f"Twitter API v2 Search Error: {str(e)}")
+            return []
+
+    def search_v1(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        try:
+            if not self.client_v1:
+                st.error("Twitter API v1 is not enabled in configuration.")
+                return []
+
+            tweets = self.client_v1.search_tweets(q=query, count=max_results, tweet_mode="extended")
+            return [{
+                'id': tweet.id_str,
+                'text': tweet.full_text,
+                'user': tweet.user.screen_name,
+                'url': f"https://twitter.com/{tweet.user.screen_name}/status/{tweet.id_str}"  # Ajout de l'URL du tweet
+            } for tweet in tweets]
+        except Exception as e:
+            st.error(f"Twitter API v1 Search Error: {str(e)}")
+            return []
+
+    def create_tweet(self, text: str, in_reply_to_tweet_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        try:
+            response = self.client.create_tweet(
+                text=text,
+                in_reply_to_tweet_id=in_reply_to_tweet_id
+            )
+            return response.data
+        except Exception as e:
+            st.error(f"Twitter API v2 Create Tweet Error: {str(e)}")
             return None
 
 class BlueskyAPI:
@@ -202,4 +267,46 @@ class YoutubePostAPI:
             return response
         except Exception as e:
             st.error(f"YouTube Post: {str(e)}")
+            return None
+
+    def get_comments(self, video_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        try:
+            request = self.youtube.commentThreads().list(
+                part="snippet",
+                videoId=video_id,
+                maxResults=max_results,
+                textFormat="plainText"
+            )
+            response = request.execute()
+
+            comments = []
+            for item in response['items']:
+                comment = item['snippet']['topLevelComment']['snippet']
+                comments.append({
+                    'id': item['id'],
+                    'text': comment['textDisplay'],
+                    'author': comment['authorDisplayName'],
+                    'published_at': comment['publishedAt']
+                })
+
+            return comments
+        except Exception as e:
+            st.error(f"YouTube API Error: {str(e)}")
+            return []
+
+    def post_comment_reply(self, comment_id: str, text: str) -> Optional[Dict[str, Any]]:
+        try:
+            request = self.youtube.comments().insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "parentId": comment_id,
+                        "textOriginal": text
+                    }
+                }
+            )
+            response = request.execute()
+            return response
+        except Exception as e:
+            st.error(f"YouTube API Error: {str(e)}")
             return None

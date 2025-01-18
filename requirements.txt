@@ -24,3 +24,4 @@ tweepy
 atproto
 python-telegram-bot
 PyJWT
+pyperclip
