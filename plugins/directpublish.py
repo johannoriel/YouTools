@@ -160,8 +160,7 @@ class DirectpublishPlugin(Plugin):
         remove_silences = st.checkbox(t("directpublish_remove_silences"))
         replace_green_screen = st.checkbox(t("directpublish_replace_green_screen"))
         do_llm = st.checkbox(t("directpublish_do_llm"), value=True)
-        if not do_llm:
-            title = st.text_input(t("directpublish_title"))
+        title = st.text_input(t("directpublish_title"))
         do_publish = st.checkbox(t("directpublish_dopublish"), value=True)
 
         # Sélection du fond si le remplacement du fond vert est activé
@@ -204,6 +203,7 @@ class DirectpublishPlugin(Plugin):
                             video_to_process,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],
+                            config['trimsilences']['keep_duration'],
                             work_directory
                         )
                         if isinstance(result, str) and (result.startswith("Erreur") or result.startswith("Une erreur")):
@@ -255,7 +255,8 @@ class DirectpublishPlugin(Plugin):
                         # 5. Générer un titre pour la vidéo
                         st.text(t("directpublish_generating_title"))
                         title_prompt = t("directpublish_title_generator")
-                        title = remove_quotes(self.ragllm_plugin.process_with_llm(
+                        if not title:
+                            title = remove_quotes(self.ragllm_plugin.process_with_llm(
                             title_prompt,
                             config['ragllm']['llm_sys_prompt'],
                             transcript
@@ -274,6 +275,7 @@ class DirectpublishPlugin(Plugin):
                     if do_publish:
                         # 6. Uploader la vidéo sur YouTube
                         st.text(t("directpublish_upload"))
+                        print(title)
                         tags = remove_quotes(cut_string(tags))
                         st.code(tags)
                         try:
