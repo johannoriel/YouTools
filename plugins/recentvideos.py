@@ -9,8 +9,7 @@ from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
 import yt_dlp
-
-from plugins.common import get_credentials
+from social_api import YoutubeAPI
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -91,82 +90,6 @@ class RecentvideosPlugin(Plugin):
 
         return full_transcript, language
 
-    def get_channel_public_videos(self, channel_id, api_key, page_token=None):
-        youtube = build('youtube', 'v3', developerKey=api_key)
-
-        try:
-            channel_response = youtube.channels().list(
-                part='contentDetails',
-                id=channel_id
-            ).execute()
-
-            uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-
-            playlist_response = youtube.playlistItems().list(
-                part='snippet',
-                playlistId=uploads_playlist_id,
-                maxResults=10,  # Affiche 10 vidéos par page
-                pageToken=page_token  # Ajout de la gestion des pages
-            ).execute()
-
-            videos = []
-            for item in playlist_response['items']:
-                video = {
-                    'title': item['snippet']['title'],
-                    'video_id': item['snippet']['resourceId']['videoId'],
-                    'thumbnail': item['snippet']['thumbnails']['default']['url']
-                }
-                videos.append(video)
-
-            next_page_token = playlist_response.get('nextPageToken')
-            prev_page_token = playlist_response.get('prevPageToken')
-
-            return videos, next_page_token, prev_page_token
-        except HttpError as e:
-            st.error(f"{t('recent_videos_error')}{e}")
-            return [], None, None
-
-    def get_channel_videos(self, channel_id, page_token=None):
-        # Utilisation des credentials pour obtenir l'accès aux vidéos protégées
-        credentials = get_credentials()
-        youtube = build('youtube', 'v3', credentials=credentials)
-
-        try:
-            # Récupération des informations sur la chaîne
-            channel_response = youtube.channels().list(
-                part='contentDetails',
-                id=channel_id
-            ).execute()
-
-            uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-
-            # Récupération des vidéos avec gestion de la pagination
-            playlist_response = youtube.playlistItems().list(
-                part='snippet',
-                playlistId=uploads_playlist_id,
-                maxResults=10,  # Affiche 10 vidéos par page
-                pageToken=page_token  # Gestion des pages
-            ).execute()
-
-            videos = []
-            for item in playlist_response['items']:
-                video = {
-                    'title': item['snippet']['title'],
-                    'video_id': item['snippet']['resourceId']['videoId'],
-                    'thumbnail': item['snippet']['thumbnails']['default']['url']
-                }
-                videos.append(video)
-
-            # Gestion des tokens pour la pagination
-            next_page_token = playlist_response.get('nextPageToken')
-            prev_page_token = playlist_response.get('prevPageToken')
-
-            return videos, next_page_token, prev_page_token
-
-        except HttpError as e:
-            st.error(f"Une erreur s'est produite : {e}")
-            return [], None, None
-
     def download_video(self, video_url, work_directory, title):
         # Nettoyer le titre pour enlever les caractères spéciaux et tout ce qui suit "|"
         clean_title = re.sub(r'[^\w\-_\. ]', '', title.split('|')[0].strip())
@@ -191,19 +114,40 @@ class RecentvideosPlugin(Plugin):
         api_key = config['api_key']
 
         if 'channel_id' in config['common'] and config['common']['channel_id']:
-            page_token = st.session_state.get('page_token', None)
+            # Utilisation de YoutubeAPI pour récupérer toutes les vidéos
+            youtube_api = YoutubeAPI(config)
+            if 'all_videos' not in st.session_state:
+                st.session_state.all_videos = youtube_api.get_channel_videos(config['common']['channel_id'])
 
-            videos, next_page_token, prev_page_token = self.get_channel_videos(
-                config['common']['channel_id'], page_token
-            )
+            # Ajout d'un champ de filtre
+            filter_keywords = st.text_input("Filtrer les vidéos par mots-clés")
 
-            for video in videos:
+            # Filtrage des vidéos en fonction des mots-clés
+            if filter_keywords:
+                filtered_videos = [video for video in st.session_state.all_videos if filter_keywords.lower() in video['title'].lower()]
+            else:
+                filtered_videos = st.session_state.all_videos
+
+            # Pagination des résultats filtrés
+            page_size = 10  # Nombre de vidéos par page
+            page_number = st.session_state.get('page_number', 0)
+            total_pages = (len(filtered_videos) + page_size - 1) // page_size
+
+            # Affichage des vidéos de la page actuelle
+            start_index = page_number * page_size
+            end_index = start_index + page_size
+            videos_to_display = filtered_videos[start_index:end_index]
+
+            for video in videos_to_display:
                 col1, col2, col3 = st.columns([1, 2, 1])
                 with col1:
                     st.image(video['thumbnail'])
                 with col2:
                     st.subheader(video['title'])
                     st.markdown(f"[Voir la vidéo](https://www.youtube.com/watch?v={video['video_id']})")
+                    st.write(f"Statut : {video['status']}")  # Affichage du statut de la vidéo
+                    if video['is_short']:
+                        st.write("**Short** 🎥")  # Indication que la vidéo est un Short
                 with col3:
                     if st.button(t("recent_videos_transcript_button"), key=f"transcript_{video['video_id']}"):
                         transcript, lang = self.get_transcript(video['video_id'], config['common']['language'])
@@ -226,14 +170,14 @@ class RecentvideosPlugin(Plugin):
             # Afficher les boutons de pagination
             col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
-                if prev_page_token and st.button("Page Précédente"):
-                    st.session_state.page_token = prev_page_token
+                if page_number > 0 and st.button("Page Précédente"):
+                    st.session_state.page_number -= 1
                     st.experimental_rerun()
             with col2:
-                st.write("")  # Espace pour alignement
+                st.write(f"Page {page_number + 1} / {total_pages}")
             with col3:
-                if next_page_token and st.button("Page Suivante"):
-                    st.session_state.page_token = next_page_token
+                if page_number < total_pages - 1 and st.button("Page Suivante"):
+                    st.session_state.page_number += 1
                     st.experimental_rerun()
 
         else:
