@@ -57,8 +57,13 @@ class TwitterAPI:
             st.error(f"Twitter: {str(e)}")
             return None
 
-    def search_v2(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+    def search_v2(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
         try:
+            # Ajouter le filtre de langue à la requête (ex: "lang:fr")
+            if language:
+                query = f"{query} lang:{language}"
+
+            # Effectuer la recherche avec les champs et expansions nécessaires
             response = self.client.search_recent_tweets(
                 query=query,
                 max_results=max_results,
@@ -66,6 +71,7 @@ class TwitterAPI:
                 expansions=["author_id"]
             )
 
+            # Traiter les tweets récupérés
             tweets = []
             for tweet in response.data:
                 user = next(u for u in response.includes['users'] if u.id == tweet.author_id)
@@ -74,7 +80,7 @@ class TwitterAPI:
                     'id': tweet.id,
                     'text': tweet.text,
                     'user': user.username,
-                    'url': tweet_url  # Ajout de l'URL du tweet
+                    'url': tweet_url
                 })
 
             return tweets
@@ -114,6 +120,7 @@ class BlueskyAPI:
     def __init__(self, config):
         self.client = AtprotoClient()
         self.client.login(config['common']['bluesky_handle'], config['common']['bluesky_password'])
+        self.base_url = "https://public.api.bsky.app"  # URL de l'API publique Bluesky
 
     def _prepare_post(self, text: str) -> Any:
         url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
@@ -165,6 +172,118 @@ class BlueskyAPI:
             return responses
         except Exception as e:
             st.error(f"Bluesky: {str(e)}")
+            return None
+
+    def search_posts(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
+        """
+        BUG COTE BLUEKSY => la recherche ne marche pas encore
+        Recherche des posts sur Bluesky en fonction des mots-clés.
+        :param query: Mots-clés de recherche
+        :param max_results: Nombre maximum de posts à récupérer
+        :param language: Langue des posts à rechercher (par défaut "fr")
+        :return: Liste des posts trouvés
+        """
+        try:
+            # Paramètres de la requête
+            params = {
+                "q": query,  # Requête de recherche
+                "sort": "latest",  # Tri par date (les plus récents en premier)
+                "lang": language,  # Filtre par langue
+                "limit": min(int(max_results), 100)  # Limite le nombre de résultats (max 100)
+            }
+
+            # Appel à l'API Bluesky
+            response = requests.get(
+                f"{self.base_url}/xrpc/app.bsky.feed.searchPosts",
+                params=params
+            )
+
+            # Vérification de la réponse
+            if response.status_code != 200:
+                st.error(f"Bluesky API Search Error: {response.status_code} - {response.text}")
+                return []
+
+            # Traitement des résultats
+            posts = []
+            for post in response.json().get("posts", []):
+                posts.append({
+                    'id': post['uri'].split('/')[-1],  # Récupère l'ID du post
+                    'text': post['record']['text'],  # Texte du post
+                    'handle': post['author']['handle'],  # Handle de l'auteur
+                    'url': f"https://bsky.app/profile/{post['author']['handle']}/post/{post['uri'].split('/')[-1]}"  # URL du post
+                })
+
+            return posts
+        except Exception as e:
+            st.error(f"Bluesky API Search Error: {str(e)}")
+            return []
+
+    def search_posts_api(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
+        """
+        BUG COTE BLUEKSY => la recherche ne marche pas encore
+        Recherche des posts sur Bluesky en fonction des mots-clés.
+        :param query: Mots-clés de recherche
+        :param max_results: Nombre maximum de posts à récupérer
+        :param language: Langue des posts à rechercher (par défaut "fr")
+        :return: Liste des posts trouvés
+        """
+        try:
+            # Création des paramètres de recherche
+            params = dict(
+                        q=query,  # Requête de recherche
+                        limit=min(int(max_results), 100),  # Limite le nombre de résultats (max 100)
+                        lang=language,  # Filtre par langue
+                        sort="latest"  # Tri par date (les plus récents en premier)
+                    )
+
+            # Appel à l'API de recherche
+            response = self.client.app.bsky.feed.search_posts(params)
+
+            # Traitement des résultats
+            posts = []
+            for post in response.posts:
+                posts.append({
+                    'id': post.uri.split('/')[-1],
+                    'text': post.record.text,
+                    'handle': post.author.handle,
+                    'url': f"https://bsky.app/profile/{post.author.handle}/post/{post.uri.split('/')[-1]}"
+                })
+
+            return posts
+        except Exception as e:
+            import traceback
+            st.error(f"Bluesky API Search Error: {str(e)}")
+            st.error("Full traceback:")
+            st.code(traceback.format_exc())
+            return []
+
+    def create_post(self, text: str, in_reply_to_post_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Crée un post sur Bluesky, éventuellement en réponse à un autre post.
+        :param text: Texte du post
+        :param in_reply_to_post_id: ID du post auquel répondre (optionnel)
+        :return: Réponse de l'API
+        """
+        try:
+            if in_reply_to_post_id:
+                # Si c'est une réponse, on récupère le post parent
+                parent_post = self.client.get_post(in_reply_to_post_id)
+                reply_ref = models.AppBskyFeedPost.ReplyRef(
+                    root=parent_post,
+                    parent=parent_post
+                )
+                response = self.client.send_post(text=text, reply_to=reply_ref)
+            else:
+                # Sinon, on crée un post simple
+                response = self.client.send_post(text=text)
+
+            return {
+                'id': response.uri.split('/')[-1],  # Récupère l'ID du post créé
+                'text': text,
+                'url': f"https://bsky.app/profile/{self.client.me.handle}/post/{response.uri.split('/')[-1]}"  # URL du post
+            }
+        except Exception as e:
+            st.error(f"Bluesky API Create Post Error: {str(e)}")
             return None
 
 class TelegramAPI:
@@ -269,12 +388,155 @@ class YoutubeAPI:
             st.error(f"YouTube Post: {str(e)}")
             return None
 
-    def search_videos(self, query: str, max_results: int = 5, order: str = "date") -> List[Dict[str, Any]]:
+    def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Récupère les informations d'une chaîne YouTube, y compris le nombre d'abonnés.
+        :param channel_id: ID de la chaîne
+        :return: Dictionnaire contenant les informations de la chaîne
+        """
+        try:
+            request = self.youtube.channels().list(
+                part="snippet,statistics",
+                id=channel_id
+            )
+            response = request.execute()
+
+            if response['items']:
+                channel_info = response['items'][0]
+                return {
+                    'title': channel_info['snippet']['title'],
+                    'subscriber_count': int(channel_info['statistics']['subscriberCount']),
+                    'view_count': int(channel_info['statistics']['viewCount']),
+                    'video_count': int(channel_info['statistics']['videoCount'])
+                }
+            else:
+                return None
+        except Exception as e:
+            st.error(f"YouTube API Error (get_channel_info): {str(e)}")
+            return None
+
+    # social_api.py (modification de la fonction get_channel_videos)
+
+    # social_api.py (modification de la fonction get_channel_videos)
+
+    def get_channel_videos(self, channel_id: str) -> list:
+        """
+        Récupère toutes les vidéos d'une chaîne YouTube.
+        :param channel_id: ID de la chaîne YouTube
+        :return: Liste des vidéos
+        """
+        try:
+            # Récupération des informations sur la chaîne
+            channel_response = self.youtube.channels().list(
+                part='contentDetails',
+                id=channel_id
+            ).execute()
+
+            uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+
+            videos = []
+            next_page_token = None
+
+            while True:
+                # Récupération des vidéos avec gestion de la pagination
+                playlist_response = self.youtube.playlistItems().list(
+                    part='snippet,status',
+                    playlistId=uploads_playlist_id,
+                    maxResults=50,  # Nombre maximal de vidéos par requête
+                    pageToken=next_page_token  # Gestion des pages
+                ).execute()
+
+                # Récupération des IDs des vidéos pour obtenir leur durée
+                video_ids = [item['snippet']['resourceId']['videoId'] for item in playlist_response['items']]
+                video_details = self.youtube.videos().list(
+                    part='contentDetails',
+                    id=','.join(video_ids)
+                ).execute()
+
+                # Création d'un dictionnaire pour mapper les IDs des vidéos à leur durée
+                duration_map = {item['id']: item['contentDetails']['duration'] for item in video_details['items']}
+
+                for item in playlist_response['items']:
+                    video_id = item['snippet']['resourceId']['videoId']
+                    duration = duration_map.get(video_id, "N/A")
+
+                    # Déterminer si la vidéo est un Short
+                    is_short = self._is_short_video(duration)
+
+                    video = {
+                        'title': item['snippet']['title'],
+                        'video_id': video_id,
+                        'thumbnail': item['snippet']['thumbnails']['default']['url'],
+                        'status': item['status']['privacyStatus'],  # Statut de la vidéo
+                        'duration': duration,  # Durée de la vidéo
+                        'is_short': is_short  # Indicateur de Short
+                    }
+                    videos.append(video)
+
+                # Vérification s'il y a une page suivante
+                next_page_token = playlist_response.get('nextPageToken')
+                if not next_page_token:
+                    break
+
+            return videos
+
+        except HttpError as e:
+            st.error(f"Une erreur s'est produite : {e}")
+            return []
+
+    def _is_short_video(self, duration: str) -> bool:
+        """
+        Détermine si une vidéo est un Short en fonction de sa durée.
+        :param duration: Durée de la vidéo au format ISO 8601 (ex: PT1M30S)
+        :return: True si la vidéo est un Short, False sinon
+        """
+        # Convertir la durée en secondes
+        import re
+        match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration)
+        if not match:
+            return False
+
+        hours = int(match.group(1)) if match.group(1) else 0
+        minutes = int(match.group(2)) if match.group(2) else 0
+        seconds = int(match.group(3)) if match.group(3) else 0
+
+        total_seconds = hours * 3600 + minutes * 60 + seconds
+
+        # Une vidéo est considérée comme un Short si elle dure moins de 60 secondes
+        return total_seconds <= 60
+
+    def get_video_details(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Récupère les détails d'une vidéo, y compris le nombre de vues et de commentaires.
+        :param video_id: ID de la vidéo
+        :return: Dictionnaire contenant les détails de la vidéo
+        """
+        try:
+            request = self.youtube.videos().list(
+                part="statistics",
+                id=video_id
+            )
+            response = request.execute()
+
+            if response['items']:
+                video_info = response['items'][0]
+                return {
+                    'view_count': int(video_info['statistics'].get('viewCount', 0)),
+                    'comment_count': int(video_info['statistics'].get('commentCount', 0))
+                }
+            else:
+                return None
+        except Exception as e:
+            st.error(f"YouTube API Error (get_video_details): {str(e)}")
+            return None
+
+    def search_videos(self, query: str, max_results: int = 5, order: str = "date", language: str = "fr") -> List[Dict[str, Any]]:
         """
         Recherche des vidéos sur YouTube en fonction des mots-clés.
         :param query: Mots-clés de recherche
         :param max_results: Nombre maximum de vidéos à récupérer
         :param order: Ordre des résultats ("date" pour les plus récentes, "relevance" pour la pertinence)
+        :param language: Langue des vidéos à rechercher (par défaut "fr" pour le français)
         """
         try:
             request = self.youtube.search().list(
@@ -282,7 +544,8 @@ class YoutubeAPI:
                 q=query,
                 maxResults=max_results,
                 type="video",
-                order=order  # Utiliser l'ordre spécifié
+                order=order,
+                relevanceLanguage=language  # Ajouter le filtre de langue
             )
             response = request.execute()
 
@@ -292,11 +555,24 @@ class YoutubeAPI:
                 title = item['snippet']['title']
                 channel_title = item['snippet']['channelTitle']  # Nom de la chaîne
                 channel_id = item['snippet']['channelId']  # ID de la chaîne
+
+                # Récupérer les informations de la chaîne
+                channel_info = self.get_channel_info(channel_id)
+                subscriber_count = channel_info['subscriber_count'] if channel_info else 0
+
+                # Récupérer les détails de la vidéo
+                video_details = self.get_video_details(video_id)
+                view_count = video_details['view_count'] if video_details else 0
+                comment_count = video_details['comment_count'] if video_details else 0
+
                 videos.append({
                     'id': video_id,
                     'title': title,
                     'channel_title': channel_title,  # Ajouter le nom de la chaîne
                     'channel_id': channel_id,  # Ajouter l'ID de la chaîne
+                    'subscriber_count': subscriber_count,  # Ajouter le nombre d'abonnés
+                    'view_count': view_count,  # Ajouter le nombre de vues
+                    'comment_count': comment_count,  # Ajouter le nombre de commentaires
                     'url': f"https://www.youtube.com/watch?v={video_id}"
                 })
 

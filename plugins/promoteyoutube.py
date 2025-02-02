@@ -72,7 +72,7 @@ class PromoteyoutubePlugin(Plugin):
             "max_videos": {
                 "type": "number",
                 "label": "Maximum Number of Videos to Fetch",
-                "default": 5
+                "default": 10
             },
             "max_comments_per_video": {
                 "type": "number",
@@ -91,7 +91,7 @@ class PromoteyoutubePlugin(Plugin):
 
     def search_videos_and_comments(self, keywords, max_videos, max_comments_per_video):
         youtube_api = YoutubeAPI(self.plugin_manager.config)
-        videos = youtube_api.search_videos(keywords, max_videos)
+        videos = youtube_api.search_videos(keywords, max_videos, language=st.session_state.lang)  # Passer la langue
         comments = []
 
         for video in videos:
@@ -183,7 +183,7 @@ class PromoteyoutubePlugin(Plugin):
             "Nombre de vidéos à rechercher",
             min_value=1,
             max_value=50,
-            value=5,  # Valeur par défaut
+            value=int(config['promoteyoutube']['max_videos']),  # Valeur par défaut
             key="max_videos"
         )
 
@@ -191,7 +191,7 @@ class PromoteyoutubePlugin(Plugin):
             "Nombre de commentaires par vidéo",
             min_value=1,
             max_value=10,
-            value=2,  # Valeur par défaut
+            value=int(config['promoteyoutube']['max_comments_per_video']),  # Valeur par défaut
             key="max_comments_per_video"
         )
 
@@ -216,7 +216,7 @@ class PromoteyoutubePlugin(Plugin):
                 youtube_api = YoutubeAPI(self.plugin_manager.config)
 
                 # Rechercher les vidéos
-                videos = youtube_api.search_videos(keywords, max_videos, order=video_order)
+                videos = youtube_api.search_videos(keywords, max_videos, order=video_order, language=st.session_state.lang)
                 st.session_state.videos = videos  # Stocker les vidéos dans session_state
 
                 # Récupérer les commentaires pour chaque vidéo
@@ -236,6 +236,7 @@ class PromoteyoutubePlugin(Plugin):
             for video in st.session_state.videos:
                 st.write(f"**{video['title']}**")
                 st.markdown(f"Chaîne : **[{video['channel_title']}](https://www.youtube.com/channel/{video['channel_id']})**")  # Lien vers la chaîne
+                st.markdown(f"Abonnés : **{video['subscriber_count']}**")  # Afficher le nombre d'abonnés
                 st.markdown(f"[Voir la vidéo]({video['url']})")
 
         # Afficher les commentaires

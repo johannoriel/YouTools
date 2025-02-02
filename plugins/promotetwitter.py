@@ -92,11 +92,17 @@ class PromotetwitterPlugin(Plugin):
     def get_tabs(self):
         return [{"name": t("promotetwitter_tab"), "plugin": "promotetwitter"}]
 
-    def search_tweets(self, keywords, max_tweets):
+    def search_tweets(self, query: str, max_tweets: int, api_version: str) -> List[Dict[str, Any]]:
         twitter_api = TwitterAPI(self.plugin_manager.config)
-        query = " OR ".join(keywords)
-        tweets = twitter_api.search_tweets(query, max_tweets)
-        return tweets
+        if api_version == "v1":
+            return twitter_api.search_v1(query, max_tweets)
+        elif api_version == "v2":
+            # Récupérer la langue depuis st.session_state.lang, avec 'fr' comme valeur par défaut
+            language = st.session_state.get('lang', 'fr')
+            return twitter_api.search_v2(query, max_tweets, language=language)
+        else:
+            st.error("Invalid API version selected.")
+            return []
 
     def generate_responses(self, config, selected_tweets, transcript, url):
         ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
