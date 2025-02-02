@@ -9,7 +9,7 @@ from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
 import yt_dlp
-from social_api import YoutubeAPI
+from youtube_api import YoutubeAPI
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({

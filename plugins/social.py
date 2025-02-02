@@ -4,7 +4,8 @@ import streamlit as st
 import os
 from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
-from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI, YoutubeAPI
+from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI
+from youtube_api import YoutubeAPI
 
 translations["en"].update({
     "social_tab": "Social Networks",

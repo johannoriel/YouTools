@@ -135,15 +135,8 @@ class PromotetwitterPlugin(Plugin):
             response_text = response['response']
             twitter_api.create_tweet(response_text, in_reply_to_tweet_id=tweet_id)
 
-    def search_tweets(self, query: str, max_tweets: int, api_version: str) -> List[Dict[str, Any]]:
-        twitter_api = TwitterAPI(self.plugin_manager.config)
-        if api_version == "v1":
-            return twitter_api.search_v1(query, max_tweets)
-        elif api_version == "v2":
-            return twitter_api.search_v2(query, max_tweets)
-        else:
-            st.error("Invalid API version selected.")
-            return []
+    def has_llm_error(self, response_text: str) -> bool:
+        return "litellm.APIError" in response_text
 
     def run(self, config):
         st.header(t("promotetwitter_header"))
@@ -213,8 +206,22 @@ class PromotetwitterPlugin(Plugin):
         # Display generated responses
         if st.session_state.generated_responses:
             st.subheader(t("promotetwitter_responses"))
+            error_count = 0  # Compteur d'erreurs
+
             for i, response in enumerate(st.session_state.generated_responses):
-                st.write(f"**Response to Tweet {response['tweet_id']+1}**:")
+                # Récupérer le tweet original
+                tweet_id = response['tweet_id']
+                tweet = st.session_state.tweets[tweet_id]
+                tweet_text = tweet['text']
+                tweet_user = tweet['user']
+
+                # Afficher le tweet original
+                st.write(f"**Tweet original de @{tweet_user}**:")
+                st.write(tweet_text)
+                st.markdown(f"[Voir le tweet]({self.get_tweet_url(tweet_user, tweet['id'])})")  # Lien vers le tweet
+
+                # Afficher la réponse générée
+                st.write(f"**Réponse générée pour ce tweet**:")
                 edited_response = st.text_area(
                     f"Edit Response {i+1}",
                     response['response'],
@@ -227,6 +234,11 @@ class PromotetwitterPlugin(Plugin):
                 if len(edited_response) > 280:
                     st.warning(f"⚠️ Cette réponse dépasse 280 caractères ({len(edited_response)} caractères). Veuillez la raccourcir.")
 
+                # Vérification des erreurs LLM
+                if self.has_llm_error(edited_response):
+                    error_count += 1
+                    st.error("⚠️ Cette réponse contient une erreur LLM.")
+
                 # Bouton pour copier la réponse et lien pour répondre au tweet
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
@@ -234,7 +246,7 @@ class PromotetwitterPlugin(Plugin):
                         pyperclip.copy(edited_response)
                         st.success("Réponse copiée dans le presse-papiers !")
                 with col2:
-                    tweet_url = self.get_tweet_url(st.session_state.tweets[response['tweet_id']]['user'], st.session_state.tweets[response['tweet_id']]['id'])
+                    tweet_url = self.get_tweet_url(tweet_user, tweet['id'])
                     st.markdown(f"[Répondre à ce tweet]({tweet_url})", unsafe_allow_html=True)
                 with col3:
                     selected = st.checkbox(
@@ -243,12 +255,28 @@ class PromotetwitterPlugin(Plugin):
                     )
                     st.session_state.selected_responses[i] = selected
 
-        # Post responses button
-        if st.button(t("promotetwitter_post_responses")) and st.session_state.selected_responses:
-            with st.spinner(t("promotetwitter_posting")):
-                selected_responses = [
-                    response for i, response in enumerate(st.session_state.generated_responses)
-                    if st.session_state.selected_responses[i]
-                ]
-                self.post_responses(config, selected_responses)
-                st.success(t("promotetwitter_success"))
+            # Afficher le décompte des erreurs
+            st.write(f"**Erreurs LLM détectées : {error_count}**")
+
+            # Bouton pour regénérer les réponses en erreur
+            if error_count > 0:
+                if st.button("Regénérer les réponses en erreur"):
+                    with st.spinner("Regénération des réponses en erreur..."):
+                        for i, response in enumerate(st.session_state.generated_responses):
+                            if self.has_llm_error(response['response']):
+                                # Regénérer la réponse pour ce tweet
+                                tweet_id = response['tweet_id']
+                                tweet_text = st.session_state.tweets[tweet_id]['text']
+                                prompt = config['promotetwitter']['response_prompt'].format(
+                                    url=url,
+                                    transcript=transcript
+                                )
+                                llm_response = RagllmPlugin("ragllm", self.plugin_manager).process_with_llm(
+                                    prompt,
+                                    config.get('llm', {}).get('llm_sys_prompt', ''),
+                                    tweet_text
+                                )
+                                clean_response = remove_quotes(llm_response.strip())
+                                st.session_state.generated_responses[i]['response'] = clean_response
+
+                        st.success("Réponses regénérées avec succès !")

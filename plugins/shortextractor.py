@@ -239,9 +239,11 @@ class ShortextractorPlugin(Plugin):
             # Pour la position "top", on utilise Alignment=8 (haut-centre)
             # Pour la position "bottom", on utilise Alignment=2 (bas-centre)
             alignment = "6" if subtitle_position == "top" else "2"
+            subtitle_y = str(int(-10*zoom_factor*4)) if subtitle_position == "top" else "(h-th-20)"
             subtitle_y = "0" if subtitle_position == "top" else "(h-th-20)"
             bold_style = ",Bold=1" if subtitle_bold else ""
             subtitle_filter = f"subtitles='{temp_srt}':force_style='FontSize={subtitle_size},Alignment={alignment},MarginV={subtitle_y}{bold_style}'" if add_subtitles else ""
+            crop_filter = f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):(ih/2+ih/(4*{zoom_factor})*{center_y})'"
             crop_filter = f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'"
 
             vf_filters = [crop_filter]
