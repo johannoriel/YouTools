@@ -7,12 +7,13 @@ from app import Plugin
 from plugins.common import list_video_files
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 
-# Mise à jour des traductions existantes
+# Ajout des nouvelles traductions
 translations["en"].update({
     "trim_silences_tab": "Silence Removal",
     "trim_silences_header": "Remove Silences from Videos",
     "trim_silences_threshold_label": "Silence threshold (dB)",
-    "trim_silences_duration_label": "Minimum silence duration (seconds)",
+    "trim_silences_duration_label": "Minimum silence duration to detect (seconds)",
+    "trim_silences_keep_duration_label": "Duration to keep for each silence (seconds)",
     "trim_silences_original_videos": "Original Videos",
     "trim_silences_button": "Remove Silences",
     "trim_silences_processing": "Processing {file}...",
@@ -25,7 +26,8 @@ translations["fr"].update({
     "trim_silences_tab": "Retrait des silences",
     "trim_silences_header": "Retirer les silences des vidéos",
     "trim_silences_threshold_label": "Seuil de silence (dB)",
-    "trim_silences_duration_label": "Durée minimale du silence (secondes)",
+    "trim_silences_duration_label": "Durée minimale de silence à détecter (secondes)",
+    "trim_silences_keep_duration_label": "Durée à conserver pour chaque silence (secondes)",
     "trim_silences_original_videos": "Vidéos originales",
     "trim_silences_button": "Retirer les silences",
     "trim_silences_processing": "Traitement de {file} en cours...",
@@ -35,7 +37,8 @@ translations["fr"].update({
 })
 
 def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
-                          threshold_db: float, min_duration: float) -> List[Tuple[float, float]]:
+                          threshold_db: float, min_duration: float,
+                          keep_duration: float) -> List[Tuple[float, float, float]]:
     """
     Détecte les segments de silence dans un signal audio.
 
@@ -44,9 +47,10 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
         sample_rate: Taux d'échantillonnage
         threshold_db: Seuil de silence en dB
         min_duration: Durée minimale du silence en secondes
+        keep_duration: Durée à conserver pour chaque silence en secondes
 
     Returns:
-        Liste de tuples (début, fin) des segments non-silencieux en secondes
+        Liste de tuples (début_segment, fin_segment, milieu_silence) pour les segments non-silencieux
     """
     # Convertir le seuil dB en amplitude linéaire
     threshold_amp = 10 ** (threshold_db / 20)
@@ -63,8 +67,8 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
     time_per_window = window_size / sample_rate
     changes = np.where(np.diff(is_silence))[0]
 
-    # Construire les segments non-silencieux
-    non_silence_segments = []
+    # Construire les segments non-silencieux avec points de transition
+    segments = []
     start_time = 0
 
     for i in range(0, len(changes), 2):
@@ -73,19 +77,21 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
 
         silence_duration = (changes[i] - changes[i-1]) * time_per_window if i > 0 else 0
 
-        # Si le silence est assez long, créer un nouveau segment
+        # Si le silence est assez long
         if silence_duration >= min_duration:
             end_time = changes[i-1] * time_per_window if i > 0 else 0
             if end_time > start_time:
-                non_silence_segments.append((start_time, end_time))
+                # Calculer le point milieu du silence pour insérer la pause
+                silence_middle = end_time + (silence_duration / 2)
+                segments.append((start_time, end_time, silence_middle))
             start_time = changes[i] * time_per_window
 
     # Ajouter le dernier segment si nécessaire
     end_time = len(audio_array) / sample_rate
     if end_time > start_time:
-        non_silence_segments.append((start_time, end_time))
+        segments.append((start_time, end_time, None))
 
-    return non_silence_segments
+    return segments
 
 class TrimsilencesPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -102,6 +108,11 @@ class TrimsilencesPlugin(Plugin):
                 "type": "number",
                 "label": t("trim_silences_duration_label"),
                 "default": 0.5
+            },
+            "keep_duration": {
+                "type": "number",
+                "label": t("trim_silences_keep_duration_label"),
+                "default": 0.1
             }
         }
 
@@ -120,25 +131,31 @@ class TrimsilencesPlugin(Plugin):
             value=config.get("silence_duration", 0.5),
             step=0.1
         )
+        updated_config["keep_duration"] = st.slider(
+            t("trim_silences_keep_duration_label"),
+            min_value=0.0,
+            max_value=0.5,
+            value=config.get("keep_duration", 0.1),
+            step=0.05
+        )
         return updated_config
 
     def get_tabs(self):
         return [{"name": t("trim_silences_tab"), "plugin": "trimsilences"}]
 
     def remove_silence(self, input_file: str, threshold: float, duration: float,
-                      videos_dir: str, progress_callback=None) -> str:
+                      keep_duration: float, videos_dir: str,
+                      progress_callback=None) -> str:
         """
-        Supprime les silences d'une vidéo en utilisant moviepy.
+        Supprime les silences d'une vidéo en conservant une durée minimale.
 
         Args:
             input_file: Chemin du fichier vidéo d'entrée
             threshold: Seuil de silence en dB
             duration: Durée minimale du silence en secondes
+            keep_duration: Durée à conserver pour chaque silence
             videos_dir: Répertoire de sortie
             progress_callback: Fonction de callback pour la progression
-
-        Returns:
-            Chemin du fichier de sortie
         """
         try:
             if progress_callback:
@@ -152,12 +169,13 @@ class TrimsilencesPlugin(Plugin):
             if len(audio_array.shape) > 1:
                 audio_array = np.mean(audio_array, axis=1)  # Convertir en mono si stéréo
 
-            # Détecter les segments non-silencieux
-            non_silence_segments = detect_silence_segments(
+            # Détecter les segments avec leurs points de transition
+            segments = detect_silence_segments(
                 audio_array,
                 video.audio.fps,
                 threshold,
-                duration
+                duration,
+                keep_duration
             )
 
             if progress_callback:
@@ -165,11 +183,21 @@ class TrimsilencesPlugin(Plugin):
 
             # Découper la vidéo selon les segments
             clips = []
-            for i, (start, end) in enumerate(non_silence_segments):
+            for i, (start, end, silence_middle) in enumerate(segments):
+                # Ajouter le segment non-silencieux
                 clip = video.subclip(start, end)
                 clips.append(clip)
+
+                # Si ce n'est pas le dernier segment et qu'il y a un point de silence,
+                # ajouter une petite pause
+                if silence_middle is not None and keep_duration > 0:
+                    pause_start = silence_middle - (keep_duration / 2)
+                    pause_end = silence_middle + (keep_duration / 2)
+                    pause_clip = video.subclip(pause_start, pause_end)
+                    clips.append(pause_clip)
+
                 if progress_callback:
-                    progress = 33 + (i / len(non_silence_segments) * 33)
+                    progress = 33 + (i / len(segments) * 33)
                     progress_callback(int(progress))
 
             # Concaténer les segments
@@ -231,6 +259,7 @@ class TrimsilencesPlugin(Plugin):
                             full_path,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],
+                            config['trimsilences']['keep_duration'],
                             config['common']['work_directory'],
                             update_progress
                         )
