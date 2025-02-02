@@ -211,6 +211,12 @@ def main():
         for key, value in sidebar_config.items():
             config.setdefault(plugin_name, {})[key] = value
 
+
+    # Ajouter le bouton "Clean session" dans la barre latérale
+    if st.sidebar.button(t("Clean session")):
+        st.session_state.clear()  # Cela réinitialise st.session_state
+        st.rerun()  # Relancer l'application pour refléter les changements
+
     # Initialize selected tab
     if 'selected_tab_id' not in st.session_state:
         st.session_state.selected_tab_id = "directpublish"
