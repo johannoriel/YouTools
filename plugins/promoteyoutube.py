@@ -413,10 +413,12 @@ class PromoteyoutubePlugin(Plugin):
                 index=0
             )
 
-            # Filtrage des vidéos par langue si nécessaire
+            # Création d'une map des indices pour maintenir la correspondance
             filtered_videos = st.session_state.videos
+            filtered_indices = list(range(len(st.session_state.videos)))
             if selected_language != t("promoteyoutube_show_all_languages"):
-                filtered_videos = [v for v in st.session_state.videos if v['language'] == selected_language]
+                filtered_indices = [i for i, v in enumerate(st.session_state.videos) if v['language'] == selected_language]
+                filtered_videos = [st.session_state.videos[i] for i in filtered_indices]
 
             sort_by = st.selectbox(
                 t("promoteyoutube_sort_by"),
@@ -430,15 +432,18 @@ class PromoteyoutubePlugin(Plugin):
             # Boutons Select All/Deselect All pour les vidéos
             col1, col2 = st.columns(2)
             if col1.button(t("promoteyoutube_select_all_videos")):
-                st.session_state.selected_videos = {i: True for i in range(len(filtered_videos))}
+                for i in filtered_indices:
+                    st.session_state.selected_videos[i] = True
             if col2.button(t("promoteyoutube_deselect_all_videos")):
-                st.session_state.selected_videos = {i: False for i in range(len(filtered_videos))}
+                for i in filtered_indices:
+                    st.session_state.selected_videos[i] = False
 
-            for i, video in enumerate(filtered_videos):
+            # Affichage des vidéos filtrées avec les indices originaux
+            for display_index, original_index in enumerate(filtered_indices):
+                video = st.session_state.videos[original_index]
                 published_at = datetime.strptime(video['published_at'], "%Y-%m-%dT%H:%M:%SZ")
                 days_ago = (datetime.now(pytz.UTC) - published_at.replace(tzinfo=pytz.UTC)).days
 
-                # Rendre le titre de la vidéo cliquable
                 st.markdown(f"[**{video['title']}**]({video['url']})")
                 st.markdown(f"Chaîne : **[{video['channel_title']}](https://www.youtube.com/channel/{video['channel_id']})**")
 
@@ -449,13 +454,15 @@ class PromoteyoutubePlugin(Plugin):
                 col4.markdown(f"**{days_ago}** jours")
                 col5.markdown(f"Score : **{video['relevance_score']}**/100")
                 col6.markdown(f"{t('promoteyoutube_language')} : **{video['language']}**")
-                st.session_state.selected_videos[i] = col7.checkbox(
+
+                # Utilisation de l'indice original pour la checkbox
+                st.session_state.selected_videos[original_index] = col7.checkbox(
                     t("promoteyoutube_select_video"),
-                    key=f"video_{i}",
-                    value=st.session_state.selected_videos.get(i, False)
+                    key=f"video_{original_index}",
+                    value=st.session_state.selected_videos.get(original_index, False)
                 )
 
-            # Section 3: Configuration et recherche des commentaires
+            # Utilisation des indices originaux pour la sélection des vidéos
             selected_video_indices = [i for i, selected in st.session_state.selected_videos.items() if selected]
 
             if selected_video_indices:
