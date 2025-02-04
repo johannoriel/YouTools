@@ -438,7 +438,8 @@ class PromoteyoutubePlugin(Plugin):
                 published_at = datetime.strptime(video['published_at'], "%Y-%m-%dT%H:%M:%SZ")
                 days_ago = (datetime.now(pytz.UTC) - published_at.replace(tzinfo=pytz.UTC)).days
 
-                st.markdown(f"**{video['title']}**")
+                # Rendre le titre de la vidéo cliquable
+                st.markdown(f"[**{video['title']}**]({video['url']})")
                 st.markdown(f"Chaîne : **[{video['channel_title']}](https://www.youtube.com/channel/{video['channel_id']})**")
 
                 col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
