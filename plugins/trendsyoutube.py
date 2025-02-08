@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from youtube_api import YoutubeAPI
 import pandas as pd
 from global_vars import translations, t
+from plugins.ragllm import RagllmPlugin
 
 # Add new translations for sorting functionality
 translations["en"].update({
@@ -26,6 +27,10 @@ translations["en"].update({
     "trendsyoutube_search_keywords": "Keywords",
     "trendsyoutube_search_order": "Search Order",
     "trendsyoutube_search_button": "Search Videos",
+    "trendsyoutube_source_keywords_compare": "Keywords Comparison",
+    "trendsyoutube_keywords_list": "Keywords List (comma separated)",
+    "trendsyoutube_suggest_keywords": "Suggest Keywords",
+    "trendsyoutube_theme_for_suggestions": "Theme for keyword suggestions",
 })
 
 translations["fr"].update({
@@ -48,6 +53,10 @@ translations["fr"].update({
     "trendsyoutube_search_keywords": "Mots-clés",
     "trendsyoutube_search_order": "Ordre de recherche",
     "trendsyoutube_search_button": "Rechercher des vidéos",
+    "trendsyoutube_source_keywords_compare": "Comparatif de mots-clés",
+    "trendsyoutube_keywords_list": "Liste de mots-clés (séparés par des virgules)",
+    "trendsyoutube_suggest_keywords": "Suggérer des mots-clés",
+    "trendsyoutube_theme_for_suggestions": "Thème pour les suggestions",
 })
 
 
@@ -104,11 +113,15 @@ class TrendsyoutubePlugin(Plugin):
             st.session_state.sort_ascending = False
 
         # Crée un nouveau DataFrame à partir des vidéos
-        df = pd.DataFrame(st.session_state.subscription_videos, columns=[
+        base_columns = [
             'title', 'video_id', 'channel_title', 'channel_id', 'view_count', 'like_count',
             'comment_count', 'days_old', 'published_at', 'url', 'language', 'subscriber_count',
             'relevance_score'
-        ])
+        ]
+        if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
+            base_columns.append('search_keyword')
+
+        df = pd.DataFrame(st.session_state.subscription_videos, columns=base_columns)
 
         # Applique le tri
         st.session_state.sorted_df = df.sort_values(
@@ -210,6 +223,72 @@ class TrendsyoutubePlugin(Plugin):
             )
         st.rerun()
 
+    def search_multiple_keywords(self, keywords_list: List[str], max_videos: int, order: str) -> None:
+        """
+        Search videos for multiple keywords and store them in session state.
+
+        Args:
+            keywords_list: List of keywords to search for
+            max_videos: Maximum number of videos to fetch per keyword
+            order: Order of search results
+        """
+        youtube_api = YoutubeAPI(self.plugin_manager.config)
+
+        all_videos = []
+        with st.spinner("Searching videos for multiple keywords..."):
+            for keyword in keywords_list:
+                search_results = youtube_api.search_videos(
+                    keyword.strip(),
+                    max_videos,
+                    order=order,
+                    language=st.session_state.lang
+                )
+
+                for video in search_results:
+                    video['search_keyword'] = keyword.strip()  # Add keyword information
+                    video['relevance_score'] = youtube_api.calculate_relevance_score(video)
+                    all_videos.append(video)
+
+            st.session_state.subscription_videos = all_videos
+            st.session_state.selected_videos = {i: False for i in range(len(all_videos))}
+
+    def get_keyword_suggestions(self, theme: str, config: dict) -> List[str]:
+        """
+        Get keyword suggestions from LLM based on a theme.
+
+        Args:
+            theme: Theme to generate keywords for
+            config: Configuration dictionary
+
+        Returns:
+            List of suggested keywords
+        """
+        prompt = f"""Please suggest 5-10 relevant YouTube search keywords for the theme: {theme}.
+        Provide only the keywords, separated by commas."""
+
+        context = ""  # You can add relevant context if needed
+
+        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
+        llm_response = ragllm_plugin.process_with_llm(
+            prompt,
+            config.get('llm', {}).get('llm_sys_prompt', ''),
+            context
+        )
+
+        # Clean and parse the response
+        keywords = [k.strip() for k in llm_response.split(',')]
+        return keywords
+
+    def reset_session_state(self) -> None:
+        """Reset display and results related session state variables."""
+        st.session_state.subscription_videos = []
+        st.session_state.selected_videos = {}
+        st.session_state.sort_column = 'relevance_score'
+        st.session_state.sort_ascending = False
+        st.session_state.sorted_df = None
+        if 'suggested_keywords' in st.session_state:
+            del st.session_state.suggested_keywords
+
     def display_subscriptions(self) -> None:
         """Display subscription videos in a sortable table with selection controls."""
         if not st.session_state.subscription_videos:
@@ -218,9 +297,17 @@ class TrendsyoutubePlugin(Plugin):
 
         youtube_api = YoutubeAPI(self.plugin_manager.config)
 
+        base_columns = [
+                'title', 'video_id', 'channel_title', 'channel_id', 'view_count', 'like_count',
+                'comment_count', 'days_old', 'published_at', 'url', 'language', 'subscriber_count',
+                'relevance_score'
+            ]
+
         # Utilise le DataFrame trié s'il existe, sinon crée un nouveau
         if st.session_state.sorted_df is None:
             df = pd.DataFrame(st.session_state.subscription_videos)
+            if 'search_keyword' in base_columns and 'search_keyword' not in df.columns:
+                df['search_keyword'] = ''
             st.session_state.sorted_df = df.sort_values(
                 by=st.session_state.sort_column,
                 ascending=st.session_state.sort_ascending
@@ -253,6 +340,17 @@ class TrendsyoutubePlugin(Plugin):
         if selected_channels:
             df = df[df['channel_title'].isin(selected_channels)]
 
+        if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
+                available_keywords = df['search_keyword'].unique().tolist()
+                available_keywords.sort()
+                selected_keywords = st.multiselect(
+                    "Filter by keyword",
+                    options=available_keywords,
+                    default=available_keywords
+                )
+                if selected_keywords:
+                    df = df[df['search_keyword'].isin(selected_keywords)]
+
         # Add selection controls
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -269,9 +367,6 @@ class TrendsyoutubePlugin(Plugin):
             if st.button("Recalculate Scores"):
                 self.recalculate_scores(youtube_api)
 
-        # Column headers with sorting buttons
-        cols = st.columns([0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1])
-
         # Définition des en-têtes de colonnes avec leur fonction de tri
         headers = [
             ("", None),
@@ -285,6 +380,12 @@ class TrendsyoutubePlugin(Plugin):
             ("Score", "relevance_score"),
             ("Lang", "language")
         ]
+
+        if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
+            headers.append(("Keyword", "search_keyword"))
+            cols = st.columns([0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1])  # Ajout d'une colonne
+        else:
+            cols = st.columns([0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1])
 
         # Affiche les en-têtes triables
         for col, (header, column_name) in zip(cols, headers):
@@ -300,7 +401,12 @@ class TrendsyoutubePlugin(Plugin):
         # Display video rows
         for index, video in df.iterrows():
             with st.container():
-                cols = st.columns([0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1])
+                columns_width = [0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1]
+                if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
+                    headers.append(("Keyword", "search_keyword"))
+                    columns_width.append(1)
+
+                cols = st.columns(columns_width)
 
                 # Trouver l'index original en comparant uniquement les champs clés
                 original_index = next(
@@ -326,6 +432,8 @@ class TrendsyoutubePlugin(Plugin):
                 cols[7].write(youtube_api.format_count(video['like_count']))
                 cols[8].write(f"{video['relevance_score']:.1f}")
                 cols[9].write(video['language'])
+                if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
+                    cols[10].write(video.get('search_keyword', ''))
 
     def _update_selection(self, index: int):
         """Update video selection in session state."""
@@ -338,16 +446,21 @@ class TrendsyoutubePlugin(Plugin):
         #stats = youtube_api.get_quota_usage(config)
         #st.info(f"Quota utilisé : {stats['usage_percentage']}%")
 
+        if st.button("Reset Results"):
+            self.reset_session_state()
+            st.rerun()
+
         # Sélection de la source des vidéos
         video_source = st.radio(
-            t("trendsyoutube_source"),
-            options=[
-                t("trendsyoutube_source_subscriptions"),
-                t("trendsyoutube_source_trending"),
-                t("trendsyoutube_source_search")
-            ],
-            index=0
-        )
+                t("trendsyoutube_source"),
+                options=[
+                    t("trendsyoutube_source_subscriptions"),
+                    t("trendsyoutube_source_trending"),
+                    t("trendsyoutube_source_search"),
+                    t("trendsyoutube_source_keywords_compare")  # New option
+                ],
+                index=0
+            )
         st.session_state.video_source = video_source
 
         if video_source == t("trendsyoutube_source_subscriptions"):
@@ -389,6 +502,42 @@ class TrendsyoutubePlugin(Plugin):
             if st.button(t("trendsyoutube_search_button")):
                 if keywords:
                     self.search_videos(keywords, int(max_videos), order)
+                else:
+                    st.warning("Please enter keywords to search.")
+
+        elif video_source == t("trendsyoutube_source_keywords_compare"):
+            # Add theme input and suggestion button
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                theme = st.text_input(t("trendsyoutube_theme_for_suggestions"))
+            with col2:
+                if st.button(t("trendsyoutube_suggest_keywords")) and theme:
+                    suggested_keywords = self.get_keyword_suggestions(theme, config)
+                    st.session_state.suggested_keywords = ", ".join(suggested_keywords)
+
+            # Keywords input
+            keywords = st.text_input(
+                t("trendsyoutube_keywords_list"),
+                value=getattr(st.session_state, 'suggested_keywords', '')
+            )
+
+            max_videos = st.number_input(
+                "Number of videos to fetch per keyword",
+                min_value=1,
+                max_value=50,
+                value=10
+            )
+
+            order = st.selectbox(
+                t("trendsyoutube_search_order"),
+                options=["relevance", "date", "viewCount", "rating"],
+                index=1
+            )
+
+            if st.button(t("trendsyoutube_search_button")):
+                if keywords:
+                    keywords_list = [k.strip() for k in keywords.split(',') if k.strip()]
+                    self.search_multiple_keywords(keywords_list, int(max_videos), order)
                 else:
                     st.warning("Please enter keywords to search.")
 
