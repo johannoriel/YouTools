@@ -334,6 +334,9 @@ class TrendsyoutubePlugin(Plugin):
     def run(self, config):
         """Main plugin execution."""
         st.header(t("trendsyoutube_subscriptions"))
+        #youtube_api = YoutubeAPI(config)
+        #stats = youtube_api.get_quota_usage(config)
+        #st.info(f"Quota utilisé : {stats['usage_percentage']}%")
 
         # Sélection de la source des vidéos
         video_source = st.radio(

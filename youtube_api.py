@@ -62,6 +62,59 @@ class YoutubeAPI:
 
         return round(relevance_score * 100)  # Score sur 100
 
+    def get_quota_usage(self, config) -> Dict[str, float]:
+        """
+        Récupère l'utilisation du quota de l'API YouTube en pourcentage.
+        :return: Dictionnaire contenant l'utilisation actuelle et le quota total.
+        """
+        try:
+            # Utilisation de l'API Service Usage pour récupérer les informations de quota
+            service_usage = build('serviceusage', 'v1', credentials=get_credentials())
+            project_id = config['common']['project_number']
+
+            # Récupération des métriques de quota
+            request = service_usage.services().consumerQuotaMetrics().list(
+                parent=project_id,
+                filter="metric=youtube.googleapis.com/quota"
+            )
+            response = request.execute()
+
+            # Extraction des informations de quota
+            quota_metrics = response.get('metrics', [])
+            if quota_metrics:
+                quota_limit = quota_metrics[0].get('quotaLimits', [{}])[0].get('maxLimit', 0)
+                quota_usage = quota_metrics[0].get('quotaUsage', 0)
+
+                # Calcul du pourcentage d'utilisation
+                if quota_limit > 0:
+                    usage_percentage = (quota_usage / quota_limit) * 100
+                    remaining_percentage = 100 - usage_percentage
+                else:
+                    usage_percentage = 0
+                    remaining_percentage = 100
+
+                return {
+                    'usage_percentage': round(usage_percentage, 2),
+                    'remaining_percentage': round(remaining_percentage, 2),
+                    'quota_usage': quota_usage,
+                    'quota_limit': quota_limit
+                }
+            else:
+                return {
+                    'usage_percentage': 0,
+                    'remaining_percentage': 100,
+                    'quota_usage': 0,
+                    'quota_limit': 0
+                }
+        except Exception as e:
+            print(f"Error fetching quota usage: {str(e)}")
+            return {
+                'usage_percentage': 0,
+                'remaining_percentage': 100,
+                'quota_usage': 0,
+                'quota_limit': 0
+            }
+
     def post(self, content: str) -> Optional[Dict[str, Any]]:
         try:
             if not self.channel_id:

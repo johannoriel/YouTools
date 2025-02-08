@@ -66,6 +66,11 @@ class CommonPlugin(Plugin):
                 "label": t("channel_id"),
                 "default": ""
             },
+            "project_number": {  # Nouveau champ pour la clé du projet
+                "type": "text",
+                "label": "YouTube project number",
+                "default": ""
+            },
             "work_directory": {
                 "type": "text",
                 "label": t("work_directory"),
