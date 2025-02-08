@@ -19,6 +19,13 @@ translations["en"].update({
     "trendsyoutube_no_data": "No subscription data available",
     "trendsyoutube_sort_by": "Sort by",
     "trendsyoutube_relevance_score": "Relevance Score",
+    "trendsyoutube_source": "Video Source",
+    "trendsyoutube_source_subscriptions": "Subscriptions",
+    "trendsyoutube_source_trending": "Trending",
+    "trendsyoutube_source_search": "Search by Keywords",
+    "trendsyoutube_search_keywords": "Keywords",
+    "trendsyoutube_search_order": "Search Order",
+    "trendsyoutube_search_button": "Search Videos",
 })
 
 translations["fr"].update({
@@ -34,7 +41,15 @@ translations["fr"].update({
     "trendsyoutube_no_data": "Aucune donnée d'abonnement disponible",
     "trendsyoutube_sort_by": "Trier par",
     "trendsyoutube_relevance_score": "Score de Pertinence",
+    "trendsyoutube_source": "Source des vidéos",
+    "trendsyoutube_source_subscriptions": "Abonnements",
+    "trendsyoutube_source_trending": "Tendances",
+    "trendsyoutube_source_search": "Recherche par Mots-clés",
+    "trendsyoutube_search_keywords": "Mots-clés",
+    "trendsyoutube_search_order": "Ordre de recherche",
+    "trendsyoutube_search_button": "Rechercher des vidéos",
 })
+
 
 class TrendsyoutubePlugin(Plugin):
     def __init__(self, name, plugin_manager):
@@ -135,6 +150,49 @@ class TrendsyoutubePlugin(Plugin):
             # Store in session state
             st.session_state.subscription_videos = all_videos
             st.session_state.selected_videos = {i: False for i in range(len(all_videos))}
+
+    def load_trending_videos(self, max_videos: int) -> None:
+        """
+        Load trending videos and store them in session state.
+
+        Args:
+            max_videos: Maximum number of videos to fetch
+        """
+        youtube_api = YoutubeAPI(self.plugin_manager.config)
+
+        with st.spinner("Loading trending videos..."):
+            trending_videos = youtube_api.get_trending_videos(language=st.session_state.lang, max_results=max_videos)
+
+            all_videos = []
+            for video in trending_videos:
+                video['relevance_score'] = youtube_api.calculate_relevance_score(video)
+                all_videos.append(video)
+
+            st.session_state.subscription_videos = all_videos
+            st.session_state.selected_videos = {i: False for i in range(len(all_videos))}
+
+    def search_videos(self, keywords: str, max_videos: int, order: str) -> None:
+        """
+        Search videos by keywords and store them in session state.
+
+        Args:
+            keywords: Keywords to search for
+            max_videos: Maximum number of videos to fetch
+            order: Order of search results (relevance, date, viewCount, rating)
+        """
+        youtube_api = YoutubeAPI(self.plugin_manager.config)
+
+        with st.spinner("Searching videos..."):
+            search_results = youtube_api.search_videos(keywords, max_videos, order=order, language=st.session_state.lang)
+
+            all_videos = []
+            for video in search_results:
+                video['relevance_score'] = youtube_api.calculate_relevance_score(video)
+                all_videos.append(video)
+
+            st.session_state.subscription_videos = all_videos
+            st.session_state.selected_videos = {i: False for i in range(len(all_videos))}
+
 
     def recalculate_scores(self, youtube_api: YoutubeAPI) -> None:
         """
@@ -277,18 +335,59 @@ class TrendsyoutubePlugin(Plugin):
         """Main plugin execution."""
         st.header(t("trendsyoutube_subscriptions"))
 
-        # Input for number of videos per channel
-        max_videos = st.number_input(
-            t("trendsyoutube_num_videos"),
-            min_value=1,
-            max_value=10,
-            value=int(config['trendsyoutube']['max_videos_per_channel'])
+        # Sélection de la source des vidéos
+        video_source = st.radio(
+            t("trendsyoutube_source"),
+            options=[
+                t("trendsyoutube_source_subscriptions"),
+                t("trendsyoutube_source_trending"),
+                t("trendsyoutube_source_search")
+            ],
+            index=0
         )
+        st.session_state.video_source = video_source
 
-        # Button to trigger analysis
-        if st.button(t("trendsyoutube_list_subs")):
-            self.load_subscriptions(int(max_videos))
+        if video_source == t("trendsyoutube_source_subscriptions"):
+            max_videos = st.number_input(
+                t("trendsyoutube_num_videos"),
+                min_value=1,
+                max_value=10,
+                value=int(config['trendsyoutube']['max_videos_per_channel'])
+            )
 
-        # Display results if data is available
+            if st.button(t("trendsyoutube_list_subs")):
+                self.load_subscriptions(int(max_videos))
+
+        elif video_source == t("trendsyoutube_source_trending"):
+            max_videos = st.number_input(
+                "Number of trending videos to fetch",
+                min_value=1,
+                max_value=50,
+                value=10
+            )
+
+            if st.button("Load Trending Videos"):
+                self.load_trending_videos(int(max_videos))
+
+        elif video_source == t("trendsyoutube_source_search"):
+            keywords = st.text_input(t("trendsyoutube_search_keywords"))
+            max_videos = st.number_input(
+                "Number of videos to fetch",
+                min_value=1,
+                max_value=50,
+                value=10
+            )
+            order = st.selectbox(
+                t("trendsyoutube_search_order"),
+                options=["relevance", "date", "viewCount", "rating"],
+                index=1
+            )
+
+            if st.button(t("trendsyoutube_search_button")):
+                if keywords:
+                    self.search_videos(keywords, int(max_videos), order)
+                else:
+                    st.warning("Please enter keywords to search.")
+
         if st.session_state.subscription_videos:
             self.display_subscriptions()

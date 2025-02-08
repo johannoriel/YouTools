@@ -220,85 +220,14 @@ class YoutubeAPI:
                 video_info = response['items'][0]
                 return {
                     'view_count': int(video_info['statistics'].get('viewCount', 0)),
-                    'comment_count': int(video_info['statistics'].get('commentCount', 0))
+                    'comment_count': int(video_info['statistics'].get('commentCount', 0)),
+                    'like_count': int(video_info['statistics'].get('likeCount', 0)),
                 }
             else:
                 return None
         except Exception as e:
             print(f"YouTube API Error (get_video_details): {str(e)}")
             return None
-
-    def search_videos(self, query: str, max_results: int = 5, order: str = "date", language: str = "fr") -> List[Dict[str, Any]]:
-        try:
-            # Modifier la query pour inclure la langue
-            modified_query = f"{query} in {language}"
-            modified_query = f"{query}"
-
-            api_max_results = min(max_results * 5, 50)  # Augmenter le nombre de résultats
-
-            if (language == "fr" and order!="relevance"):
-                request = self.youtube.search().list(
-                            part="snippet",
-                            q=modified_query,
-                            maxResults=api_max_results,
-                            type="video",
-                            order=order,
-                            location="46.2276,2.2137",  # Coordonnées approximatives du centre de la France
-                            locationRadius="1000km"  # Rayon de recherche de 1000 km
-                        )
-            else:
-                request = self.youtube.search().list(
-                            part="snippet",
-                            q=modified_query,
-                            maxResults=api_max_results,
-                            type="video",
-                            relevanceLanguage=language,
-                            order=order,
-                        )
-
-            response = request.execute()
-
-            videos = []
-            for item in response['items']:
-                video_id = item['id']['videoId']
-                title = item['snippet']['title']
-                description = item['snippet']['description']
-                try:
-                    video_language = detect(title + " " + description)
-                except:
-                    video_language = 'unknown'
-                channel_title = item['snippet']['channelTitle']
-                channel_id = item['snippet']['channelId']
-                published_at = item['snippet']['publishedAt']
-
-                channel_info = self.get_channel_info(channel_id)
-                subscriber_count = channel_info['subscriber_count'] if channel_info else 0
-
-                video_details = self.get_video_details(video_id)
-                view_count = video_details['view_count'] if video_details else 0
-                comment_count = video_details['comment_count'] if video_details else 0
-
-                video_data = {
-                    'id': video_id,
-                    'title': title,
-                    'channel_title': channel_title,
-                    'channel_id': channel_id,
-                    'subscriber_count': subscriber_count,
-                    'view_count': view_count,
-                    'comment_count': comment_count,
-                    'published_at': published_at,
-                    'language': video_language,
-                    'url': f"https://www.youtube.com/watch?v={video_id}"
-                }
-
-                video_data['relevance_score'] = self.calculate_relevance_score(video_data)
-                videos.append(video_data)
-
-            return videos[:max_results]
-
-        except Exception as e:
-            print(f"YouTube API Error (search_videos): {str(e)}")
-            return []
 
     def get_comments(self, video_id: str, max_results: int = 2, order: str = "relevance") -> List[Dict[str, Any]]:
         """
@@ -354,41 +283,6 @@ class YoutubeAPI:
             print(f"YouTube API Error (post_comment_reply): {str(e)}")
             return None
 
-    def get_trending_videos(self, language: str = "fr", category_id: int = 0, max_results: int = 50) -> List[Dict[str, Any]]:
-        """
-        Récupère les vidéos tendances de YouTube pour une langue et une catégorie spécifique.
-        :param language: Code de la langue (ex: 'fr' pour français)
-        :param category_id: ID de la catégorie YouTube (0 pour toutes les catégories)
-        :param max_results: Nombre de vidéos à récupérer
-        :return: Liste des vidéos tendances
-        """
-        try:
-            request = self.youtube.videos().list(
-                part="snippet,statistics",
-                chart="mostPopular",
-                regionCode=language.upper(),
-                videoCategoryId=str(category_id),
-                maxResults=max_results
-            )
-            response = request.execute()
-
-            trending_videos = []
-            for item in response['items']:
-                trending_videos.append({
-                    'id': item['id'],
-                    'title': item['snippet']['title'],
-                    'channel_title': item['snippet']['channelTitle'],
-                    'channel_id': item['snippet']['channelId'],
-                    'view_count': int(item['statistics'].get('viewCount', 0)),
-                    'comment_count': int(item['statistics'].get('commentCount', 0)),
-                    'published_at': item['snippet']['publishedAt'],
-                    'url': f"https://www.youtube.com/watch?v={item['id']}"
-                })
-            return trending_videos
-        except Exception as e:
-            print(f"YouTube API Error (get_trending_videos): {str(e)}")
-            return []
-
     def get_subscriptions(self, max_results: int = 50) -> List[Dict[str, Any]]:
         """
         Retrieves the user's YouTube channel subscriptions.
@@ -420,7 +314,7 @@ class YoutubeAPI:
                         subscriptions.append({
                             'channel_id': channel_id,
                             'title': item['snippet']['title'],
-                            'subscriber_count': channel_info['subscriber_count']
+                            'subscriber_count': channel_info.get('subscriber_count', 0)
                         })
 
                 next_page_token = response.get('nextPageToken')
@@ -430,6 +324,174 @@ class YoutubeAPI:
             return subscriptions[:max_results]
         except Exception as e:
             print(f"Error fetching subscriptions: {str(e)}")
+            return []
+
+    def get_video_infos(self, video_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalise les informations d'une vidéo pour s'assurer que tous les champs nécessaires sont présents.
+        :param video_data: Données brutes de la vidéo
+        :return: Dictionnaire normalisé des informations de la vidéo
+        """
+        # Récupérer les informations de base de la vidéo
+        video_id = video_data.get('id') or video_data.get('video_id')
+        if not video_id:
+            raise ValueError("Video ID is missing in video data")
+
+        # Récupérer les informations supplémentaires si nécessaire
+        if 'subscriber_count' not in video_data:
+            channel_info = self.get_channel_info(video_data.get('channel_id'))
+            video_data['subscriber_count'] = channel_info['subscriber_count'] if channel_info else 0
+
+        if 'view_count' not in video_data:
+            video_details = self.get_video_details(video_id)
+            video_data['view_count'] = video_details['view_count'] if video_details else 0
+            video_data['comment_count'] = video_details['comment_count'] if video_details else 0
+            video_data['like_count'] = video_details['like_count'] if video_details else 0
+
+        if 'published_at' in video_data:
+            published_date = datetime.strptime(video_data['published_at'], "%Y-%m-%dT%H:%M:%SZ")
+            now = datetime.now(pytz.UTC)
+            days_old = (now - published_date.replace(tzinfo=pytz.UTC)).days
+        else:
+            days_old = 0  # Valeur par défaut si la date de publication est manquante
+
+        if 'language' not in video_data:
+            title = video_data['title']
+            description = video_data['description']
+            try:
+                video_language = detect(title + " " + description)
+            except:
+                video_language = 'unfound'
+
+        # Assurer que tous les champs nécessaires sont présents
+        normalized_video = {
+            'video_id': video_id,
+            'title': video_data.get('title', 'N/A'),
+            'channel_title': video_data.get('channel_title', 'N/A'),
+            'channel_id': video_data.get('channel_id', 'N/A'),
+            'subscriber_count': video_data.get('subscriber_count', 0),
+            'view_count': video_data.get('view_count', 0),
+            'like_count': video_data.get('like_count', 0),
+            'comment_count': video_data.get('comment_count', 0),
+            'published_at': video_data.get('published_at', 'N/A'),
+            'days_old': days_old,
+            'url': f"https://www.youtube.com/watch?v={video_id}",
+            'language': video_data.get('language', video_language),
+            'relevance_score': video_data.get('relevance_score', 0)
+        }
+
+        return normalized_video
+
+    def search_videos(self, query: str, max_results: int = 5, order: str = "date", language: str = "fr") -> List[Dict[str, Any]]:
+        try:
+            # Modifier la query pour inclure la langue
+            modified_query = f"{query} in {language}"
+            modified_query = f"{query}"
+
+            api_max_results = min(max_results * 5, 50)  # Augmenter le nombre de résultats
+
+            if (language == "fr" and order!="relevance"):
+                request = self.youtube.search().list(
+                            part="snippet",
+                            q=modified_query,
+                            maxResults=api_max_results,
+                            type="video",
+                            order=order,
+                            location="46.2276,2.2137",  # Coordonnées approximatives du centre de la France
+                            locationRadius="1000km"  # Rayon de recherche de 1000 km
+                        )
+            else:
+                request = self.youtube.search().list(
+                            part="snippet",
+                            q=modified_query,
+                            maxResults=api_max_results,
+                            type="video",
+                            relevanceLanguage=language,
+                            order=order,
+                        )
+
+            response = request.execute()
+
+            videos = []
+            for item in response['items']:
+                video_id = item['id']['videoId']
+                title = item['snippet']['title']
+                description = item['snippet']['description']
+                try:
+                    video_language = detect(title + " " + description)
+                except:
+                    video_language = 'unknown'
+                channel_title = item['snippet']['channelTitle']
+                channel_id = item['snippet']['channelId']
+                published_at = item['snippet']['publishedAt']
+                video_details = self.get_video_details(video_id)
+
+                channel_info = self.get_channel_info(channel_id)
+                subscriber_count = channel_info['subscriber_count'] if channel_info else 0
+
+                video_data = {
+                    'id': video_id,
+                    'title': title,
+                    'description': description,
+                    'channel_title': channel_title,
+                    'channel_id': channel_id,
+                    'subscriber_count': subscriber_count,
+                    'view_count': video_details['view_count'],
+                    'like_count': video_details['like_count'],
+                    'comment_count': video_details['comment_count'],
+                    'published_at': published_at,
+                    'url': f"https://www.youtube.com/watch?v={video_id}"
+                }
+
+                # Normaliser les données de la vidéo
+                normalized_video = self.get_video_infos(video_data)
+                normalized_video['relevance_score'] = self.calculate_relevance_score(normalized_video)
+                videos.append(normalized_video)
+
+            return videos[:max_results]
+
+        except Exception as e:
+            print(f"YouTube API Error (search_videos): {str(e)}")
+            return []
+
+    def get_trending_videos(self, language: str = "fr", category_id: int = 0, max_results: int = 50) -> List[Dict[str, Any]]:
+        """
+        Récupère les vidéos tendances de YouTube pour une langue et une catégorie spécifique.
+        :param language: Code de la langue (ex: 'fr' pour français)
+        :param category_id: ID de la catégorie YouTube (0 pour toutes les catégories)
+        :param max_results: Nombre de vidéos à récupérer
+        :return: Liste des vidéos tendances
+        """
+        try:
+            request = self.youtube.videos().list(
+                part="snippet,statistics",
+                chart="mostPopular",
+                regionCode=language.upper(),
+                videoCategoryId=str(category_id),
+                maxResults=max_results
+            )
+            response = request.execute()
+
+            trending_videos = []
+            for item in response['items']:
+                video = {
+                    'id': item['id'],
+                    'video_id': item['id'], #compat
+                    'title': item['snippet']['title'],
+                    'description': item['snippet']['description'],
+                    'channel_title': item['snippet']['channelTitle'],
+                    'channel_id': item['snippet']['channelId'],
+                    'view_count': int(item['statistics'].get('viewCount', 0)),
+                    'comment_count': int(item['statistics'].get('commentCount', 0)),
+                    'like_count': int(item['statistics'].get('likeCount', 0)),
+                    'published_at': item['snippet']['publishedAt'],
+                    'url': f"https://www.youtube.com/watch?v={item['id']}"
+                }
+                normalized_video = self.get_video_infos(video)
+                trending_videos.append(normalized_video)
+            return trending_videos
+        except Exception as e:
+            print(f"YouTube API Error (get_trending_videos): {str(e)}")
             return []
 
     def get_channel_recent_videos(self, channel_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
@@ -493,6 +555,7 @@ class YoutubeAPI:
                         videos.append({
                             'title': item['snippet']['title'],
                             'video_id': item['id'],
+                            'description': description,
                             'channel_title': item['snippet']['channelTitle'],
                             'channel_id': item['snippet']['channelId'],
                             'view_count': int(item['statistics'].get('viewCount', 0)),
