@@ -21,10 +21,12 @@ class YoutubeAPI:
             return f"{count/1000:.1f}K"
         return str(count)
 
+    import math
+
     def calculate_relevance_score(self, video_data: dict) -> float:
         """
         Calcule un score de pertinence basé sur :
-        - l'ancienneté de la vidéo (plus c'est récent, mieux c'est)
+        - l'ancienneté de la vidéo (pénalisation exponentielle après 7 jours)
         - le nombre d'abonnés (plus il y en a, mieux c'est)
         - le nombre de commentaires (moins il y en a, mieux c'est)
         """
@@ -38,8 +40,16 @@ class YoutubeAPI:
         SUBS_WEIGHT = 0.4
         COMMENTS_WEIGHT = 0.2
 
-        # Normalisation des scores entre 0 et 1
-        age_score = max(0, 1 - (age_in_days / 30))  # Score max pour < 30 jours
+        # Calcul du score d'âge avec pénalisation exponentielle après 7 jours
+        if age_in_days <= 5:
+            age_score = 1.0  # Pas de pénalisation pour les vidéos de moins de 7 jours
+        else:
+            # Pénalisation exponentielle : l'intérêt diminue de moitié tous les 2 jours
+            decay_rate = 0.5  # Diminution de 50% tous les 2 jours
+            days_over = age_in_days - 5  # Nombre de jours au-delà de 7 jours
+            age_score = decay_rate ** (days_over / 2)  # Décroissance exponentielle
+
+        # Normalisation des autres scores entre 0 et 1
         subs_score = min(1, video_data['subscriber_count'] / 1_000_000)  # Score max à 1M subs
         comments_score = max(0, 1 - (video_data['comment_count'] / 1000))  # Score max pour < 1000 comments
 
@@ -377,4 +387,128 @@ class YoutubeAPI:
             return trending_videos
         except Exception as e:
             print(f"YouTube API Error (get_trending_videos): {str(e)}")
+            return []
+
+    def get_subscriptions(self, max_results: int = 50) -> List[Dict[str, Any]]:
+        """
+        Retrieves the user's YouTube channel subscriptions.
+
+        Args:
+            max_results: Maximum number of subscriptions to retrieve
+
+        Returns:
+            List of subscription channel information
+        """
+        try:
+            subscriptions = []
+            next_page_token = None
+
+            while True:
+                request = self.youtube.subscriptions().list(
+                    part="snippet",
+                    mine=True,
+                    maxResults=50,
+                    pageToken=next_page_token
+                )
+                response = request.execute()
+
+                for item in response['items']:
+                    channel_id = item['snippet']['resourceId']['channelId']
+                    channel_info = self.get_channel_info(channel_id)
+
+                    if channel_info:
+                        subscriptions.append({
+                            'channel_id': channel_id,
+                            'title': item['snippet']['title'],
+                            'subscriber_count': channel_info['subscriber_count']
+                        })
+
+                next_page_token = response.get('nextPageToken')
+                if not next_page_token or len(subscriptions) >= max_results:
+                    break
+
+            return subscriptions[:max_results]
+        except Exception as e:
+            print(f"Error fetching subscriptions: {str(e)}")
+            return []
+
+    def get_channel_recent_videos(self, channel_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        Gets the most recent videos from a specific channel with detailed statistics.
+
+        Args:
+            channel_id: The YouTube channel ID
+            max_results: Maximum number of videos to retrieve
+
+        Returns:
+            List of video information including views, likes, comments, etc.
+        """
+        try:
+            # Get channel's uploads playlist ID
+            channel_response = self.youtube.channels().list(
+                part='contentDetails',
+                id=channel_id
+            ).execute()
+
+            uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+
+            # Get videos from uploads playlist
+            videos = []
+            next_page_token = None
+
+            while len(videos) < max_results:
+                playlist_response = self.youtube.playlistItems().list(
+                    part='snippet',
+                    playlistId=uploads_playlist_id,
+                    maxResults=min(50, max_results - len(videos)),
+                    pageToken=next_page_token
+                ).execute()
+
+                video_ids = [item['snippet']['resourceId']['videoId']
+                            for item in playlist_response['items']]
+
+                # Get detailed video statistics
+                if video_ids:
+                    video_response = self.youtube.videos().list(
+                        part='statistics,snippet',
+                        id=','.join(video_ids)
+                    ).execute()
+
+                    for item in video_response['items']:
+                        published_at = datetime.strptime(
+                            item['snippet']['publishedAt'],
+                            "%Y-%m-%dT%H:%M:%SZ"
+                        ).replace(tzinfo=pytz.UTC)
+
+                        days_old = (datetime.now(pytz.UTC) - published_at).days
+
+                        # Détecter la langue à partir du titre et de la description
+                        title = item['snippet']['title']
+                        description = item['snippet']['description']
+                        try:
+                            video_language = detect(title + " " + description)
+                        except:
+                            video_language = 'unfound'
+
+                        videos.append({
+                            'title': item['snippet']['title'],
+                            'video_id': item['id'],
+                            'channel_title': item['snippet']['channelTitle'],
+                            'channel_id': item['snippet']['channelId'],
+                            'view_count': int(item['statistics'].get('viewCount', 0)),
+                            'like_count': int(item['statistics'].get('likeCount', 0)),
+                            'comment_count': int(item['statistics'].get('commentCount', 0)),
+                            'days_old': days_old,
+                            'published_at': published_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            'url': f"https://www.youtube.com/watch?v={item['id']}",
+                            'language': video_language
+                        })
+
+                next_page_token = playlist_response.get('nextPageToken')
+                if not next_page_token:
+                    break
+
+            return videos[:max_results]
+        except Exception as e:
+            print(f"Error fetching channel videos: {str(e)}")
             return []
