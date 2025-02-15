@@ -541,6 +541,7 @@ class YoutubeAPI:
                     'url': f"https://www.youtube.com/watch?v={item['id']}"
                 }
                 normalized_video = self.get_video_infos(video)
+                normalized_video['relevance_score'] = self.calculate_relevance_score(normalized_video)
                 trending_videos.append(normalized_video)
             return trending_videos
         except Exception as e:
@@ -600,12 +601,8 @@ class YoutubeAPI:
                         # Détecter la langue à partir du titre et de la description
                         title = item['snippet']['title']
                         description = item['snippet']['description']
-                        try:
-                            video_language = detect(title + " " + description)
-                        except:
-                            video_language = 'unfound'
 
-                        videos.append({
+                        video = {
                             'title': item['snippet']['title'],
                             'video_id': item['id'],
                             'description': description,
@@ -617,9 +614,10 @@ class YoutubeAPI:
                             'days_old': days_old,
                             'published_at': published_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
                             'url': f"https://www.youtube.com/watch?v={item['id']}",
-                            'language': video_language
-                        })
-
+                        }
+                        normalized_video = self.get_video_infos(video)
+                        normalized_video['relevance_score'] = self.calculate_relevance_score(normalized_video)
+                        videos.append(normalized_video)
                 next_page_token = playlist_response.get('nextPageToken')
                 if not next_page_token:
                     break
