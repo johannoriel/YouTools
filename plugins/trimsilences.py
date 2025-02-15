@@ -40,9 +40,10 @@ translations["fr"].update({
     "trim_silences_apply": "Appliquer les paramètres",
 })
 
+
 def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
-                          threshold_db: float, min_duration: float,
-                          keep_duration: float) -> List[Tuple[float, float, float]]:
+                            threshold_db: float, min_duration: float,
+                            keep_duration: float) -> List[Tuple[float, float, float]]:
     """
     Détecte les segments de silence dans un signal audio.
 
@@ -61,41 +62,85 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
 
     # Calculer l'amplitude RMS sur des fenêtres courtes
     window_size = int(sample_rate * 0.02)  # fenêtre de 20ms
+    if window_size == 0:
+        return []
+    num_windows = len(audio_array) // window_size
+    if num_windows == 0:
+        return []
+    audio_array = audio_array[:num_windows * window_size]
     rms = np.array([np.sqrt(np.mean(window**2))
-                   for window in np.array_split(audio_array, len(audio_array) // window_size)])
+                   for window in np.array_split(audio_array, num_windows)])
 
     # Détecter les segments silencieux
     is_silence = rms < threshold_amp
+    if len(is_silence) == 0:
+        return []
 
-    # Convertir les indices en temps
-    time_per_window = window_size / sample_rate
-    changes = np.where(np.diff(is_silence))[0]
+    # Trouver les indices de changement d'état
+    changes = np.where(np.diff(is_silence))[
+        0] + 1  # +1 pour aligner les indices
+    changes = changes.tolist()
 
-    # Construire les segments non-silencieux avec points de transition
+    # Ajouter les bords si nécessaire pour gérer les silences initiaux/finaux
+    if is_silence[0]:
+        changes.insert(0, 0)
+    if is_silence[-1]:
+        changes.append(len(is_silence))
+
     segments = []
-    start_time = 0
+    start_time = 0.0
+    time_per_window = window_size / sample_rate
 
+    # Traiter chaque intervalle de silence
     for i in range(0, len(changes), 2):
         if i + 1 >= len(changes):
             break
 
-        silence_duration = (changes[i] - changes[i-1]) * time_per_window if i > 0 else 0
+        silence_start = changes[i]
+        silence_end = changes[i + 1]
 
-        # Si le silence est assez long
+        # Calculer la durée du silence
+        silence_duration = (silence_end - silence_start) * time_per_window
+
         if silence_duration >= min_duration:
-            end_time = changes[i-1] * time_per_window if i > 0 else 0
-            if end_time > start_time:
-                # Calculer le point milieu du silence pour insérer la pause
-                silence_middle = end_time + (silence_duration / 2)
-                segments.append((start_time, end_time, silence_middle))
-            start_time = changes[i] * time_per_window
+            # Segment non-silencieux avant le silence
+            non_silent_end = silence_start * time_per_window
+            if non_silent_end > start_time:
+                segments.append((start_time, non_silent_end, None))
 
-    # Ajouter le dernier segment si nécessaire
-    end_time = len(audio_array) / sample_rate
-    if end_time > start_time:
-        segments.append((start_time, end_time, None))
+            # Calculer le milieu du silence
+            silence_middle = (silence_start + silence_end) / \
+                2 * time_per_window
+            # Conserver une partie autour du milieu
+            keep_start = max(start_time, silence_middle - keep_duration / 2)
+            keep_end = min(silence_end * time_per_window,
+                           silence_middle + keep_duration / 2)
 
-    return segments
+            # Ajouter le segment conservé
+            segments.append((keep_start, keep_end, silence_middle))
+
+            # Mettre à jour le début pour le prochain segment
+            start_time = silence_end * time_per_window
+
+    # Ajouter le dernier segment après le dernier silence
+    final_end_time = len(audio_array) / sample_rate
+    if start_time < final_end_time:
+        segments.append((start_time, final_end_time, None))
+
+    # Fusionner les segments adjacents sans pause
+    merged_segments = []
+    for seg in segments:
+        if not merged_segments:
+            merged_segments.append(seg)
+        else:
+            last_seg = merged_segments[-1]
+            if last_seg[2] is None and seg[2] is None:
+                merged_segments[-1] = (last_seg[0], seg[1], None)
+            else:
+                merged_segments.append(seg)
+
+    return merged_segments
+
 
 class TrimsilencesPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -150,8 +195,8 @@ class TrimsilencesPlugin(Plugin):
         return [{"name": t("trim_silences_tab"), "plugin": "trimsilences"}]
 
     def remove_silence(self, input_file: str, threshold: float, duration: float,
-                      keep_duration: float, videos_dir: str,
-                      progress_callback=None) -> str:
+                       keep_duration: float, videos_dir: str,
+                       progress_callback=None) -> str:
         """
         Supprime les silences d'une vidéo en conservant une durée minimale.
 
@@ -173,7 +218,8 @@ class TrimsilencesPlugin(Plugin):
             # Extraire l'audio et le convertir en array numpy
             audio_array = video.audio.to_soundarray()
             if len(audio_array.shape) > 1:
-                audio_array = np.mean(audio_array, axis=1)  # Convertir en mono si stéréo
+                # Convertir en mono si stéréo
+                audio_array = np.mean(audio_array, axis=1)
 
             # Détecter les segments avec leurs points de transition
             segments = detect_silence_segments(
@@ -194,14 +240,6 @@ class TrimsilencesPlugin(Plugin):
                 clip = video.subclip(start, end)
                 clips.append(clip)
 
-                # Si ce n'est pas le dernier segment et qu'il y a un point de silence,
-                # ajouter une petite pause
-                if silence_middle is not None and keep_duration > 0:
-                    pause_start = silence_middle - (keep_duration / 2)
-                    pause_end = silence_middle + (keep_duration / 2)
-                    pause_clip = video.subclip(pause_start, pause_end)
-                    clips.append(pause_clip)
-
                 if progress_callback:
                     progress = 33 + (i / len(segments) * 33)
                     progress_callback(int(progress))
@@ -218,12 +256,12 @@ class TrimsilencesPlugin(Plugin):
 
             # Écrire le fichier final
             final_video.write_videofile(output_file,
-                                      codec='libx264',
-                                      audio_codec='aac',
-                                      temp_audiofile='temp-audio.m4a',
-                                      remove_temp=True,
-                                      audio_bitrate="192k",
-                                      preset='medium')
+                                        codec='libx264',
+                                        audio_codec='aac',
+                                        temp_audiofile='temp-audio.m4a',
+                                        remove_temp=True,
+                                        audio_bitrate="192k",
+                                        preset='medium')
 
             # Nettoyer
             video.close()
@@ -240,87 +278,89 @@ class TrimsilencesPlugin(Plugin):
             return t("trim_silences_error").format(error=str(e))
 
     def run(self, config):
-            st.header(t("trim_silences_header"))
+        st.header(t("trim_silences_header"))
 
-            # Section pour les paramètres temporaires
-            st.subheader(t("trim_silences_params"))
+        # Section pour les paramètres temporaires
+        st.subheader(t("trim_silences_params"))
 
-            # Initialiser les paramètres temporaires si nécessaire
-            if st.session_state.temp_silence_params is None:
-                st.session_state.temp_silence_params = {
-                    "silence_threshold": config['trimsilences']['silence_threshold'],
-                    "silence_duration": config['trimsilences']['silence_duration'],
-                    "keep_duration": config['trimsilences']['keep_duration']
-                }
-
-            # Interface pour modifier les paramètres
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                temp_threshold = st.slider(
-                    t("trim_silences_threshold_label"),
-                    min_value=-60,
-                    max_value=0,
-                    value=st.session_state.temp_silence_params["silence_threshold"]
-                )
-            with col2:
-                temp_duration = st.slider(
-                    t("trim_silences_duration_label"),
-                    min_value=0.1,
-                    max_value=2.0,
-                    value=st.session_state.temp_silence_params["silence_duration"],
-                    step=0.1
-                )
-            with col3:
-                temp_keep_duration = st.slider(
-                    t("trim_silences_keep_duration_label"),
-                    min_value=0.0,
-                    max_value=0.5,
-                    value=st.session_state.temp_silence_params["keep_duration"],
-                    step=0.05
-                )
-
-            # Mettre à jour les paramètres temporaires
+        # Initialiser les paramètres temporaires si nécessaire
+        if st.session_state.temp_silence_params is None:
             st.session_state.temp_silence_params = {
-                "silence_threshold": temp_threshold,
-                "silence_duration": temp_duration,
-                "keep_duration": temp_keep_duration
+                "silence_threshold": config['trimsilences']['silence_threshold'],
+                "silence_duration": config['trimsilences']['silence_duration'],
+                "keep_duration": config['trimsilences']['keep_duration']
             }
 
-            # Liste des vidéos
-            all_videos = list_video_files(config['common']['work_directory'])
-            video_files, outfile_videos, _, _ = all_videos
-            st.session_state['list_video_files'] = all_videos
+        # Interface pour modifier les paramètres
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            temp_threshold = st.slider(
+                t("trim_silences_threshold_label"),
+                min_value=-60,
+                max_value=0,
+                value=st.session_state.temp_silence_params["silence_threshold"]
+            )
+        with col2:
+            temp_duration = st.slider(
+                t("trim_silences_duration_label"),
+                min_value=0.1,
+                max_value=2.0,
+                value=st.session_state.temp_silence_params["silence_duration"],
+                step=0.1
+            )
+        with col3:
+            temp_keep_duration = st.slider(
+                t("trim_silences_keep_duration_label"),
+                min_value=0.0,
+                max_value=0.5,
+                value=st.session_state.temp_silence_params["keep_duration"],
+                step=0.05
+            )
 
-            st.subheader(t("trim_silences_original_videos"))
-            for file, full_path, _ in video_files:
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(file)
-                with col2:
-                    if st.button(t("trim_silences_button"), key=f"remove_silence_{file}"):
-                        progress_bar = st.progress(0)
-                        progress_text = st.empty()
+        # Mettre à jour les paramètres temporaires
+        st.session_state.temp_silence_params = {
+            "silence_threshold": temp_threshold,
+            "silence_duration": temp_duration,
+            "keep_duration": temp_keep_duration
+        }
 
-                        def update_progress(progress):
-                            progress_bar.progress(progress)
-                            progress_text.text(t("trim_silences_progress").format(progress=progress))
+        # Liste des vidéos
+        all_videos = list_video_files(config['common']['work_directory'])
+        video_files, outfile_videos, _, _ = all_videos
+        st.session_state['list_video_files'] = all_videos
 
-                        with st.spinner(t("trim_silences_processing").format(file=file)):
-                            # Utiliser les paramètres temporaires au lieu des paramètres de configuration
-                            result = self.remove_silence(
-                                full_path,
-                                st.session_state.temp_silence_params["silence_threshold"],
-                                st.session_state.temp_silence_params["silence_duration"],
-                                st.session_state.temp_silence_params["keep_duration"],
-                                config['common']['work_directory'],
-                                update_progress
-                            )
+        st.subheader(t("trim_silences_original_videos"))
+        for file, full_path, _ in video_files:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(file)
+            with col2:
+                if st.button(t("trim_silences_button"), key=f"remove_silence_{file}"):
+                    progress_bar = st.progress(0)
+                    progress_text = st.empty()
 
-                        progress_bar.empty()
-                        progress_text.empty()
+                    def update_progress(progress):
+                        progress_bar.progress(progress)
+                        progress_text.text(
+                            t("trim_silences_progress").format(progress=progress))
 
-                        if result.startswith(t("trim_silences_error").format(error="")):
-                            st.error(result)
-                        else:
-                            st.success(t("trim_silences_success").format(result=result))
-                            st.rerun()
+                    with st.spinner(t("trim_silences_processing").format(file=file)):
+                        # Utiliser les paramètres temporaires au lieu des paramètres de configuration
+                        result = self.remove_silence(
+                            full_path,
+                            st.session_state.temp_silence_params["silence_threshold"],
+                            st.session_state.temp_silence_params["silence_duration"],
+                            st.session_state.temp_silence_params["keep_duration"],
+                            config['common']['work_directory'],
+                            update_progress
+                        )
+
+                    progress_bar.empty()
+                    progress_text.empty()
+
+                    if result.startswith(t("trim_silences_error").format(error="")):
+                        st.error(result)
+                    else:
+                        st.success(
+                            t("trim_silences_success").format(result=result))
+                        st.rerun()
