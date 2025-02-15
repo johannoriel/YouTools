@@ -19,7 +19,9 @@ translations["en"].update({
     "trim_silences_processing": "Processing {file}...",
     "trim_silences_success": "Processing completed. Output file: {result}",
     "trim_silences_error": "Error during processing: {error}",
-    "trim_silences_progress": "Processing: {progress}%"
+    "trim_silences_progress": "Processing: {progress}%",
+    "trim_silences_params": "Silence Detection Parameters",
+    "trim_silences_apply": "Apply Parameters",
 })
 
 translations["fr"].update({
@@ -33,7 +35,9 @@ translations["fr"].update({
     "trim_silences_processing": "Traitement de {file} en cours...",
     "trim_silences_success": "Traitement terminé. Fichier de sortie : {result}",
     "trim_silences_error": "Erreur lors du traitement : {error}",
-    "trim_silences_progress": "Progression : {progress}%"
+    "trim_silences_progress": "Progression : {progress}%",
+    "trim_silences_params": "Paramètres de détection des silences",
+    "trim_silences_apply": "Appliquer les paramètres",
 })
 
 def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
@@ -96,6 +100,8 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
 class TrimsilencesPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
+        if 'temp_silence_params' not in st.session_state:
+            st.session_state.temp_silence_params = None
 
     def get_config_fields(self):
         return {
@@ -234,41 +240,87 @@ class TrimsilencesPlugin(Plugin):
             return t("trim_silences_error").format(error=str(e))
 
     def run(self, config):
-        st.header(t("trim_silences_header"))
+            st.header(t("trim_silences_header"))
 
-        all_videos = list_video_files(config['common']['work_directory'])
-        video_files, outfile_videos, _, _ = all_videos
-        st.session_state['list_video_files'] = all_videos
+            # Section pour les paramètres temporaires
+            st.subheader(t("trim_silences_params"))
 
-        st.subheader(t("trim_silences_original_videos"))
-        for file, full_path, _ in video_files:
-            col1, col2 = st.columns([3, 1])
+            # Initialiser les paramètres temporaires si nécessaire
+            if st.session_state.temp_silence_params is None:
+                st.session_state.temp_silence_params = {
+                    "silence_threshold": config['trimsilences']['silence_threshold'],
+                    "silence_duration": config['trimsilences']['silence_duration'],
+                    "keep_duration": config['trimsilences']['keep_duration']
+                }
+
+            # Interface pour modifier les paramètres
+            col1, col2, col3 = st.columns(3)
             with col1:
-                st.write(file)
+                temp_threshold = st.slider(
+                    t("trim_silences_threshold_label"),
+                    min_value=-60,
+                    max_value=0,
+                    value=st.session_state.temp_silence_params["silence_threshold"]
+                )
             with col2:
-                if st.button(t("trim_silences_button"), key=f"remove_silence_{file}"):
-                    progress_bar = st.progress(0)
-                    progress_text = st.empty()
+                temp_duration = st.slider(
+                    t("trim_silences_duration_label"),
+                    min_value=0.1,
+                    max_value=2.0,
+                    value=st.session_state.temp_silence_params["silence_duration"],
+                    step=0.1
+                )
+            with col3:
+                temp_keep_duration = st.slider(
+                    t("trim_silences_keep_duration_label"),
+                    min_value=0.0,
+                    max_value=0.5,
+                    value=st.session_state.temp_silence_params["keep_duration"],
+                    step=0.05
+                )
 
-                    def update_progress(progress):
-                        progress_bar.progress(progress)
-                        progress_text.text(t("trim_silences_progress").format(progress=progress))
+            # Mettre à jour les paramètres temporaires
+            st.session_state.temp_silence_params = {
+                "silence_threshold": temp_threshold,
+                "silence_duration": temp_duration,
+                "keep_duration": temp_keep_duration
+            }
 
-                    with st.spinner(t("trim_silences_processing").format(file=file)):
-                        result = self.remove_silence(
-                            full_path,
-                            config['trimsilences']['silence_threshold'],
-                            config['trimsilences']['silence_duration'],
-                            config['trimsilences']['keep_duration'],
-                            config['common']['work_directory'],
-                            update_progress
-                        )
+            # Liste des vidéos
+            all_videos = list_video_files(config['common']['work_directory'])
+            video_files, outfile_videos, _, _ = all_videos
+            st.session_state['list_video_files'] = all_videos
 
-                    progress_bar.empty()
-                    progress_text.empty()
+            st.subheader(t("trim_silences_original_videos"))
+            for file, full_path, _ in video_files:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(file)
+                with col2:
+                    if st.button(t("trim_silences_button"), key=f"remove_silence_{file}"):
+                        progress_bar = st.progress(0)
+                        progress_text = st.empty()
 
-                    if result.startswith(t("trim_silences_error").format(error="")):
-                        st.error(result)
-                    else:
-                        st.success(t("trim_silences_success").format(result=result))
-                        st.rerun()
+                        def update_progress(progress):
+                            progress_bar.progress(progress)
+                            progress_text.text(t("trim_silences_progress").format(progress=progress))
+
+                        with st.spinner(t("trim_silences_processing").format(file=file)):
+                            # Utiliser les paramètres temporaires au lieu des paramètres de configuration
+                            result = self.remove_silence(
+                                full_path,
+                                st.session_state.temp_silence_params["silence_threshold"],
+                                st.session_state.temp_silence_params["silence_duration"],
+                                st.session_state.temp_silence_params["keep_duration"],
+                                config['common']['work_directory'],
+                                update_progress
+                            )
+
+                        progress_bar.empty()
+                        progress_text.empty()
+
+                        if result.startswith(t("trim_silences_error").format(error="")):
+                            st.error(result)
+                        else:
+                            st.success(t("trim_silences_success").format(result=result))
+                            st.rerun()
