@@ -5,6 +5,7 @@ from youtube_api import YoutubeAPI
 import pandas as pd
 from global_vars import translations, t
 from plugins.ragllm import RagllmPlugin
+import os
 
 # Add new translations for sorting functionality
 translations["en"].update({
@@ -154,10 +155,6 @@ class TrendsyoutubePlugin(Plugin):
                     sub['channel_id'],
                     max_results=max_videos
                 )
-                for video in channel_videos:
-                    video['subscriber_count'] = sub['subscriber_count']
-                    # Utiliser la méthode de l'API YouTube pour le calcul du score
-                    video['relevance_score'] = youtube_api.calculate_relevance_score(video)
                 all_videos.extend(channel_videos)
 
             # Store in session state
@@ -175,14 +172,8 @@ class TrendsyoutubePlugin(Plugin):
 
         with st.spinner("Loading trending videos..."):
             trending_videos = youtube_api.get_trending_videos(language=st.session_state.lang, max_results=max_videos)
-
-            all_videos = []
-            for video in trending_videos:
-                video['relevance_score'] = youtube_api.calculate_relevance_score(video)
-                all_videos.append(video)
-
-            st.session_state.subscription_videos = all_videos
-            st.session_state.selected_videos = {i: False for i in range(len(all_videos))}
+            st.session_state.subscription_videos = trending_videos
+            st.session_state.selected_videos = {i: False for i in range(len(trending_videos))}
 
     def search_videos(self, keywords: str, max_videos: int, order: str) -> None:
         """
@@ -246,7 +237,6 @@ class TrendsyoutubePlugin(Plugin):
 
                 for video in search_results:
                     video['search_keyword'] = keyword.strip()  # Add keyword information
-                    video['relevance_score'] = youtube_api.calculate_relevance_score(video)
                     all_videos.append(video)
 
             st.session_state.subscription_videos = all_videos
@@ -439,6 +429,67 @@ class TrendsyoutubePlugin(Plugin):
         """Update video selection in session state."""
         st.session_state.selected_videos[index] = not st.session_state.selected_videos.get(index, False)
 
+    def extract_comments(self, youtube_api: YoutubeAPI, work_directory: str, max_comments: int) -> None:
+            """
+            Extrait les commentaires des vidéos sélectionnées et les écrit dans un fichier.
+
+            Args:
+                youtube_api: Instance de YoutubeAPI
+                work_directory: Répertoire de travail pour sauvegarder le fichier
+                max_comments: Nombre maximum de commentaires à extraire par vidéo
+            """
+            selected_indices = [i for i, selected in st.session_state.selected_videos.items() if selected]
+            if not selected_indices:
+                st.warning("Please select at least one video to extract comments.")
+                return
+
+            # Créer le fichier comments.txt
+            comments_file = os.path.join(work_directory, "comments.txt")
+            comment_id = 1  # Pour générer des IDs uniques
+
+            with st.spinner("Extracting comments..."):
+                with open(comments_file, "w", encoding="utf-8") as f:
+                    for index in selected_indices:
+                        video = st.session_state.subscription_videos[index]
+
+                        # Écrire l'en-tête de la vidéo
+                        header = f"""
+=== VIDEO INFORMATION ===
+Title: {video['title']}
+Channel: {video['channel_title']}
+URL: {video['url']}
+Subscribers: {youtube_api.format_count(video['subscriber_count'])}
+Views: {youtube_api.format_count(video['view_count'])}
+Likes: {youtube_api.format_count(video['like_count'])}
+Age: {video['days_old']} days
+Video Language: {video.get('language', 'unknown')}
+
+--- COMMENTS ---
+"""
+                        f.write(header)
+
+                        # Récupérer et écrire les commentaires
+                        comments = youtube_api.get_comments(
+                            video_id=video['video_id'],
+                            max_results=max_comments,
+                            order="relevance"  # Trier par pertinence
+                        )
+
+                        for comment in comments:
+                            comment_text = f"""
+[COMMENT ID: {comment['id']}]
+Author: {comment['author']}
+Posted: {comment['published_at']}
+Content: {comment['text']}
+----------------------------------------
+"""
+                            f.write(comment_text)
+                            comment_id += 1
+
+                        f.write("\n\n")  # Séparateur entre les vidéos
+
+            st.success(f"Comments extracted and saved to {comments_file}")
+
     def run(self, config):
         """Main plugin execution."""
         st.header(t("trendsyoutube_subscriptions"))
@@ -543,3 +594,19 @@ class TrendsyoutubePlugin(Plugin):
 
         if st.session_state.subscription_videos:
             self.display_subscriptions()
+
+            # Ajouter les contrôles pour l'extraction des commentaires
+            st.write("---")
+            st.subheader("Comment Extraction")
+
+            max_comments = st.number_input(
+                "Number of comments to extract per video",
+                min_value=1,
+                max_value=50,
+                value=10
+            )
+
+            if st.button("Extract Comments"):
+                youtube_api = YoutubeAPI(config)
+                work_directory = config['common']['work_directory']
+                self.extract_comments(youtube_api, work_directory, max_comments)
