@@ -137,6 +137,7 @@ class BatchsilencesPlugin(Plugin):
                             video_path,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],
+                            config['trimsilences']['keep_duration'],
                             work_directory
                         )
 
@@ -167,6 +168,7 @@ class BatchsilencesPlugin(Plugin):
                             video_path,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],
+                            config['trimsilences']['keep_duration'],
                             work_directory
                         )
 
