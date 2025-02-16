@@ -299,7 +299,8 @@ class PromoteyoutubePlugin(Plugin):
 
         for idx in selected_video_indices:
             video = st.session_state.videos[idx]
-            video_comments = youtube_api.get_comments(video['id'], max_comments_per_video, order=comment_order)
+            #st.info(video)
+            video_comments = youtube_api.get_comments(video['video_id'], max_comments_per_video, order=comment_order)
             for comment in video_comments:
                 comment['video_title'] = video['title']
                 comment['channel_title'] = video['channel_title']
