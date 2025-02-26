@@ -3,13 +3,15 @@ import torch
 import matplotlib.pyplot as plt
 import random
 from PIL import Image
-import os
 import streamlit as st
 from app import Plugin
 from global_vars import t, translations
 from diffusers import FluxPipeline, AutoPipelineForImage2Image
 from rembg import remove, new_session
 import json
+
+import os
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 # Add translations for this plugin
 translations["en"].update({
@@ -52,6 +54,7 @@ translations["fr"].update({
     "imggen_processing": "En cours...",
     "imggen_done": "Génération d'images terminée !",
 })
+
 
 class ImggenPlugin(Plugin):
     def __init__(self, name, plugin_manager):
@@ -147,17 +150,25 @@ class ImggenPlugin(Plugin):
                 st.session_state.imggen_use_random_seed = True
                 st.session_state.immgen_style = "oil painting"
 
-        aspect_ratio = st.selectbox(t("aspect_ratio"), ["1:1", "16:9"], key="imggen_aspect_ratio")
-        remove_background = st.checkbox(t("remove_background"), key="imggen_remove_background")
-        background_removal_method = st.selectbox(t("background_removal_method"), ["ai", "color"], key="imggen_background_removal_method")
-        use_random_seed = st.checkbox(t("random_seed"), key="imggen_use_random_seed")
-        seed = st.number_input(t("seed"), value=st.session_state.imggen_seed, key="imggen_seed", disabled=use_random_seed)
+        aspect_ratio = st.selectbox(
+            t("aspect_ratio"), ["1:1", "16:9"], key="imggen_aspect_ratio")
+        remove_background = st.checkbox(
+            t("remove_background"), key="imggen_remove_background")
+        background_removal_method = st.selectbox(t("background_removal_method"), [
+                                                 "ai", "color"], key="imggen_background_removal_method")
+        use_random_seed = st.checkbox(
+            t("random_seed"), key="imggen_use_random_seed")
+        seed = st.number_input(t("seed"), value=st.session_state.imggen_seed,
+                               key="imggen_seed", disabled=use_random_seed)
         use_face = st.checkbox(t("use_face"), key="imggen_use_face")
-        steps = st.number_input(t("steps"), min_value=1, value=st.session_state.imggen_steps, key="imggen_steps")
-        input_image = st.file_uploader(t("input_image"), type=["png", "jpg", "jpeg"])
+        steps = st.number_input(
+            t("steps"), min_value=1, value=st.session_state.imggen_steps, key="imggen_steps")
+        input_image = st.file_uploader(
+            t("input_image"), type=["png", "jpg", "jpeg"])
 
         styles = config['imggen']['styles'].split(',')
-        style = st.selectbox(t("style"), [""] + [s.strip() for s in styles], key="imggen_style")
+        style = st.selectbox(
+            t("style"), [""] + [s.strip() for s in styles], key="imggen_style")
 
         st.subheader(t("prompt_history"))
         selected_history_prompt = st.selectbox("", [""] + self.prompt_history)
@@ -172,18 +183,21 @@ class ImggenPlugin(Plugin):
 
                 self.add_to_prompt_history(prompt)
 
-                sub_prompts = [p.strip() for p in prompt.split('\n') if p.strip()]
-                background_prompt = ', '+ config['imggen']['background_prompt']
-                self.generate_images( background_prompt,
-                    sub_prompts, aspect_ratio, remove_background, background_removal_method,
-                    None if use_random_seed else seed, use_face, steps, input_image,
-                    config['imggen']['face_prompt'], style, config['imggen']['output_dir']
-                )
+                sub_prompts = [p.strip()
+                               for p in prompt.split('\n') if p.strip()]
+                background_prompt = ', ' + \
+                    config['imggen']['background_prompt']
+                self.generate_images(background_prompt,
+                                     sub_prompts, aspect_ratio, remove_background, background_removal_method,
+                                     None if use_random_seed else seed, use_face, steps, input_image,
+                                     config['imggen']['face_prompt'], style, config['imggen']['output_dir']
+                                     )
 
     def generate_images(self, background_prompt, prompts, aspect_ratio, remove_background, background_removal_method,
                         seed, use_face, steps, input_image, face_prompt, style, output_dir):
         num_columns = 3  # Nombre de colonnes dans la galerie
-        cols = st.columns(num_columns)  # Crée les colonnes une fois pour la galerie
+        # Crée les colonnes une fois pour la galerie
+        cols = st.columns(num_columns)
 
         # Barre de progression unique avec un placeholder
         progress_placeholder = st.empty()
@@ -197,15 +211,16 @@ class ImggenPlugin(Plugin):
 
             # Génère l'image
             image, used_seed = self.generate_image(background_prompt,
-                full_prompt, aspect_ratio, remove_background, background_removal_method,
-                seed, use_face, steps, input_image, face_prompt
-            )
+                                                   full_prompt, aspect_ratio, remove_background, background_removal_method,
+                                                   seed, use_face, steps, input_image, face_prompt
+                                                   )
 
             # Choisir la colonne dans laquelle afficher l'image
             col_idx = i % num_columns
             with cols[col_idx]:  # Mise à jour dans la colonne correspondante
                 # Affichage de l'image directement
-                st.image(image, caption=f"Image {i+1}/{len(prompts)} \nSeed: {used_seed}\nPrompt: {full_prompt}", use_column_width=True)
+                st.image(
+                    image, caption=f"Image {i+1}/{len(prompts)} \nSeed: {used_seed}\nPrompt: {full_prompt}", use_column_width=True)
 
             # Sauvegarder l'image
             self.save_image(image, output_dir, sub_prompt)
@@ -216,8 +231,6 @@ class ImggenPlugin(Plugin):
         # Lorsque tout est terminé, remplacez la barre de progression par un message
         progress_placeholder.empty()  # Efface la barre de progression
         st.success(t("imggen_done"))
-
-
 
     def generate_image(self, background_prompt, prompt, aspect_ratio="1:1", remove_background=True, background_removal_method="ai", seed=None, face=True, steps=2, input_image=None, face_prompt=""):
         if seed is None:
@@ -237,7 +250,8 @@ class ImggenPlugin(Plugin):
         elif aspect_ratio == "16:9":
             height, width = 1080, 1920
             if face and input_image is None:
-                print("Warning: 16:9 aspect ratio is not suitable for face generation. Disabling face mode.")
+                print(
+                    "Warning: 16:9 aspect ratio is not suitable for face generation. Disabling face mode.")
                 face = False
                 prompt = original_prompt
         else:
@@ -248,9 +262,11 @@ class ImggenPlugin(Plugin):
         if self.pipe is None:
             ckpt_id = "black-forest-labs/FLUX.1-schnell"
             if input_image:
-                self.pipe = AutoPipelineForImage2Image.from_pretrained(ckpt_id, torch_dtype=torch.bfloat16)
+                self.pipe = AutoPipelineForImage2Image.from_pretrained(
+                    ckpt_id, torch_dtype=torch.bfloat16)
             else:
-                self.pipe = FluxPipeline.from_pretrained(ckpt_id, torch_dtype=torch.bfloat16)
+                self.pipe = FluxPipeline.from_pretrained(
+                    ckpt_id, torch_dtype=torch.bfloat16)
             self.pipe.vae.enable_tiling()
             self.pipe.vae.enable_slicing()
             self.pipe.enable_sequential_cpu_offload()
@@ -330,18 +346,30 @@ class ImggenPlugin(Plugin):
         image.save(filepath)
         print(f"Image saved to: {filepath}")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Generate an image using FLUX pipeline.")
-    parser.add_argument("prompt", type=str, help="The prompt for image generation")
-    parser.add_argument("-i", "--input-image", type=str, help="Path to input image for img2img")
-    parser.add_argument("-ar", "--aspect_ratio", choices=["1:1", "16:9"], default="1:1", help="Aspect ratio of the image")
-    parser.add_argument("-nb", "--no-background-removal", action="store_false", dest="remove_background", help="Don't remove the background")
-    parser.add_argument("-m", "--method", choices=["color", "ai"], default="ai", help="Method for background removal")
-    parser.add_argument("-s", "--seed", type=int, default=3212316546, help="Random seed for generation")
-    parser.add_argument("-nf", "--no-face", action="store_false", dest="face", help="Don't add face description to the prompt")
-    parser.add_argument("-rs", "--random-seed", action="store_true", help="Use a random seed for generation")
-    parser.add_argument("-n", "--steps", type=int, default=2, help="Number of steps for generation")
-    parser.add_argument("-o", "--output", type=str, default="~/Images", help="Output directory for saving the image")
+    parser = argparse.ArgumentParser(
+        description="Generate an image using FLUX pipeline.")
+    parser.add_argument("prompt", type=str,
+                        help="The prompt for image generation")
+    parser.add_argument("-i", "--input-image", type=str,
+                        help="Path to input image for img2img")
+    parser.add_argument("-ar", "--aspect_ratio",
+                        choices=["1:1", "16:9"], default="1:1", help="Aspect ratio of the image")
+    parser.add_argument("-nb", "--no-background-removal", action="store_false",
+                        dest="remove_background", help="Don't remove the background")
+    parser.add_argument(
+        "-m", "--method", choices=["color", "ai"], default="ai", help="Method for background removal")
+    parser.add_argument("-s", "--seed", type=int,
+                        default=3212316546, help="Random seed for generation")
+    parser.add_argument("-nf", "--no-face", action="store_false",
+                        dest="face", help="Don't add face description to the prompt")
+    parser.add_argument("-rs", "--random-seed", action="store_true",
+                        help="Use a random seed for generation")
+    parser.add_argument("-n", "--steps", type=int, default=2,
+                        help="Number of steps for generation")
+    parser.add_argument("-o", "--output", type=str, default="~/Images",
+                        help="Output directory for saving the image")
 
     args = parser.parse_args()
     if args.random_seed:
@@ -353,9 +381,9 @@ def main():
 
     plugin = ImggenPlugin("imggen", None)
     image, used_seed = plugin.generate_image(", arrière plan blanc vif uni",
-        args.prompt, args.aspect_ratio, args.remove_background, args.method,
-        args.seed, args.face, args.steps, input_image
-    )
+                                             args.prompt, args.aspect_ratio, args.remove_background, args.method,
+                                             args.seed, args.face, args.steps, input_image
+                                             )
     print(f"Image generated with seed: {used_seed}")
 
     output_dir = os.path.expanduser(args.output)
@@ -364,6 +392,7 @@ def main():
     plt.imshow(image)
     plt.axis('off')
     plt.show()
+
 
 if __name__ == "__main__":
     main()
