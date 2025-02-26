@@ -15,12 +15,15 @@ from transformers import AutoTokenizer, AutoModel
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 MAX_LENGTH = 512
 CHUNK_SIZE = 200  # Nombre de mots par chunk
-#litellm.set_verbose=True
+# litellm.set_verbose=True
+
 
 def mean_pooling(model_output, attention_mask):
     token_embeddings = model_output[0]
-    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    input_mask_expanded = attention_mask.unsqueeze(
+        -1).expand(token_embeddings.size()).float()
     return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -44,7 +47,7 @@ translations["en"].update({
     "rag_default_sys_prompt": "You are an AI assistant. Your task is to analyze the provided context and answer questions based ONLY on this context. If the information is not in the context, clearly state that.",
     "rag_error_fetching_models_ollama": "Error fetching Ollama models: ",
     "rag_error_calling_llm": "Error calling LLM: ",
-    "rag_processing" : "Processing...",
+    "rag_processing": "Processing...",
 })
 
 translations["fr"].update({
@@ -68,8 +71,9 @@ translations["fr"].update({
     "rag_default_sys_prompt": "Tu es un assistant IA. Ta tâche est d'analyser le contexte fourni et de répondre aux questions en te basant UNIQUEMENT sur ce contexte. Si l'information n'est pas dans le contexte, dis-le clairement.",
     "rag_error_fetching_models_ollama": "Erreur lors de la récupération des modèles Ollama : ",
     "rag_error_calling_llm": "Erreur lors de l'appel au LLM : ",
-    "rag_processing" : "En cours de traitement...",
+    "rag_processing": "En cours de traitement...",
 })
+
 
 class RagllmPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -143,7 +147,8 @@ class RagllmPlugin(Plugin):
                     provider = config.get('provider', 'ollama')
                     models = self.get_available_models(provider)
                     try:
-                        default_index = models.index(config.get(field, params['default']))
+                        default_index = models.index(
+                            config.get(field, params['default']))
                     except ValueError:
                         default_index = 0
                     updated_config[field] = st.selectbox(
@@ -154,7 +159,8 @@ class RagllmPlugin(Plugin):
                 else:
                     options_list = [option[0] for option in params['options']]
                     try:
-                        default_index = options_list.index(config.get(field, params['default']))
+                        default_index = options_list.index(
+                            config.get(field, params['default']))
                     except ValueError:
                         default_index = 0
                     updated_config[field] = st.selectbox(
@@ -182,12 +188,15 @@ class RagllmPlugin(Plugin):
         return updated_config
 
     def get_sidebar_config_ui(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        available_models = self.get_available_models('ollama') + self.get_available_models('groq')
-        default_model = config.get('llm_model', available_models[0] if available_models else None)
+        available_models = self.get_available_models(
+            'ollama') + self.get_available_models('groq')
+        default_model = config.get(
+            'llm_model', available_models[0] if available_models else None)
         selected_model = st.sidebar.selectbox(
             t("rag_llm_model"),
             options=available_models,
-            index=available_models.index(default_model) if default_model in available_models else 0,
+            index=available_models.index(
+                default_model) if default_model in available_models else 0,
             key="ragllm_llm_model"
         )
         return {"llm_model": selected_model}
@@ -202,20 +211,24 @@ class RagllmPlugin(Plugin):
                 st.error(f"{t('rag_error_fetching_models_ollama')}{str(e)}")
                 return ["ollama/qwen2"]
         elif provider == 'groq':
-            return ["groq/llama3-70b-8192", "groq/mixtral-8x7b-32768", "groq/llama-3.3-70b-versatile", "deepseek/deepseek-chat"]
+            return ["groq/llama3-70b-8192", "groq/mixtral-8x7b-32768", "groq/llama-3.3-70b-versatile", "deepseek/deepseek-chat", "xai/grok-2"]
         else:
             return ["none"]
 
     def process_rag_text(self, rag_text: str, chunk_size: int, embedder):
         rag_text = rag_text.replace('\\n', ' ').replace('\\\'', "'")
         mots = rag_text.split()
-        self.chunks = [' '.join(mots[i:i+chunk_size]) for i in range(0, len(mots), chunk_size)]
-        self.embeddings = np.vstack([self.get_embedding(c, embedder) for c in self.chunks])
+        self.chunks = [' '.join(mots[i:i+chunk_size])
+                       for i in range(0, len(mots), chunk_size)]
+        self.embeddings = np.vstack(
+            [self.get_embedding(c, embedder) for c in self.chunks])
 
     def get_embedding(self, text: str, model: str) -> np.ndarray:
         tokenizer = AutoTokenizer.from_pretrained(model)
-        model = AutoModel.from_pretrained(model, trust_remote_code=True).to(DEVICE)
-        inputs = tokenizer(text, padding=True, truncation=True, max_length=MAX_LENGTH, return_tensors="pt").to(DEVICE)
+        model = AutoModel.from_pretrained(
+            model, trust_remote_code=True).to(DEVICE)
+        inputs = tokenizer(text, padding=True, truncation=True,
+                           max_length=MAX_LENGTH, return_tensors="pt").to(DEVICE)
         with torch.no_grad():
             model_output = model(**inputs)
         return mean_pooling(model_output, inputs['attention_mask']).cpu().numpy()
@@ -231,16 +244,19 @@ class RagllmPlugin(Plugin):
             raise ValueError("Méthode de similarité non reconnue")
 
     def get_context(self, query: str, config: Dict[str, Any]) -> tuple:
-        query_embedding = self.get_embedding(query, config['ragllm']['embedder'])
-        similarities = self.calculate_similarity(query_embedding, config['ragllm']['similarity_method'])
-        top_indices = np.argsort(similarities)[-config['ragllm']['top_k']:][::-1]
+        query_embedding = self.get_embedding(
+            query, config['ragllm']['embedder'])
+        similarities = self.calculate_similarity(
+            query_embedding, config['ragllm']['similarity_method'])
+        top_indices = np.argsort(
+            similarities)[-config['ragllm']['top_k']:][::-1]
         context = "\n\n".join([self.chunks[i] for i in top_indices])
         return context, [self.chunks[i] for i in top_indices]
 
     def call_llm(self, prompt: str, sysprompt: str) -> str:
         try:
             llm_model = st.session_state.ragllm_llm_model
-            #print(f"---------------------------------------\nCalling LLM {llm_model} \n with sysprompt {sysprompt} \n and prompt {prompt}")
+            # print(f"---------------------------------------\nCalling LLM {llm_model} \n with sysprompt {sysprompt} \n and prompt {prompt}")
             messages = [
                 {"role": "system", "content": sysprompt},
                 {"role": "user", "content": prompt}
@@ -279,22 +295,27 @@ class RagllmPlugin(Plugin):
         if 'rag_question' not in st.session_state:
             st.session_state.rag_question = "Question"
 
-        rag_text = st.text_area(t("rag_enter_text"), height=200, value=st.session_state.rag_text, key="rag_text_key")
-        user_prompt = st.text_area(t("rag_enter_question"), value=st.session_state.rag_question, key="rag_prompt_key")
-        st.session_state.rag_text = rag_text  # Mettre à jour la valeur dans session_state
+        rag_text = st.text_area(t("rag_enter_text"), height=200,
+                                value=st.session_state.rag_text, key="rag_text_key")
+        user_prompt = st.text_area(
+            t("rag_enter_question"), value=st.session_state.rag_question, key="rag_prompt_key")
+        # Mettre à jour la valeur dans session_state
+        st.session_state.rag_text = rag_text
         st.session_state.rag_question = user_prompt
 
         if st.button(t("rag_button_get_answer"), key="get_answer_button"):
 
             with st.spinner(t("rag_processing")):
                 if rag_text:
-                    self.process_rag_text(rag_text, config['ragllm']['chunk_size'], config['ragllm']['embedder'])
+                    self.process_rag_text(
+                        rag_text, config['ragllm']['chunk_size'], config['ragllm']['embedder'])
                     st.success(t("rag_success_text_processed"))
                 else:
                     st.warning(t("rag_warning_enter_text"))
                 if user_prompt and self.embeddings is not None:
                     context, citations = self.get_context(user_prompt, config)
-                    response = self.process_with_llm(user_prompt, config['ragllm']['llm_sys_prompt'], context)
+                    response = self.process_with_llm(
+                        user_prompt, config['ragllm']['llm_sys_prompt'], context)
 
                     st.write(t("rag_answer"))
                     st.write(response)
