@@ -26,8 +26,8 @@ python-telegram-bot
 PyJWT
 pyperclip
 diffsynth
-moviepy
 onnxruntime
 accelerate
 whisper
 langdetect
+moviepy==1.0.3
