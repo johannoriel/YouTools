@@ -289,7 +289,7 @@ class DirectpublishPlugin(Plugin):
                     print(title)
                     tags = remove_quotes(cut_string(tags))
                     st.code(tags)
-                    print("Uploading...")
+                    st.info("Uploading...")
                     try:
                         video_id = upload_video(
                             video_to_process,
