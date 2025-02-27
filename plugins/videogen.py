@@ -21,6 +21,7 @@ translations["en"].update({
     "videogen_fps": "FPS",
     "videogen_quality": "Quality",
     "videogen_seed": "Seed",
+    "videogen_steps": "Default Number of Inference Steps",
     "videogen_random_seed": "Random Seed",
     "videogen_generate_video": "Generate Video",
     "videogen_processing": "Generating video...",
@@ -42,6 +43,7 @@ translations["fr"].update({
     "videogen_fps": "IPS",
     "videogen_quality": "Qualité",
     "videogen_seed": "Graine",
+    "video_gen_steps": "Nombre de passes d'inférences",
     "videogen_random_seed": "Graine Aléatoire",
     "videogen_generate_video": "Générer la Vidéo",
     "videogen_processing": "Génération de la vidéo...",
@@ -79,6 +81,11 @@ class VideogenPlugin(Plugin):
                 "label": "Model Directory",
                 "default": "models/Wan-AI/Wan2.1-T2V-1.3B"
             },
+            "i2v_model_dir": {
+                "type": "text",
+                "label": "I2V Model Directory",
+                "default": "models/Wan-AI/Wan2.1-I2V-14B-480P"
+            },
             "output_dir": {
                 "type": "text",
                 "label": t("videogen_output_dir"),
@@ -98,6 +105,11 @@ class VideogenPlugin(Plugin):
                 "type": "number",
                 "label": t("videogen_seed"),
                 "default": 0
+            },
+            "default_num_inference_steps": {
+                "type": "number",
+                "label": t("video_gen_steps"),
+                "default": 50
             },
             "default_prompt": {
                 "type": "textarea",
@@ -126,20 +138,38 @@ class VideogenPlugin(Plugin):
              "plugin": "videogen_video2video"}
         ]
 
-    def _load_pipeline(self, config):
+    def _load_pipeline(self, config, is_image_to_video=False):
         if self.pipe is None:
-            model_dir = config['videogen']['model_dir']
-            if not os.path.exists(model_dir):
-                snapshot_download("Wan-AI/Wan2.1-T2V-1.3B", cache_dir="models")
-            model_manager = ModelManager(device="cpu")
-            model_manager.load_models(
-                [
-                    f"{model_dir}/diffusion_pytorch_model.safetensors",
-                    f"{model_dir}/models_t5_umt5-xxl-enc-bf16.pth",
-                    f"{model_dir}/Wan2.1_VAE.pth",
-                ],
-                torch_dtype=torch.bfloat16,
-            )
+            if is_image_to_video:
+                model_dir = config['videogen']['i2v_model_dir']
+                if not os.path.exists(model_dir):
+                    snapshot_download(
+                        "Wan-AI/Wan2.1-I2V-14B-480P", cache_dir="models")
+                model_manager = ModelManager(device="cpu")
+                model_manager.load_models(
+                    [
+                        [f"{model_dir}/diffusion_pytorch_model-0000{i}-of-00007.safetensors" for i in range(
+                            1, 8)],
+                        f"{model_dir}/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                        f"{model_dir}/models_t5_umt5-xxl-enc-bf16.pth",
+                        f"{model_dir}/Wan2.1_VAE.pth",
+                    ],
+                    torch_dtype=torch.bfloat16,
+                )
+            else:
+                model_dir = config['videogen']['model_dir']
+                if not os.path.exists(model_dir):
+                    snapshot_download(
+                        "Wan-AI/Wan2.1-T2V-1.3B", cache_dir="models")
+                model_manager = ModelManager(device="cpu")
+                model_manager.load_models(
+                    [
+                        f"{model_dir}/diffusion_pytorch_model.safetensors",
+                        f"{model_dir}/models_t5_umt5-xxl-enc-bf16.pth",
+                        f"{model_dir}/Wan2.1_VAE.pth",
+                    ],
+                    torch_dtype=torch.bfloat16,
+                )
             self.pipe = WanVideoPipeline.from_model_manager(
                 model_manager, torch_dtype=torch.bfloat16, device="cuda"
             )
@@ -165,25 +195,26 @@ class VideogenPlugin(Plugin):
             # Fallback si le format n'est pas respecté
             return response.strip(), config['videogen']['default_negative_prompt']
 
-    def _generate_video(self, config, prompt, negative_prompt, fps, quality, seed, input_image=None, input_video=None):
-        self._load_pipeline(config)
+    def _generate_video(self, config, prompt, negative_prompt, fps, quality, seed, num_inference_steps, input_image=None, input_video=None):
+        # Charger I2V si input_image, T2V sinon
+        self._load_pipeline(config, is_image_to_video=bool(input_image))
         output_dir = os.path.expanduser(config['videogen']['output_dir'])
         os.makedirs(output_dir, exist_ok=True)
 
         video_params = {
             "prompt": prompt,
             "negative_prompt": negative_prompt,
-            "num_inference_steps": 50,
+            "num_inference_steps": num_inference_steps,
             "seed": seed,
             "tiled": True
         }
         if input_image:
-            video = self.pipe(**video_params, input_image=input_image)
+            video_params["input_image"] = input_image
         elif input_video:
-            video = self.pipe(
-                **video_params, input_video=input_video, denoising_strength=0.7)
-        else:
-            video = self.pipe(**video_params)
+            video_params["input_video"] = input_video
+            video_params["denoising_strength"] = 0.7
+
+        video = self.pipe(**video_params)
 
         output_path = os.path.join(output_dir, f"video_{seed}.mp4")
         save_video(video, output_path, fps=fps, quality=quality)
@@ -225,6 +256,8 @@ class VideogenPlugin(Plugin):
             config['videogen']['default_fps']), key=f"fps_{suffix}")
         quality = st.number_input(t("videogen_quality"), min_value=1, max_value=10, value=int(
             config['videogen']['default_quality']), key=f"quality_{suffix}")
+        num_inference_steps = st.number_input("Number of Inference Steps", min_value=1, value=int(
+            config['videogen']['default_num_inference_steps']), key=f"num_inference_steps_{suffix}")
         use_random_seed = st.checkbox(
             t("videogen_random_seed"), key=f"random_seed_{suffix}")
         seed = st.number_input(t("videogen_seed"), value=int(
@@ -234,7 +267,7 @@ class VideogenPlugin(Plugin):
         if st.button(t("videogen_generate_video"), key=f"generate_video_{suffix}"):
             with st.spinner(t("videogen_processing")):
                 output_path = self._generate_video(
-                    config, prompt, negative_prompt, fps, quality, seed, input_image, input_video)
+                    config, prompt, negative_prompt, fps, quality, seed, num_inference_steps, input_image, input_video)
                 st.video(output_path)
                 st.success(t("videogen_done"))
                 st.write(f"Video saved at: {output_path}")
@@ -244,15 +277,19 @@ class VideogenPlugin(Plugin):
         self._common_ui(config, suffix="txt2vid")
 
     def _image_to_video(self, config):
+        from modelscope import dataset_snapshot_download
         st.header(t("videogen_header"))
         work_dir = config['common']['work_directory']
         image_files = [f for f in os.listdir(
             work_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
         selected_image = st.selectbox(
             t("videogen_input_image"), [""] + image_files)
-        input_image = Image.open(os.path.join(
-            work_dir, selected_image)) if selected_image else None
-        self._common_ui(config, input_image=input_image, suffix="img2vid")
+
+        if selected_image:  # Check if an image is selected
+            input_image = Image.open(os.path.join(work_dir, selected_image))
+            self._common_ui(config, input_image=input_image, suffix="img2vid")
+        else:
+            st.warning("Please select an image to proceed.")
 
     def _video_to_video(self, config):
         st.header(t("videogen_header"))
