@@ -216,7 +216,25 @@ class TrimsilencesPlugin(Plugin):
             video = VideoFileClip(input_file)
 
             # Extraire l'audio et le convertir en array numpy
-            audio_array = video.audio.to_soundarray()
+            # audio_array = video.audio.to_soundarray() => BUG ?
+
+            import tempfile
+            import scipy.io.wavfile as wavfile
+
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                temp_filename = temp_file.name
+
+            # Écrire l'audio dans un fichier temporaire
+            video.audio.write_audiofile(
+                temp_filename, fps=44100, nbytes=2, codec='pcm_s16le')
+
+            # Lire l'audio avec scipy
+            sample_rate, audio_array = wavfile.read(temp_filename)
+
+            # Convertir en mono si stéréo
+            if len(audio_array.shape) > 1:
+                audio_array = np.mean(audio_array, axis=1).astype(np.int16)
+
             if len(audio_array.shape) > 1:
                 # Convertir en mono si stéréo
                 audio_array = np.mean(audio_array, axis=1)
