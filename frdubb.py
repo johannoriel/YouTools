@@ -1,9 +1,9 @@
 import whisper
 import torch
 from TTS.api import TTS
-from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips, AudioClip
+from moviepy import VideoFileClip, AudioFileClip, concatenate_audioclips, AudioClip
 import moviepy.video.fx.all as vfx
-from moviepy.editor import concatenate_videoclips
+from moviepy import concatenate_videoclips
 import litellm
 import numpy as np
 import soundfile as sf
@@ -14,12 +14,14 @@ import re
 import time
 from datetime import datetime
 
+
 class VideoDubber:
     def __init__(self, input_video_path, output_video_path, model, threshold):
         self.start_time = time.time()
         print(f"[{self._get_timestamp()}] Initialisation...")
         self.whisper_model = whisper.load_model("medium")
-        self.tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2", gpu=True)
+        self.tts = TTS(
+            "tts_models/multilingual/multi-dataset/xtts_v2", gpu=True)
         self.input_video_path = input_video_path
         self.output_video_path = output_video_path
         self.temp_dir = Path(tempfile.mkdtemp())
@@ -31,7 +33,8 @@ class VideoDubber:
         video.audio.write_audiofile(str(self.reference_audio_path))
         self.video_duration = video.duration
         video.close()
-        print(f"[{self._get_timestamp()}] Initialisation terminée en {time.time() - self.start_time:.2f}s")
+        print(
+            f"[{self._get_timestamp()}] Initialisation terminée en {time.time() - self.start_time:.2f}s")
 
     def _get_timestamp(self):
         return datetime.now().strftime("%H:%M:%S")
@@ -141,8 +144,9 @@ class VideoDubber:
             audio_clips.append(french_audio)
 
             # Ajuster la vitesse de la vidéo pour correspondre à l'audio français
-            video_segment = video.subclip(segment['start'], segment['end'])
-            speed_factor = segment['french_duration'] / segment['original_duration']
+            video_segment = video.subclipped(start_time=segment['start'], end_time=segment['end'])
+            speed_factor = segment['french_duration'] / \
+                segment['original_duration']
             adjusted_video = video_segment.fx(vfx.speedx, 1/speed_factor)
             video_clips.append(adjusted_video)
 
@@ -173,14 +177,17 @@ class VideoDubber:
             file.unlink()
         self.temp_dir.rmdir()
         total_time = time.time() - self.start_time
-        print(f"\n[{self._get_timestamp()}] Traitement terminé en {total_time:.2f} secondes")
+        print(
+            f"\n[{self._get_timestamp()}] Traitement terminé en {total_time:.2f} secondes")
 
     # Optimized version
     def process_video(self):
         # 1. Transcription de tous les segments
         self._log_time("Début de la transcription")
-        segments = self.whisper_model.transcribe(str(self.reference_audio_path))['segments']
-        self._log_time(f"Transcription terminée - {len(segments)} segments trouvés")
+        segments = self.whisper_model.transcribe(
+            str(self.reference_audio_path))['segments']
+        self._log_time(
+            f"Transcription terminée - {len(segments)} segments trouvés")
 
         # 2. Traduction de tous les segments d'un coup
         self._log_time("Début des traductions")
@@ -206,10 +213,12 @@ class VideoDubber:
 
             # Nettoyer et séparer les traductions
             translations_text = response.choices[0].message.content
-            batch_translations = [self.clean_translation(t) for t in translations_text.split("\n---\n")]
+            batch_translations = [self.clean_translation(
+                t) for t in translations_text.split("\n---\n")]
             translations.extend(batch_translations)
 
-            print(f"[{self._get_timestamp()}] Traduction du lot {i//batch_size + 1}/{len(all_texts)//batch_size + 1}")
+            print(
+                f"[{self._get_timestamp()}] Traduction du lot {i//batch_size + 1}/{len(all_texts)//batch_size + 1}")
 
         self._log_time("Traductions terminées")
 
@@ -226,7 +235,8 @@ class VideoDubber:
             )
             self.trim_silence(output_path)
             audio_paths.append(output_path)
-            print(f"[{self._get_timestamp()}] Audio généré {idx + 1}/{len(translations)}")
+            print(
+                f"[{self._get_timestamp()}] Audio généré {idx + 1}/{len(translations)}")
 
         self._log_time("Génération audio terminée")
 
@@ -240,8 +250,9 @@ class VideoDubber:
             french_audio = AudioFileClip(str(audio_path))
             audio_clips.append(french_audio)
 
-            video_segment = video.subclip(segment['start'], segment['end'])
-            speed_factor = french_audio.duration / (segment['end'] - segment['start'])
+            video_segment = video.subclipped(start_time=segment['start'], end_time=segment['end'])
+            speed_factor = french_audio.duration / \
+                (segment['end'] - segment['start'])
             adjusted_video = video_segment.fx(vfx.speedx, 1/speed_factor)
             video_clips.append(adjusted_video)
             print(f"[{self._get_timestamp()}] Clip {idx + 1}/{len(segments)} ajusté")
@@ -272,9 +283,11 @@ class VideoDubber:
         self.temp_dir.rmdir()
 
         total_time = time.time() - self.start_time
-        print(f"\n[{self._get_timestamp()}] Traitement terminé en {total_time:.2f} secondes")
+        print(
+            f"\n[{self._get_timestamp()}] Traitement terminé en {total_time:.2f} secondes")
 
 
 if __name__ == "__main__":
-    dubber = VideoDubber('video_source.mp4', 'video_doublee.mp4', 'ollama/qwen2.5', -30)
+    dubber = VideoDubber('video_source.mp4',
+                         'video_doublee.mp4', 'ollama/qwen2.5', -30)
     dubber.create_dubbed_video()

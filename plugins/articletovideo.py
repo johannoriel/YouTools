@@ -1,3 +1,4 @@
+from proglog import ProgressBarLogger
 import streamlit as st
 from app import Plugin
 from global_vars import t, translations
@@ -10,7 +11,7 @@ from plugins.imggen import ImggenPlugin
 from plugins.ragllm import RagllmPlugin
 import os
 import subprocess
-from moviepy.editor import *
+from moviepy import *
 from PIL import Image
 import io
 import glob
@@ -352,7 +353,8 @@ class ArticletovideoPlugin(Plugin):
             if st.button(t("assemble_video"), key="assemble_video_button"):
                 audio_paths = st.session_state.audio_paths
                 image_paths = st.session_state.image_paths
-                output_dir = os.path.expanduser(config["articletovideo"]["output_dir"])
+                output_dir = os.path.expanduser(
+                    config["articletovideo"]["output_dir"])
                 self.assemble_final_video(
                     config,
                     use_zoom_and_transitions=True,
@@ -443,7 +445,8 @@ class ArticletovideoPlugin(Plugin):
         st.session_state.image_paths = image_files
 
         # Reconstruct segments and prompts based on file count
-        st.session_state.segments = [f"Segment {i+1}" for i in range(len(audio_files))]
+        st.session_state.segments = [
+            f"Segment {i+1}" for i in range(len(audio_files))]
         st.session_state.prompts = [
             f"Prompt for image {i+1}" for i in range(len(image_files))
         ]
@@ -525,7 +528,8 @@ class ArticletovideoPlugin(Plugin):
         plugin.show_detailed_interface(config)
         """
         if st.button(t("retrieve"), key="retrieve_button"):
-            article_text = self.retrieve_article(st.session_state.get("url", ""))
+            article_text = self.retrieve_article(
+                st.session_state.get("url", ""))
             st.session_state.article_text = article_text
 
         if "article_text" in st.session_state:
@@ -567,10 +571,12 @@ class ArticletovideoPlugin(Plugin):
                     )
             with col2:
                 if st.button(t("regenerate_audio"), key="regenerate_audio_button"):
-                    self.regenerate_audios(st.session_state.translated_text, config)
+                    self.regenerate_audios(
+                        st.session_state.translated_text, config)
             with col3:
                 if st.button(t("regenerate_images"), key="regenerate_images_button"):
-                    self.regenerate_images(st.session_state.edited_prompts, config)
+                    self.regenerate_images(
+                        st.session_state.edited_prompts, config)
 
         if (
             "image_paths" in st.session_state
@@ -583,7 +589,8 @@ class ArticletovideoPlugin(Plugin):
             if st.button(t("assemble_video"), key="assemble_video_button"):
                 audio_paths = st.session_state.audio_paths
                 image_paths = st.session_state.image_paths
-                output_dir = os.path.expanduser(config["articletovideo"]["output_dir"])
+                output_dir = os.path.expanduser(
+                    config["articletovideo"]["output_dir"])
                 self.assemble_final_video(
                     config,
                     use_zoom_and_transitions=True,
@@ -801,7 +808,8 @@ class ArticletovideoPlugin(Plugin):
                     num2words(int(digit), lang=lang) for digit in decimal_part
                 )
                 decimal_separator = (
-                    t("decimal_point") if lang.startswith("en") else t("decimal_comma")
+                    t("decimal_point") if lang.startswith(
+                        "en") else t("decimal_comma")
                 )
                 return f"{integer_words} {decimal_separator} {decimal_words}"
 
@@ -970,9 +978,11 @@ class ArticletovideoPlugin(Plugin):
                 prompt = f"Translate the following text to {target_lang}, converting all numbers and real numbers and percent sign to words, do not add any comment:\n\n{paragraph}"
 
                 ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
-                translated_paragraph = ragllm_plugin.call_llm(prompt, sysprompt)
+                translated_paragraph = ragllm_plugin.call_llm(
+                    prompt, sysprompt)
 
-                truncated_paragraph = translated_paragraph.split("\n\n", maxsplit=1)[0]
+                truncated_paragraph = translated_paragraph.split("\n\n", maxsplit=1)[
+                    0]
                 translated_paragraphs.append(truncated_paragraph)
                 progress_bar.progress((i + 1) / len(paragraphs))
 
@@ -1138,20 +1148,24 @@ class ArticletovideoPlugin(Plugin):
 
         if tts_model == "your_tts":  # fast but not best quality
             if self.tts_model is None:
-                self.tts_model = TTS("tts_models/multilingual/multi-dataset/your_tts")
+                self.tts_model = TTS(
+                    "tts_models/multilingual/multi-dataset/your_tts")
             self.tts_model.tts_to_file(
                 text=text,
                 file_path=output_path,
-                speaker_wav=os.path.expanduser(config["articletovideo"]["tts_speaker"]),
+                speaker_wav=os.path.expanduser(
+                    config["articletovideo"]["tts_speaker"]),
                 language=target_lang,
             )
         elif tts_model == "xtts_v2":  # best quality but very slow
             if self.tts_model is None:
-                self.tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+                self.tts_model = TTS(
+                    "tts_models/multilingual/multi-dataset/xtts_v2")
             self.tts_model.tts_to_file(
                 text=text,
                 file_path=output_path,
-                speaker_wav=os.path.expanduser(config["articletovideo"]["tts_speaker"]),
+                speaker_wav=os.path.expanduser(
+                    config["articletovideo"]["tts_speaker"]),
                 language=target_lang[:2],
             )
         elif tts_model == "tacotron":  # not very good quality and predermined voice
@@ -1160,7 +1174,8 @@ class ArticletovideoPlugin(Plugin):
             self.tts_model.tts_to_file(
                 text=text,
                 file_path=output_path,
-                speaker_wav=os.path.expanduser(config["articletovideo"]["tts_speaker"]),
+                speaker_wav=os.path.expanduser(
+                    config["articletovideo"]["tts_speaker"]),
             )
         elif tts_model == "bark":
             if self.tts_model is None:
@@ -1170,7 +1185,8 @@ class ArticletovideoPlugin(Plugin):
             self.tts_model.tts_to_file(
                 text=text,
                 file_path=output_path,
-                speaker_wav=os.path.expanduser(config["articletovideo"]["tts_speaker"]),
+                speaker_wav=os.path.expanduser(
+                    config["articletovideo"]["tts_speaker"]),
                 language=target_lang,
             )
         else:
@@ -1435,9 +1451,11 @@ class ArticletovideoPlugin(Plugin):
         """
         img = Image.open(uploaded_file)
         img = img.convert("RGB")
-        img = img.resize((1280, 720), Image.LANCZOS)  # Resize to 16:9 aspect ratio
+        # Resize to 16:9 aspect ratio
+        img = img.resize((1280, 720), Image.LANCZOS)
         output_dir = os.path.dirname(st.session_state.image_paths[index])
-        new_image_path = os.path.join(output_dir, f"image_{index}_uploaded.png")
+        new_image_path = os.path.join(
+            output_dir, f"image_{index}_uploaded.png")
         img.save(new_image_path)
         st.session_state.image_paths[index] = new_image_path
 
@@ -1479,26 +1497,34 @@ class ArticletovideoPlugin(Plugin):
             video_clips = []
             for audio_path, image_path in zip(audio_paths, image_paths):
                 audio_clip = AudioFileClip(audio_path)
-                image_clip = ImageClip(image_path).set_duration(audio_clip.duration)
+                image_clip = ImageClip(image_path).set_duration(
+                    audio_clip.duration)
 
                 if use_zoom_and_transitions:
-                    zoom_factor = float(config['articletovideo']['zoom_factor'])
-                    speed_factor = float(config['articletovideo']['speed_factor'])
+                    zoom_factor = float(
+                        config['articletovideo']['zoom_factor'])
+                    speed_factor = float(
+                        config['articletovideo']['speed_factor'])
                     initial_x_shift = random.uniform(1, 100)
                     initial_y_shift = random.uniform(1, 100)
-                    #zoomed_clip = image_clip.resize(lambda t: 1 + zoom_factor * t) # simple zoom
+                    # zoomed_clip = image_clip.resize(lambda t: 1 + zoom_factor * t) # simple zoom
+
                     def dynamic_zoom(get_frame, t):
                         # Create a smooth, periodic motion for zoom
-                        zoom = 1 + zoom_factor * (1 + math.sin(t * math.pi / 10)) / 2
+                        zoom = 1 + zoom_factor * \
+                            (1 + math.sin(t * math.pi / 10)) / 2
 
                         # Generate wandering motion
-                        x_shift = math.sin((t + initial_x_shift) / 3.0) * speed_factor
-                        y_shift = math.cos((t + initial_y_shift) / 2.4) * speed_factor
+                        x_shift = math.sin(
+                            (t + initial_x_shift) / 3.0) * speed_factor
+                        y_shift = math.cos(
+                            (t + initial_y_shift) / 2.4) * speed_factor
 
                         # Create the transformation matrix
                         center_x, center_y = 0.5 + x_shift, 0.5 + y_shift
                         matrix = cv2.getRotationMatrix2D(
-                            (center_x * image_clip.w, center_y * image_clip.h), 0, zoom
+                            (center_x * image_clip.w,
+                             center_y * image_clip.h), 0, zoom
                         )
                         matrix[0, 2] += (0.5 - center_x) * image_clip.w
                         matrix[1, 2] += (0.5 - center_y) * image_clip.h
@@ -1522,7 +1548,8 @@ class ArticletovideoPlugin(Plugin):
                 final_clips = []
                 for i, clip in enumerate(video_clips):
                     if i > 0:
-                        final_clips.append(CompositeVideoClip([clip.crossfadein(1)]))
+                        final_clips.append(
+                            CompositeVideoClip([clip.crossfadein(1)]))
                     else:
                         final_clips.append(clip)
             else:
@@ -1549,9 +1576,6 @@ class ArticletovideoPlugin(Plugin):
 
         st.success(t("video_generated"))
         st.video(output_path)
-
-
-from proglog import ProgressBarLogger
 
 
 class StreamlitProgressBarLogger(ProgressBarLogger):

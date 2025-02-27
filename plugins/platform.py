@@ -4,7 +4,7 @@ import streamlit as st
 from plugins.common import remove_quotes, list_all_video_files
 
 import requests
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 import os
 
 # Mise à jour des traductions
@@ -55,7 +55,8 @@ class PlatformPlugin(Plugin):
         clip.close()
 
         if duration > 60:
-            st.warning("TikTok video must be 60 seconds or less. Please trim your video.")
+            st.warning(
+                "TikTok video must be 60 seconds or less. Please trim your video.")
             return None
 
         # Préparation des données pour l'upload
@@ -72,13 +73,15 @@ class PlatformPlugin(Plugin):
         }
 
         try:
-            response = requests.post(url, headers=headers, data=data, files=files)
+            response = requests.post(
+                url, headers=headers, data=data, files=files)
             response.raise_for_status()
             result = response.json()
             if result.get("data") and result["data"].get("share_id"):
                 return result["data"]["share_id"]
             else:
-                st.error(f"TikTok upload failed: {result.get('error', 'Unknown error')}")
+                st.error(
+                    f"TikTok upload failed: {result.get('error', 'Unknown error')}")
                 return None
         except requests.RequestException as e:
             st.error(f"Error during TikTok upload: {str(e)}")
@@ -93,7 +96,8 @@ class PlatformPlugin(Plugin):
         clip.close()
 
         if duration > 60:
-            st.warning("Instagram video must be 60 seconds or less for a single post. Please trim your video or consider using IGTV for longer videos.")
+            st.warning(
+                "Instagram video must be 60 seconds or less for a single post. Please trim your video or consider using IGTV for longer videos.")
             return None
 
         # Préparation des données pour l'upload
@@ -110,7 +114,8 @@ class PlatformPlugin(Plugin):
             response.raise_for_status()
             result = response.json()
             if not result.get("id"):
-                st.error(f"Instagram upload failed: {result.get('error', 'Unknown error')}")
+                st.error(
+                    f"Instagram upload failed: {result.get('error', 'Unknown error')}")
                 return None
 
             creation_id = result["id"]
@@ -124,7 +129,8 @@ class PlatformPlugin(Plugin):
                 "access_token": self.config['platform']['instagram_api_key'],
             }
 
-            response = requests.post(upload_url, files=files, params=upload_params)
+            response = requests.post(
+                upload_url, files=files, params=upload_params)
             response.raise_for_status()
 
             # Étape 3 : Publier le média
@@ -136,7 +142,8 @@ class PlatformPlugin(Plugin):
             if result.get("id"):
                 return result["id"]
             else:
-                st.error(f"Instagram publish failed: {result.get('error', 'Unknown error')}")
+                st.error(
+                    f"Instagram publish failed: {result.get('error', 'Unknown error')}")
                 return None
 
         except requests.RequestException as e:
@@ -160,8 +167,8 @@ class PlatformPlugin(Plugin):
             options=[v[0] for v in video_files],
             index=0  # Sélectionne par défaut la vidéo la plus récente
         )
-        selected_video_path = next(v[1] for v in video_files if v[0] == selected_video)
-
+        selected_video_path = next(
+            v[1] for v in video_files if v[0] == selected_video)
 
         platforms = st.multiselect(
             t("select_platforms"),
@@ -171,8 +178,10 @@ class PlatformPlugin(Plugin):
         if st.button(t("upload_button")):
             for platform in platforms:
                 if platform == "TikTok":
-                    video_id = self.upload_video_tiktok(selected_video_path, title, description)
+                    video_id = self.upload_video_tiktok(
+                        selected_video_path, title, description)
                     st.success(f"TikTok upload success: {video_id}")
                 elif platform == "Instagram":
-                    post_id = self.upload_video_instagram(selected_video_path, title, description)
+                    post_id = self.upload_video_instagram(
+                        selected_video_path, title, description)
                     st.success(f"Instagram upload success: {post_id}")

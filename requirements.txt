@@ -30,4 +30,4 @@ onnxruntime
 accelerate
 whisper
 langdetect
-moviepy==1.0.3
+moviepy

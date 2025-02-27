@@ -5,7 +5,7 @@ from typing import List, Tuple
 import streamlit as st
 from app import Plugin
 from plugins.common import list_video_files
-from moviepy.editor import VideoFileClip, concatenate_videoclips
+from moviepy import VideoFileClip, concatenate_videoclips
 
 # Ajout des nouvelles traductions
 translations["en"].update({
@@ -44,52 +44,49 @@ translations["fr"].update({
 def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
                             threshold_db: float, min_duration: float,
                             keep_duration: float) -> List[Tuple[float, float, float]]:
-    """
-    Détecte les segments de silence dans un signal audio.
+    print(f"Longueur audio array: {len(audio_array)} échantillons, Sample rate: {sample_rate} Hz")
 
-    Args:
-        audio_array: Signal audio (numpy array)
-        sample_rate: Taux d'échantillonnage
-        threshold_db: Seuil de silence en dB
-        min_duration: Durée minimale du silence en secondes
-        keep_duration: Durée à conserver pour chaque silence en secondes
-
-    Returns:
-        Liste de tuples (début_segment, fin_segment, milieu_silence) pour les segments non-silencieux
-    """
     # Convertir le seuil dB en amplitude linéaire
     threshold_amp = 10 ** (threshold_db / 20)
 
     # Calculer l'amplitude RMS sur des fenêtres courtes
     window_size = int(sample_rate * 0.02)  # fenêtre de 20ms
+    print(f"Taille fenêtre: {window_size} échantillons")
     if window_size == 0:
+        print("Erreur: window_size est 0")
         return []
     num_windows = len(audio_array) // window_size
+    print(f"Nombre de fenêtres: {num_windows}")
     if num_windows == 0:
+        print("Erreur: num_windows est 0")
         return []
     audio_array = audio_array[:num_windows * window_size]
     rms = np.array([np.sqrt(np.mean(window**2))
                    for window in np.array_split(audio_array, num_windows)])
+    print(f"Longueur RMS: {len(rms)}")
 
     # Détecter les segments silencieux
     is_silence = rms < threshold_amp
     if len(is_silence) == 0:
+        print("Erreur: is_silence est vide")
         return []
 
     # Trouver les indices de changement d'état
-    changes = np.where(np.diff(is_silence))[
-        0] + 1  # +1 pour aligner les indices
+    changes = np.where(np.diff(is_silence))[0] + 1
     changes = changes.tolist()
+    print(f"Indices de changement: {changes}")
 
     # Ajouter les bords si nécessaire pour gérer les silences initiaux/finaux
     if is_silence[0]:
         changes.insert(0, 0)
     if is_silence[-1]:
         changes.append(len(is_silence))
+    print(f"Indices ajustés: {changes}")
 
     segments = []
     start_time = 0.0
     time_per_window = window_size / sample_rate
+    print(f"Temps par fenêtre: {time_per_window} secondes")
 
     # Traiter chaque intervalle de silence
     for i in range(0, len(changes), 2):
@@ -99,33 +96,27 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
         silence_start = changes[i]
         silence_end = changes[i + 1]
 
-        # Calculer la durée du silence
         silence_duration = (silence_end - silence_start) * time_per_window
+        #print(f"Silence détecté: début={silence_start}, fin={silence_end}, durée={silence_duration}s")
 
         if silence_duration >= min_duration:
-            # Segment non-silencieux avant le silence
             non_silent_end = silence_start * time_per_window
             if non_silent_end > start_time:
                 segments.append((start_time, non_silent_end, None))
+                #print(f"Segment non-silencieux: {start_time} -> {non_silent_end}")
 
-            # Calculer le milieu du silence
-            silence_middle = (silence_start + silence_end) / \
-                2 * time_per_window
-            # Conserver une partie autour du milieu
+            silence_middle = (silence_start + silence_end) / 2 * time_per_window
             keep_start = max(start_time, silence_middle - keep_duration / 2)
-            keep_end = min(silence_end * time_per_window,
-                           silence_middle + keep_duration / 2)
-
-            # Ajouter le segment conservé
+            keep_end = min(silence_end * time_per_window, silence_middle + keep_duration / 2)
             segments.append((keep_start, keep_end, silence_middle))
+            #print(f"Segment conservé: {keep_start} -> {keep_end}, milieu={silence_middle}")
 
-            # Mettre à jour le début pour le prochain segment
             start_time = silence_end * time_per_window
 
-    # Ajouter le dernier segment après le dernier silence
     final_end_time = len(audio_array) / sample_rate
     if start_time < final_end_time:
         segments.append((start_time, final_end_time, None))
+        #print(f"Dernier segment: {start_time} -> {final_end_time}")
 
     # Fusionner les segments adjacents sans pause
     merged_segments = []
@@ -139,8 +130,10 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
             else:
                 merged_segments.append(seg)
 
+    #print("Segments finaux:")
+    #for i, (start, end, middle) in enumerate(merged_segments):
+    #    print(f"Segment {i}: {start} -> {end} (durée={(end-start)}s)")
     return merged_segments
-
 
 class TrimsilencesPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -216,28 +209,17 @@ class TrimsilencesPlugin(Plugin):
             video = VideoFileClip(input_file)
 
             # Extraire l'audio et le convertir en array numpy
-            # audio_array = video.audio.to_soundarray() => BUG ?
-
-            import tempfile
-            import scipy.io.wavfile as wavfile
-
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-                temp_filename = temp_file.name
-
-            # Écrire l'audio dans un fichier temporaire
-            video.audio.write_audiofile(
-                temp_filename, fps=44100, nbytes=2, codec='pcm_s16le')
-
-            # Lire l'audio avec scipy
-            sample_rate, audio_array = wavfile.read(temp_filename)
+            audio_array = video.audio.to_soundarray(fps=video.audio.fps)
+            print(f"Type audio_array: {type(audio_array)}")
+            print(f"Shape audio_array: {audio_array.shape}")
+            print(f"Dtype audio_array: {audio_array.dtype}")
+            print(f"Valeurs min/max audio_array: {audio_array.min()}, {audio_array.max()}")
+            print(f"Sample rate: {video.audio.fps}")
 
             # Convertir en mono si stéréo
             if len(audio_array.shape) > 1:
-                audio_array = np.mean(audio_array, axis=1).astype(np.int16)
-
-            if len(audio_array.shape) > 1:
-                # Convertir en mono si stéréo
-                audio_array = np.mean(audio_array, axis=1)
+                audio_array = np.mean(audio_array, axis=1).astype(np.float32)
+                print(f"Après conversion mono - Shape: {audio_array.shape}")
 
             # Détecter les segments avec leurs points de transition
             segments = detect_silence_segments(
@@ -247,6 +229,7 @@ class TrimsilencesPlugin(Plugin):
                 duration,
                 keep_duration
             )
+            print(f"Nombre de segments détectés: {len(segments)}")
 
             if progress_callback:
                 progress_callback(33)
@@ -255,7 +238,7 @@ class TrimsilencesPlugin(Plugin):
             clips = []
             for i, (start, end, silence_middle) in enumerate(segments):
                 # Ajouter le segment non-silencieux
-                clip = video.subclip(start, end)
+                clip = video.subclipped(start_time=start, end_time=end)
                 clips.append(clip)
 
                 if progress_callback:

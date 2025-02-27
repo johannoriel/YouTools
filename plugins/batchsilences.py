@@ -4,7 +4,7 @@ import pandas as pd
 from app import Plugin
 from global_vars import translations, t
 from plugins.common import list_all_video_files
-from moviepy.editor import VideoFileClip, concatenate_videoclips
+from moviepy import VideoFileClip, concatenate_videoclips
 from typing import List
 
 # Add translations
