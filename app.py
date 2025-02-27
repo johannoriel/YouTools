@@ -10,21 +10,26 @@ from global_vars import translations, t
 CONFIG_FILE = "config.json"
 CORE_PLUGINS = {'common', 'ragllm'}  # Add your essential plugins here
 
+
 def load_config() -> Dict[str, Any]:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
     return {}
 
+
 def save_config(config: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
 
+
 def set_lang(language):
     st.session_state.lang = language
 
+
 def t(key: str) -> str:
     return translations[st.session_state.lang].get(key, key)
+
 
 class Plugin:
     def __init__(self, name, plugin_manager):
@@ -40,12 +45,14 @@ class Plugin:
     def get_config_ui(self, config):
         updated_config = {}
         for field, params in self.get_config_fields().items():
+            print(params['label'])
             if params['type'] == 'select':
                 updated_config[field] = st.selectbox(
                     params['label'],
                     options=[option[0] for option in params['options']],
                     format_func=lambda x: dict(params['options'])[x],
-                    index=[option[0] for option in params['options']].index(config.get(field, params['default']))
+                    index=[option[0] for option in params['options']].index(
+                        config.get(field, params['default']))
                 )
             elif params['type'] == 'textarea':
                 updated_config[field] = st.text_area(
@@ -68,6 +75,7 @@ class Plugin:
 
     def get_sidebar_config_ui(self, config: Dict[str, Any]) -> Dict[str, Any]:
         return {}
+
 
 class PluginManager:
     def __init__(self, config):
@@ -109,7 +117,8 @@ class PluginManager:
         all_ui = {}
         for plugin_name, plugin in sorted(self.plugins.items()):
             with st.expander(f"{'⭐ ' if plugin_name in self.starred_plugins else ''}{t('configurations')} {plugin_name}"):
-                all_ui[plugin_name] = plugin.get_config_ui(config.get(plugin_name, {}))
+                all_ui[plugin_name] = plugin.get_config_ui(
+                    config.get(plugin_name, {}))
                 if st.button(f"{'Unstar' if plugin_name in self.starred_plugins else 'Star'} {plugin_name}"):
                     if plugin_name in self.starred_plugins:
                         self.starred_plugins.remove(plugin_name)
@@ -125,7 +134,8 @@ class PluginManager:
         for plugin_name in CORE_PLUGINS:
             plugin = self.get_plugin(plugin_name)
             if plugin:
-                sidebar_config = plugin.get_sidebar_config_ui(config.get(plugin_name, {}))
+                sidebar_config = plugin.get_sidebar_config_ui(
+                    config.get(plugin_name, {}))
                 if sidebar_config:
                     sidebar_configs[plugin_name] = sidebar_config
         return sidebar_configs
@@ -150,7 +160,8 @@ class PluginManager:
                 tab['id'] = plugin_name
                 tab['starred'] = plugin_name in self.starred_plugins
             # Replace the placeholder with actual tabs
-            all_tabs = [t for t in all_tabs if t['plugin'] != plugin_name] + tabs
+            all_tabs = [t for t in all_tabs if t['plugin']
+                        != plugin_name] + tabs
 
         return all_tabs
 
@@ -166,6 +177,7 @@ class PluginManager:
         plugin = self.get_plugin(plugin_name)
         if plugin:
             plugin.run(config)
+
 
 def main():
     st.set_page_config(page_title="YoutTools", layout="wide")
@@ -191,7 +203,8 @@ def main():
     config['llm_key'] = LLM_KEY
 
     # Create tabs
-    tabs = [{"id": "configurations", "name": t("configurations")}] + plugin_manager.get_all_tabs()
+    tabs = [{"id": "configurations", "name": t(
+        "configurations")}] + plugin_manager.get_all_tabs()
 
     # Language selection
     new_lang = st.sidebar.selectbox(
@@ -206,11 +219,11 @@ def main():
         st.rerun()
 
     # Handle core plugins sidebar configuration
-    core_sidebar_configs = plugin_manager.get_sidebar_config_for_core_plugins(config)
+    core_sidebar_configs = plugin_manager.get_sidebar_config_for_core_plugins(
+        config)
     for plugin_name, sidebar_config in core_sidebar_configs.items():
         for key, value in sidebar_config.items():
             config.setdefault(plugin_name, {})[key] = value
-
 
     # Ajouter le bouton "Clean session" dans la barre latérale
     if st.sidebar.button(t("Clean session")):
@@ -222,13 +235,18 @@ def main():
         st.session_state.selected_tab_id = "directpublish"
 
     # Sort and display tabs
-    sorted_tabs = sorted(tabs, key=lambda x: (not x.get('starred', False), x['name']))
-    tab_names = [f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" for tab in sorted_tabs]
+    sorted_tabs = sorted(tabs, key=lambda x: (
+        not x.get('starred', False), x['name']))
+    tab_names = [
+        f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" for tab in sorted_tabs]
 
-    selected_tab_index = [tab["id"] for tab in sorted_tabs].index(st.session_state.selected_tab_id)
-    selected_tab = st.sidebar.radio(t("navigation"), tab_names, index=selected_tab_index, key="tab_selector")
+    selected_tab_index = [tab["id"] for tab in sorted_tabs].index(
+        st.session_state.selected_tab_id)
+    selected_tab = st.sidebar.radio(
+        t("navigation"), tab_names, index=selected_tab_index, key="tab_selector")
 
-    new_selected_tab_id = next(tab["id"] for tab in sorted_tabs if f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" == selected_tab)
+    new_selected_tab_id = next(
+        tab["id"] for tab in sorted_tabs if f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" == selected_tab)
 
     if new_selected_tab_id != st.session_state.selected_tab_id:
         st.session_state.selected_tab_id = new_selected_tab_id
@@ -248,6 +266,7 @@ def main():
     else:
         # Load and run only the selected plugin
         plugin_manager.run_plugin(st.session_state.selected_tab_id, config)
+
 
 if __name__ == "__main__":
     main()
