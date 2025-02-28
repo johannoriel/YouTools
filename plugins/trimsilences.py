@@ -44,7 +44,8 @@ translations["fr"].update({
 def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
                             threshold_db: float, min_duration: float,
                             keep_duration: float) -> List[Tuple[float, float, float]]:
-    print(f"Longueur audio array: {len(audio_array)} échantillons, Sample rate: {sample_rate} Hz")
+    print(
+        f"Longueur audio array: {len(audio_array)} échantillons, Sample rate: {sample_rate} Hz")
 
     # Convertir le seuil dB en amplitude linéaire
     threshold_amp = 10 ** (threshold_db / 20)
@@ -97,26 +98,28 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
         silence_end = changes[i + 1]
 
         silence_duration = (silence_end - silence_start) * time_per_window
-        #print(f"Silence détecté: début={silence_start}, fin={silence_end}, durée={silence_duration}s")
+        # print(f"Silence détecté: début={silence_start}, fin={silence_end}, durée={silence_duration}s")
 
         if silence_duration >= min_duration:
             non_silent_end = silence_start * time_per_window
             if non_silent_end > start_time:
                 segments.append((start_time, non_silent_end, None))
-                #print(f"Segment non-silencieux: {start_time} -> {non_silent_end}")
+                # print(f"Segment non-silencieux: {start_time} -> {non_silent_end}")
 
-            silence_middle = (silence_start + silence_end) / 2 * time_per_window
+            silence_middle = (silence_start + silence_end) / \
+                2 * time_per_window
             keep_start = max(start_time, silence_middle - keep_duration / 2)
-            keep_end = min(silence_end * time_per_window, silence_middle + keep_duration / 2)
+            keep_end = min(silence_end * time_per_window,
+                           silence_middle + keep_duration / 2)
             segments.append((keep_start, keep_end, silence_middle))
-            #print(f"Segment conservé: {keep_start} -> {keep_end}, milieu={silence_middle}")
+            # print(f"Segment conservé: {keep_start} -> {keep_end}, milieu={silence_middle}")
 
             start_time = silence_end * time_per_window
 
     final_end_time = len(audio_array) / sample_rate
     if start_time < final_end_time:
         segments.append((start_time, final_end_time, None))
-        #print(f"Dernier segment: {start_time} -> {final_end_time}")
+        # print(f"Dernier segment: {start_time} -> {final_end_time}")
 
     # Fusionner les segments adjacents sans pause
     merged_segments = []
@@ -130,10 +133,11 @@ def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
             else:
                 merged_segments.append(seg)
 
-    #print("Segments finaux:")
-    #for i, (start, end, middle) in enumerate(merged_segments):
+    # print("Segments finaux:")
+    # for i, (start, end, middle) in enumerate(merged_segments):
     #    print(f"Segment {i}: {start} -> {end} (durée={(end-start)}s)")
     return merged_segments
+
 
 class TrimsilencesPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -207,13 +211,15 @@ class TrimsilencesPlugin(Plugin):
 
             # Charger la vidéo
             video = VideoFileClip(input_file)
+            original_duration = video.duration
 
             # Extraire l'audio et le convertir en array numpy
             audio_array = video.audio.to_soundarray(fps=video.audio.fps)
             print(f"Type audio_array: {type(audio_array)}")
             print(f"Shape audio_array: {audio_array.shape}")
             print(f"Dtype audio_array: {audio_array.dtype}")
-            print(f"Valeurs min/max audio_array: {audio_array.min()}, {audio_array.max()}")
+            print(
+                f"Valeurs min/max audio_array: {audio_array.min()}, {audio_array.max()}")
             print(f"Sample rate: {video.audio.fps}")
 
             # Convertir en mono si stéréo
@@ -263,6 +269,25 @@ class TrimsilencesPlugin(Plugin):
                                         remove_temp=True,
                                         audio_bitrate="192k",
                                         preset='medium')
+            final_duration = final_video.duration
+
+            # Calcul du pourcentage de réduction
+            if final_duration >= original_duration:
+                error_msg = t("trim_silences_error").format(
+                    error="Output video is not shorter than input video"
+                )
+                # Nettoyer
+                video.close()
+                final_video.close()
+                for clip in clips:
+                    clip.close()
+                if os.path.exists(output_file):
+                    os.remove(output_file)  # Supprimer le fichier invalide
+                return error_msg, "0%"
+
+            reduction_percentage = ((original_duration - final_duration) /
+                                    original_duration * 100)
+            reduction_str = f"{reduction_percentage:.1f}%"
 
             # Nettoyer
             video.close()
@@ -273,10 +298,10 @@ class TrimsilencesPlugin(Plugin):
             if progress_callback:
                 progress_callback(100)
 
-            return output_file
+            return output_file, reduction_str
 
         except Exception as e:
-            return t("trim_silences_error").format(error=str(e))
+            return t("trim_silences_error").format(error=str(e)), "0%"
 
     def run(self, config):
         st.header(t("trim_silences_header"))
@@ -332,7 +357,7 @@ class TrimsilencesPlugin(Plugin):
 
         st.subheader(t("trim_silences_original_videos"))
         for file, full_path, _ in video_files:
-            col1, col2 = st.columns([3, 1])
+            col1, col2 = st.columns([2, 1])
             with col1:
                 st.write(file)
             with col2:
@@ -347,7 +372,7 @@ class TrimsilencesPlugin(Plugin):
 
                     with st.spinner(t("trim_silences_processing").format(file=file)):
                         # Utiliser les paramètres temporaires au lieu des paramètres de configuration
-                        result = self.remove_silence(
+                        result, reduction = self.remove_silence(
                             full_path,
                             st.session_state.temp_silence_params["silence_threshold"],
                             st.session_state.temp_silence_params["silence_duration"],
@@ -363,5 +388,7 @@ class TrimsilencesPlugin(Plugin):
                         st.error(result)
                     else:
                         st.success(
-                            t("trim_silences_success").format(result=result))
+                            t("trim_silences_success").format(result=result) +
+                            f" - Reduction: {reduction}"
+                        )
                         st.rerun()

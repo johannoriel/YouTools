@@ -133,7 +133,7 @@ class BatchsilencesPlugin(Plugin):
                             v[1] for v in video_files if v[0] == video_name)
 
                         # Remove silence
-                        result = self.trimsilences_plugin.remove_silence(
+                        result, reduction = self.trimsilences_plugin.remove_silence(
                             video_path,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],
@@ -145,6 +145,7 @@ class BatchsilencesPlugin(Plugin):
                         if isinstance(result, str) and not (result.startswith("Erreur") or result.startswith("Une erreur")):
                             processed_count += 1
                             st.text(f"Processed: {video_name}")
+                            st.info(f"Reduction : {reduction}")
 
                     st.success(t("batchsilences_success").format(
                         count=processed_count))
@@ -164,7 +165,7 @@ class BatchsilencesPlugin(Plugin):
                             v[1] for v in video_files if v[0] == video_name)
 
                         # Remove silence
-                        result = self.trimsilences_plugin.remove_silence(
+                        result, reduction = self.trimsilences_plugin.remove_silence(
                             video_path,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],
@@ -177,6 +178,7 @@ class BatchsilencesPlugin(Plugin):
                             processed_count += 1
                             processed_videos.append(result)
                             st.text(f"Processed: {video_name}")
+                            st.info(f"Reduction : {reduction}")
 
                     if processed_videos:
                         # Merge processed videos in the specified order

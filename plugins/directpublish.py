@@ -207,7 +207,7 @@ class DirectpublishPlugin(Plugin):
                 # 1. Retirer les silences si demandé
                 if remove_silences:
                     st.text(t("directpublish_silence_trim"))
-                    result = self.trimsilences_plugin.remove_silence(
+                    result, reduction = self.trimsilences_plugin.remove_silence(
                         video_to_process,
                         config['trimsilences']['silence_threshold'],
                         config['trimsilences']['silence_duration'],
@@ -217,6 +217,8 @@ class DirectpublishPlugin(Plugin):
                     if isinstance(result, str) and (result.startswith("Erreur") or result.startswith("Une erreur")):
                         st.error(result)
                         return
+                    else:
+                        st.info(f"Reduction : {reduction}")
                     video_to_process = result
                     st.text(video_to_process)
 
