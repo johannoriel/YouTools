@@ -1,3 +1,10 @@
+import os
+from googleapiclient.http import MediaFileUpload
+from googleapiclient.discovery import build
+from google.auth.exceptions import RefreshError
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from global_vars import t, translations
 from app import Plugin
 import streamlit as st
@@ -52,11 +59,13 @@ yt_categories = {
     "44": "Trailers"
 }
 
+
 def get_category_id(category_name):
     for id, name in yt_categories.items():
         if name.lower() == category_name.lower():
             return id
     return "22"  # Default to "People & Blogs" if not found
+
 
 class CommonPlugin(Plugin):
     def get_config_fields(self):
@@ -161,7 +170,22 @@ class CommonPlugin(Plugin):
                 "type": "text",
                 "label": "Twitter API v1 Access Token Secret",
                 "default": ""
-            }
+            },
+            "linkedin_client_id": {
+                "type": "text",
+                "label": "Linkedin client ID",
+                "default": ""
+            },
+            "linkedin_client_secret": {
+                "type": "text",
+                "label": "Linkedin client secret",
+                "default": ""
+            },
+            "linkedin_access_token": {
+                "type": "text",
+                "label": "Linkedin access token",
+                "default": ""
+            },
         }
 
     def get_tabs(self):
@@ -170,18 +194,15 @@ class CommonPlugin(Plugin):
     def run(self, config):
         st.header("Common Plugin")
         st.write(f"Channel: {config['common']['channel_id']}")
-        st.write(f"{t('work_directory')}: {config['common']['work_directory']}")
+        st.write(
+            f"{t('work_directory')}: {config['common']['work_directory']}")
         torch.cuda.empty_cache()
         st.write("CUDA memory reset")
 
-import os
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.exceptions import RefreshError
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
+
+
 def get_credentials():
     creds = None
     os.environ['BROWSER'] = '/snap/bin/chromium'
@@ -211,6 +232,8 @@ def get_credentials():
     return creds
 
 # Fonction pour uploader la vidéo sur YouTube
+
+
 def upload_video(filename, title, description, category, keywords, privacy_status):
     credentials = get_credentials()
     youtube = build('youtube', 'v3', credentials=credentials)
@@ -247,6 +270,7 @@ def upload_video(filename, title, description, category, keywords, privacy_statu
     st.success(t('upload_finished')+f" : {response['id']}")
     return response['id']
 
+
 def list_video_files2(directory, prefix_exclude=None, extensions=('.mkv', '.mp4')):
     def rename_file_without_spaces(file, directory):
         if ' ' in file:
@@ -274,6 +298,7 @@ def list_video_files2(directory, prefix_exclude=None, extensions=('.mkv', '.mp4'
 
     video_files.sort(key=lambda x: x[2], reverse=True)
     return video_files
+
 
 def list_video_files(directory):
     video_files = []
@@ -312,9 +337,11 @@ def list_video_files(directory):
     short_videos.sort(key=lambda x: x[2], reverse=True)
     return video_files, outfile_videos, chroma_videos, short_videos
 
+
 def list_all_video_files(directory):
     l1, l2, l3, l4 = list_video_files(directory)
     return l1+l2+l3+l4
+
 
 def remove_quotes(s):
     if s.startswith('"') and s.endswith('"'):

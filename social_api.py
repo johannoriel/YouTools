@@ -7,8 +7,13 @@ import asyncio
 import requests
 import jwt
 import re
+import os
 from datetime import datetime
 import streamlit as st
+import json
+import pytz
+from langdetect import detect
+
 
 class TwitterAPI:
     def __init__(self, config):
@@ -32,19 +37,36 @@ class TwitterAPI:
         else:
             self.client_v1 = None
 
-    def create_thread(self, posts: List[str]) -> Optional[List[Any]]:
+    def create_thread(self, posts: List[Any]) -> Optional[List[Any]]:
         try:
             previous_tweet_id = None
             responses = []
 
             for post in posts:
-                if previous_tweet_id:
+                if isinstance(post, tuple):  # First post with meme
+                    text, media_path = post
+                    if not self.client_v1:
+                        st.error("Twitter v1 API needed for media upload")
+                        return None
+
+                    # Upload media using v1 API
+                    media = self.client_v1.media_upload(filename=media_path)
+                    media_ids = [media.media_id]
+
+                    # Create tweet with media using v2 API
                     response = self.client.create_tweet(
-                        text=post,
-                        in_reply_to_tweet_id=previous_tweet_id
+                        text=text,
+                        media_ids=media_ids
                     )
                 else:
-                    response = self.client.create_tweet(text=post)
+                    # Regular text tweet
+                    if previous_tweet_id:
+                        response = self.client.create_tweet(
+                            text=post,
+                            in_reply_to_tweet_id=previous_tweet_id
+                        )
+                    else:
+                        response = self.client.create_tweet(text=post)
 
                 previous_tweet_id = response.data['id']
                 responses.append(response)
@@ -71,7 +93,8 @@ class TwitterAPI:
             # Traiter les tweets récupérés
             tweets = []
             for tweet in response.data:
-                user = next(u for u in response.includes['users'] if u.id == tweet.author_id)
+                user = next(
+                    u for u in response.includes['users'] if u.id == tweet.author_id)
                 tweet_url = f"https://twitter.com/{user.username}/status/{tweet.id}"
                 tweets.append({
                     'id': tweet.id,
@@ -91,12 +114,14 @@ class TwitterAPI:
                 st.error("Twitter API v1 is not enabled in configuration.")
                 return []
 
-            tweets = self.client_v1.search_tweets(q=query, count=max_results, tweet_mode="extended")
+            tweets = self.client_v1.search_tweets(
+                q=query, count=max_results, tweet_mode="extended")
             return [{
                 'id': tweet.id_str,
                 'text': tweet.full_text,
                 'user': tweet.user.screen_name,
-                'url': f"https://twitter.com/{tweet.user.screen_name}/status/{tweet.id_str}"  # Ajout de l'URL du tweet
+                # Ajout de l'URL du tweet
+                'url': f"https://twitter.com/{tweet.user.screen_name}/status/{tweet.id_str}"
             } for tweet in tweets]
         except Exception as e:
             st.error(f"Twitter API v1 Search Error: {str(e)}")
@@ -113,10 +138,12 @@ class TwitterAPI:
             st.error(f"Twitter API v2 Create Tweet Error: {str(e)}")
             return None
 
+
 class BlueskyAPI:
     def __init__(self, config):
         self.client = AtprotoClient()
-        self.client.login(config['common']['bluesky_handle'], config['common']['bluesky_password'])
+        self.client.login(config['common']['bluesky_handle'],
+                          config['common']['bluesky_password'])
         self.base_url = "https://public.api.bsky.app"  # URL de l'API publique Bluesky
 
     def _prepare_post(self, text: str) -> Any:
@@ -136,40 +163,74 @@ class BlueskyAPI:
 
         return builder
 
-    def create_thread(self, posts: List[str]) -> Optional[List[Any]]:
+    def create_thread(self, posts: List[Any]) -> Optional[List[Any]]:
         try:
             responses = []
             root_ref = None
             parent_ref = None
 
             for post in posts:
-                prepared_text = self._prepare_post(post)
+                if isinstance(post, tuple):  # First post with meme
+                    text, media_path = post
+                    prepared_text = self._prepare_post(text)
 
-                if root_ref is None:
-                    if isinstance(prepared_text, client_utils.TextBuilder):
-                        response = self.client.send_post(text_builder=prepared_text)
-                    else:
-                        response = self.client.send_post(text=prepared_text)
-                    root_ref = models.create_strong_ref(response)
-                    parent_ref = root_ref
+                    # Read the image file and determine mime type
+                    with open(media_path, 'rb') as f:
+                        img_data = f.read()
+
+                    # Simple mime type detection based on extension
+                    ext = os.path.splitext(media_path)[1].lower()
+                    mime_type = {
+                        '.jpg': 'image/jpeg',
+                        '.jpeg': 'image/jpeg',
+                        '.png': 'image/png',
+                        '.gif': 'image/gif'
+                    }.get(ext, 'image/jpeg')  # Default to jpeg if unknown
+
+                    # Upload blob with correct parameters
+                    blob = self.client.upload_blob(
+                        img_data)
+
+                    if root_ref is None:
+                        response = self.client.send_post(
+                            text=prepared_text if isinstance(
+                                prepared_text, str) else prepared_text.build(),
+                            embed=models.AppBskyEmbedImages.Main(
+                                images=[models.AppBskyEmbedImages.Image(
+                                    image=blob.blob,  # Changed from blob to blob.blob
+                                    alt="Generated meme"
+                                )]
+                            )
+                        )
+                        root_ref = models.create_strong_ref(response)
+                        parent_ref = root_ref
                 else:
-                    reply_ref = models.AppBskyFeedPost.ReplyRef(
-                        root=root_ref,
-                        parent=parent_ref
-                    )
-
-                    if isinstance(prepared_text, client_utils.TextBuilder):
-                        response = self.client.send_post(text=prepared_text, reply_to=reply_ref)
+                    prepared_text = self._prepare_post(post)
+                    if root_ref is None:
+                        response = self.client.send_post(
+                            text=prepared_text if isinstance(
+                                prepared_text, str) else prepared_text.build()
+                        )
+                        root_ref = models.create_strong_ref(response)
+                        parent_ref = root_ref
                     else:
-                        response = self.client.send_post(text=prepared_text, reply_to=reply_ref)
-                    parent_ref = models.create_strong_ref(response)
+                        reply_ref = models.AppBskyFeedPost.ReplyRef(
+                            root=root_ref,
+                            parent=parent_ref
+                        )
+                        response = self.client.send_post(
+                            text=prepared_text if isinstance(
+                                prepared_text, str) else prepared_text.build(),
+                            reply_to=reply_ref
+                        )
+                        parent_ref = models.create_strong_ref(response)
 
                 responses.append(response)
 
             return responses
         except Exception as e:
             st.error(f"Bluesky: {str(e)}")
-            return None
+            raise e
 
     def search_posts(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
         """
@@ -186,7 +247,8 @@ class BlueskyAPI:
                 "q": query,  # Requête de recherche
                 "sort": "latest",  # Tri par date (les plus récents en premier)
                 "lang": language,  # Filtre par langue
-                "limit": min(int(max_results), 100)  # Limite le nombre de résultats (max 100)
+                # Limite le nombre de résultats (max 100)
+                "limit": min(int(max_results), 100)
             }
 
             # Appel à l'API Bluesky
@@ -197,7 +259,8 @@ class BlueskyAPI:
 
             # Vérification de la réponse
             if response.status_code != 200:
-                st.error(f"Bluesky API Search Error: {response.status_code} - {response.text}")
+                st.error(
+                    f"Bluesky API Search Error: {response.status_code} - {response.text}")
                 return []
 
             # Traitement des résultats
@@ -207,7 +270,8 @@ class BlueskyAPI:
                     'id': post['uri'].split('/')[-1],  # Récupère l'ID du post
                     'text': post['record']['text'],  # Texte du post
                     'handle': post['author']['handle'],  # Handle de l'auteur
-                    'url': f"https://bsky.app/profile/{post['author']['handle']}/post/{post['uri'].split('/')[-1]}"  # URL du post
+                    # URL du post
+                    'url': f"https://bsky.app/profile/{post['author']['handle']}/post/{post['uri'].split('/')[-1]}"
                 })
 
             return posts
@@ -227,11 +291,12 @@ class BlueskyAPI:
         try:
             # Création des paramètres de recherche
             params = dict(
-                        q=query,  # Requête de recherche
-                        limit=min(int(max_results), 100),  # Limite le nombre de résultats (max 100)
-                        lang=language,  # Filtre par langue
-                        sort="latest"  # Tri par date (les plus récents en premier)
-                    )
+                q=query,  # Requête de recherche
+                # Limite le nombre de résultats (max 100)
+                limit=min(int(max_results), 100),
+                lang=language,  # Filtre par langue
+                sort="latest"  # Tri par date (les plus récents en premier)
+            )
 
             # Appel à l'API de recherche
             response = self.client.app.bsky.feed.search_posts(params)
@@ -275,39 +340,53 @@ class BlueskyAPI:
                 response = self.client.send_post(text=text)
 
             return {
-                'id': response.uri.split('/')[-1],  # Récupère l'ID du post créé
+                # Récupère l'ID du post créé
+                'id': response.uri.split('/')[-1],
                 'text': text,
-                'url': f"https://bsky.app/profile/{self.client.me.handle}/post/{response.uri.split('/')[-1]}"  # URL du post
+                # URL du post
+                'url': f"https://bsky.app/profile/{self.client.me.handle}/post/{response.uri.split('/')[-1]}"
             }
         except Exception as e:
             st.error(f"Bluesky API Create Post Error: {str(e)}")
             return None
+
 
 class TelegramAPI:
     def __init__(self, config):
         self.bot_token = config['common']['telegram_bot_token']
         self.channel_id = config['common']['telegram_channel_id']
 
-    async def _post_async(self, text: str) -> Optional[Any]:
+    async def _post_async(self, content: Any) -> Optional[Any]:
         try:
             bot = telegram.Bot(token=self.bot_token)
-            response = await bot.send_message(
-                chat_id=self.channel_id,
-                text=text,
-                parse_mode='HTML'
-            )
+            if isinstance(content, tuple):  # First post with meme
+                text, media_path = content
+                with open(media_path, 'rb') as photo:
+                    response = await bot.send_photo(
+                        chat_id=self.channel_id,
+                        photo=photo,
+                        caption=text,
+                        parse_mode='HTML'
+                    )
+            else:
+                response = await bot.send_message(
+                    chat_id=self.channel_id,
+                    text=content,
+                    parse_mode='HTML'
+                )
             return response
         except Exception as e:
             st.error(f"Telegram: {str(e)}")
             return None
 
-    def post(self, text: str) -> Optional[Any]:
+    def post(self, content: Any) -> Optional[Any]:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(self._post_async(text))
+            return loop.run_until_complete(self._post_async(content))
         finally:
             loop.close()
+
 
 class GhostAPI:
     def __init__(self, config):
@@ -330,7 +409,8 @@ class GhostAPI:
                 'aud': '/admin/'
             }
 
-            token = jwt.encode(payload, bytes.fromhex(secret), algorithm='HS256', headers=header)
+            token = jwt.encode(payload, bytes.fromhex(
+                secret), algorithm='HS256', headers=header)
             headers = {'Authorization': f'Ghost {token}'}
             body = {
                 'posts': [{
@@ -349,8 +429,136 @@ class GhostAPI:
             if response.status_code == 201:
                 return response.json()
             else:
-                st.error(f"Ghost API Error: {response.status_code} - {response.text}")
+                st.error(
+                    f"Ghost API Error: {response.status_code} - {response.text}")
                 return None
         except Exception as e:
             st.error(f"Ghost: {str(e)}")
+            return None
+
+
+class LinkedinAPI:
+    def __init__(self, config):
+        self.client_id = config['common']['linkedin_client_id']
+        self.client_secret = config['common']['linkedin_client_secret']
+        self.base_url = "https://api.linkedin.com/v2"
+        # self._get_access_token()
+        self.access_token = config['common']['linkedin_access_token']
+
+    def _get_access_token(self) -> Optional[str]:
+        """
+        Récupère le token d'accès LinkedIn via OAuth2.
+        """
+        try:
+            auth_url = "https://www.linkedin.com/oauth/v2/accessToken"
+            payload = {
+                'grant_type': 'client_credentials',
+                'client_id': self.client_id,
+                'client_secret': self.client_secret
+            }
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            response = requests.post(auth_url, data=payload, headers=headers)
+            response.raise_for_status()  # Lève une exception si le statut n'est pas 200
+            return response.json().get('access_token')
+        except Exception as e:
+            print(f"LinkedIn API Error (get_access_token): {str(e)}")
+            return None
+
+    def search_posts(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
+        """
+        Recherche des posts sur LinkedIn en fonction des mots-clés.
+        :param query: Mots-clés de recherche
+        :param max_results: Nombre maximum de posts à récupérer
+        :param language: Langue des posts à rechercher (par défaut "fr")
+        :return: Liste des posts trouvés
+        """
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+                'X-Restli-Protocol-Version': '2.0.0'
+            }
+            params = {
+                'q': query,
+                'count': max_results,
+                'sort': 'relevance',
+                'locale.language': language
+            }
+            response = requests.get(
+                f"{self.base_url}/search", headers=headers, params=params)
+            response.raise_for_status()
+            posts = response.json().get('elements', [])
+
+            formatted_posts = []
+            for post in posts:
+                formatted_posts.append({
+                    'id': post.get('id'),
+                    'text': post.get('commentary', {}).get('text', ''),
+                    'author': post.get('author', {}).get('name', 'N/A'),
+                    'published_at': post.get('lastModifiedTime', {}).get('time', 'N/A'),
+                    'url': post.get('url', 'N/A')
+                })
+
+            return formatted_posts
+        except Exception as e:
+            print(f"LinkedIn API Error (search_posts): {str(e)}")
+            return []
+
+    def get_post_comments(self, post_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        Récupère les commentaires d'un post LinkedIn.
+        :param post_id: ID du post
+        :param max_results: Nombre maximum de commentaires à récupérer
+        :return: Liste des commentaires
+        """
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+                'X-Restli-Protocol-Version': '2.0.0'
+            }
+            response = requests.get(
+                f"{self.base_url}/socialActions/{post_id}/comments", headers=headers)
+            response.raise_for_status()
+            comments = response.json().get('elements', [])
+
+            formatted_comments = []
+            for comment in comments:
+                formatted_comments.append({
+                    'id': comment.get('id'),
+                    'text': comment.get('message', {}).get('text', ''),
+                    'author': comment.get('actor', {}).get('name', 'N/A'),
+                    'published_at': comment.get('lastModifiedTime', {}).get('time', 'N/A')
+                })
+
+            return formatted_comments[:max_results]
+        except Exception as e:
+            print(f"LinkedIn API Error (get_post_comments): {str(e)}")
+            return []
+
+    def post_comment(self, post_id: str, text: str) -> Optional[Dict[str, Any]]:
+        """
+        Poste un commentaire sur un post LinkedIn.
+        :param post_id: ID du post
+        :param text: Texte du commentaire
+        :return: Réponse de l'API
+        """
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+                'X-Restli-Protocol-Version': '2.0.0'
+            }
+            body = {
+                'actor': f"urn:li:person:{self.client_id}",
+                'message': {
+                    'text': text
+                },
+                'object': f"urn:li:share:{post_id}"
+            }
+            response = requests.post(
+                f"{self.base_url}/socialActions/{post_id}/comments", headers=headers, json=body)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"LinkedIn API Error (post_comment): {str(e)}")
             return None

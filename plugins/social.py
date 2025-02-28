@@ -71,6 +71,7 @@ class SocialNetwork:
         self.post_method = post_method
         self.max_chars = max_chars
 
+
 class SocialPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
@@ -90,6 +91,14 @@ class SocialPlugin(Plugin):
             st.session_state.platform_select_all = {}
         if 'has_generated' not in st.session_state:
             st.session_state.has_generated = False
+        if 'selected_meme' not in st.session_state:
+            st.session_state.selected_meme = None
+
+    def _get_image_files(self, work_dir):
+        image_extensions = ('.png', '.jpg', '.jpeg', '.gif')
+        return [f for f in os.listdir(work_dir)
+                if os.path.isfile(os.path.join(work_dir, f))
+                and f.lower().endswith(image_extensions)]
 
     def _setup_social_networks(self):
         self.social_networks = [
@@ -199,7 +208,8 @@ Chaque tweet doit faire maximum 280 caractères."""
                 checked = st.checkbox(
                     t(f"social_{network.name}"),
                     key=key,
-                    value=st.session_state.selected_platforms.get(post_index, {}).get(network.name, False)
+                    value=st.session_state.selected_platforms.get(
+                        post_index, {}).get(network.name, False)
                 )
                 platforms[network.name] = checked
         return platforms
@@ -223,6 +233,8 @@ Chaque tweet doit faire maximum 280 caractères."""
         with st.spinner(t("social_posting")):
             # Initialize API instances
             api_instances = {}
+            work_dir = config['common']['work_directory']
+
             for network in self.social_networks:
                 api_config = {
                     key.replace(f"{network.name}_", ""): value
@@ -232,13 +244,22 @@ Chaque tweet doit faire maximum 280 caractères."""
                 api_instances[network.name] = network.api_class(config)
 
             # Collect posts by platform
-            platform_posts = {network.name: [] for network in self.social_networks}
+            platform_posts = {network.name: []
+                              for network in self.social_networks}
+            meme_path = None
+            if st.session_state.selected_meme:
+                meme_path = os.path.join(
+                    work_dir, st.session_state.selected_meme)
 
             for i, post in enumerate(st.session_state.generated_posts):
                 platforms = st.session_state.selected_platforms.get(i, {})
                 for network in self.social_networks:
                     if platforms.get(network.name, False):
-                        platform_posts[network.name].append(post)
+                        if i == 0 and meme_path and network.name in ['twitter', 'bluesky', 'telegram']:
+                            platform_posts[network.name].append(
+                                (post, meme_path))
+                        else:
+                            platform_posts[network.name].append(post)
 
             # Send posts to each platform
             for network in self.social_networks:
@@ -283,7 +304,8 @@ Chaque tweet doit faire maximum 280 caractères."""
         if os.path.exists(transcript_path):
             with open(transcript_path, 'r') as f:
                 transcript = f.read()
-            st.text_area(t("social_transcript"), transcript, height=100, disabled=True)
+            st.text_area(t("social_transcript"), transcript,
+                         height=100, disabled=True)
         else:
             transcript = st.text_area(t("social_transcript"), height=200)
 
@@ -296,12 +318,25 @@ Chaque tweet doit faire maximum 280 caractères."""
         else:
             url = st.text_input(t("social_url"))
 
+        # Meme selection
+        st.subheader("Select Meme for First Post (Optional)")
+        image_files = self._get_image_files(work_dir)
+        meme_options = ["None"] + image_files
+        selected_meme = st.selectbox(
+            "Choose an image file",
+            options=meme_options,
+            index=0
+        )
+        st.session_state.selected_meme = selected_meme if selected_meme != "None" else None
+
         # Generate posts
-        prompt = st.text_area(t("social_prompt"), value=config['social']['default_prompt'])
+        prompt = st.text_area(t("social_prompt"),
+                              value=config['social']['default_prompt'])
 
         # Manual post at start
         st.subheader(t("social_manual_start"))
-        manual_post_start = st.text_area("", key="manual_post_start", height=100)
+        manual_post_start = st.text_area(
+            "", key="manual_post_start", height=100)
         cols = self.create_platform_columns()
         start_platforms = self.render_platform_checkboxes(cols, "start", True)
 
@@ -329,11 +364,13 @@ Chaque tweet doit faire maximum 280 caractères."""
                     st.session_state.selected_platforms[0] = start_platforms
 
                 # Add generated posts
-                st.session_state.generated_posts.extend(self.parse_posts(llm_response))
+                st.session_state.generated_posts.extend(
+                    self.parse_posts(llm_response))
 
                 # Add URL suffix if present
                 if url:
-                    url_suffix = config['social']['url_suffix_template'].format(url=url)
+                    url_suffix = config['social']['url_suffix_template'].format(
+                        url=url)
                     st.session_state.generated_posts.append(url_suffix)
 
         # Display posts
@@ -348,8 +385,10 @@ Chaque tweet doit faire maximum 280 caractères."""
             # Display posts
             for i, post in enumerate(st.session_state.generated_posts):
                 if st.session_state.has_generated and not (manual_post_start and i == 0):
-                    post_label = "" if (not st.session_state.has_generated and i == 0) else f"Post {i+1}"
-                    edited_post = st.text_area(post_label, post, key=f"post_{i}", height=100)
+                    post_label = "" if (
+                        not st.session_state.has_generated and i == 0) else f"Post {i+1}"
+                    edited_post = st.text_area(
+                        post_label, post, key=f"post_{i}", height=100)
                     st.session_state.generated_posts[i] = edited_post
 
                     cols = self.create_platform_columns()
