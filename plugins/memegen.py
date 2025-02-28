@@ -4,7 +4,7 @@ import streamlit as st
 import requests
 import json
 import os
-import time  # Added for timestamp
+import time
 from plugins.ragllm import RagllmPlugin
 
 translations["en"].update({
@@ -26,7 +26,9 @@ translations["en"].update({
     "password_config": "Imgflip Password",
     "working_dir_config": "Working Directory",
     "auto_subject_label": "Meme Subject",
-    "auto_prompt": "Generate a meme suggestion based on this subject: {subject}. Choose an appropriate template from this list: {meme_list} and suggest 1-2 text lines.",
+    "auto_prompt_label": "LLM Sub-Prompt",
+    "auto_selected_meme": "Selected Meme",
+    "auto_result_label": "LLM Reasoning",
 })
 
 translations["fr"].update({
@@ -48,7 +50,9 @@ translations["fr"].update({
     "password_config": "Mot de passe Imgflip",
     "working_dir_config": "Répertoire de travail",
     "auto_subject_label": "Sujet du mème",
-    "auto_prompt": "Générer une suggestion de mème basée sur ce sujet : {subject}. Choisir un modèle approprié dans cette liste : {meme_list} et suggérer 1-2 lignes de texte.",
+    "auto_prompt_label": "Sous-prompt LLM",
+    "auto_selected_meme": "Mème sélectionné",
+    "auto_result_label": "Raisonnement du LLM",
 })
 
 
@@ -70,15 +74,20 @@ class MemegenPlugin(Plugin):
             return []
 
     def get_config_fields(self):
-        """Define configuration fields for the plugin."""
+        """Define configuration fields with memegen_ prefix."""
         return {
-            "username": {"type": "text", "label": t("username_config"), "default": ""},
-            "password": {"type": "password", "label": t("password_config"), "default": ""},
-            "working_dir": {"type": "text", "label": t("working_dir_config"), "default": "./memes"}
+            "memegen_username": {"type": "text", "label": t("username_config"), "default": ""},
+            "memegen_password": {"type": "password", "label": t("password_config"), "default": ""},
+            "memegen_working_dir": {"type": "text", "label": t("working_dir_config"), "default": "~/Vidéos"},
+            "memegen_auto_prompt": {
+                "type": "textarea",
+                "label": t("auto_prompt_label"),
+                "default": "Based on the subject '{subject}', select an appropriate meme template from this list: {meme_list}. Return a plain JSON string (no ```json markers) with: 1) 'meme_name' (exact name of the chosen meme), 2) 'text0' (short top text), 3) 'text1' (short optionnal bottom text)."
+            }
         }
 
     def get_tabs(self):
-        """Define plugin tabs in the interface."""
+        """Define plugin tabs."""
         return [
             {"name": t("meme_generator_tab_manual"),
              "plugin": "memegenplugin"},
@@ -86,10 +95,11 @@ class MemegenPlugin(Plugin):
         ]
 
     def generate_meme(self, config, template_id, text0, text1, font, font_size):
-        """Common function to generate and save a meme."""
-        username = config.get(self.name, {}).get("username", "")
-        password = config.get(self.name, {}).get("password", "")
-        working_dir = config.get(self.name, {}).get("working_dir", "./memes")
+        """Generate and save a meme directly in working_dir with full path expansion."""
+        username = config.get(self.name, {}).get("memegen_username", "")
+        password = config.get(self.name, {}).get("memegen_password", "")
+        working_dir = os.path.expanduser(config.get(
+            self.name, {}).get("memegen_working_dir", "~/Vidéos"))
 
         if not username or not password:
             return None, "Please configure Imgflip username and password in settings."
@@ -132,7 +142,6 @@ class MemegenPlugin(Plugin):
 
             search_term = st.text_input(t("meme_search_label"), "")
             thumbnail_size = st.slider(t("meme_size_label"), 50, 200, 100)
-            # Dynamic column count
             num_cols = max(1, min(10, 1000 // thumbnail_size))
 
             filtered_memes = [meme for meme in self.memes
@@ -149,11 +158,10 @@ class MemegenPlugin(Plugin):
                 for idx, meme in enumerate(filtered_memes[:100]):
                     col = cols[idx % num_cols]
                     with col:
-                        st.image(meme["url"], width=thumbnail_size,
-                                 caption=meme["name"])
-                        if st.button("Select", key=f"select_{meme['id']}"):
+                        st.image(meme["url"], width=thumbnail_size)
+                        if st.button(meme["name"], key=f"select_{meme['id']}"):
                             st.session_state.selected_template = meme["id"]
-                            st.rerun()  # Rerun to update the text input
+                            st.rerun()
             else:
                 st.write("No memes found.")
 
@@ -180,8 +188,16 @@ class MemegenPlugin(Plugin):
         with tabs[1]:
             st.header(t("meme_generator_header"))
 
-            subject = st.text_input(t("auto_subject_label"), "")
-            if st.button(t("meme_generate_button"), key="generate_auto"):
+            subject = st.text_input(
+                t("auto_subject_label"), "", key="auto_subject")
+
+            # Initialize session state for auto generation
+            if "auto_suggestion" not in st.session_state:
+                st.session_state.auto_suggestion = None
+            if "auto_meme_path" not in st.session_state:
+                st.session_state.auto_meme_path = None
+
+            if st.button("Suggest Meme", key="suggest_auto"):
                 with st.spinner(t("meme_generating")):
                     if not self.ragllm_plugin:
                         st.error("RAG LLM plugin not available.")
@@ -189,33 +205,85 @@ class MemegenPlugin(Plugin):
 
                     meme_list = json.dumps(
                         [{m["id"]: m["name"]} for m in self.memes])
-                    prompt = t("auto_prompt").format(
+                    auto_prompt = config.get(self.name, {}).get(
+                        "memegen_auto_prompt", "")
+                    prompt = auto_prompt.format(
                         subject=subject, meme_list=meme_list)
                     llm_sys_prompt = config['ragllm']['llm_sys_prompt']
                     llm_response = self.ragllm_plugin.process_with_llm(
                         prompt, llm_sys_prompt, subject)
 
+                    st.subheader(t("auto_result_label"))
+                    st.write(llm_response)
+
+                    # Trim ```json markers if present
+                    cleaned_response = llm_response.strip()
+                    if cleaned_response.startswith("```json"):
+                        cleaned_response = cleaned_response[7:].strip()
+                    if cleaned_response.endswith("```"):
+                        cleaned_response = cleaned_response[:-3].strip()
+
                     try:
-                        suggestion = json.loads(llm_response)
-                        template_id = suggestion.get(
-                            "template_id", self.memes[0]["id"])
+                        suggestion = json.loads(cleaned_response)
+                        st.session_state.auto_suggestion = suggestion
+                        meme_name = suggestion.get(
+                            "meme_name", self.memes[0]["name"])
                         text0 = suggestion.get("text0", "AUTO GENERATED")
                         text1 = suggestion.get("text1", "")
+                        template_id = next(
+                            (m["id"] for m in self.memes if m["name"] == meme_name), self.memes[0]["id"])
 
+                        # Generate first shot
+                        font = "impact"
+                        font_size = 50
                         meme_path, error = self.generate_meme(
-                            config, template_id, text0, text1, "impact", 50)
+                            config, template_id, text0, text1, font, font_size)
                         if meme_path:
-                            st.image(
-                                meme_path, caption="Automatically Generated Meme")
-                            st.success(
-                                t("meme_success").format(path=meme_path))
-                            st.write(
-                                f"Template: {template_id}, Text0: {text0}, Text1: {text1}")
+                            st.session_state.auto_meme_path = meme_path
                         elif error:
                             st.error(t("meme_error").format(error=error))
-                    except Exception as e:
+
+                    except json.JSONDecodeError as e:
                         st.error(
-                            f"Failed to parse LLM response: {str(e)}\nRaw response: {llm_response}")
+                            f"Failed to parse LLM response as JSON: {str(e)}. Raw response: {llm_response}")
+                        return
+                    except Exception as e:
+                        st.error(f"Error processing suggestion: {str(e)}")
+                        return
+
+            # Display suggestion and editable fields if available
+            if st.session_state.auto_suggestion:
+                suggestion = st.session_state.auto_suggestion
+                meme_name = suggestion.get("meme_name", self.memes[0]["name"])
+                text0 = suggestion.get("text0", "AUTO GENERATED")
+                text1 = suggestion.get("text1", "")
+                template_id = next(
+                    (m["id"] for m in self.memes if m["name"] == meme_name), self.memes[0]["id"])
+
+                selected_meme = st.text_input(
+                    t("auto_selected_meme"), meme_name, key="auto_meme")
+                edited_text0 = st.text_input(
+                    t("meme_text0_label"), text0, key="auto_text0")
+                edited_text1 = st.text_input(
+                    t("meme_text1_label"), text1, key="auto_text1")
+
+                if st.session_state.auto_meme_path:
+                    st.image(st.session_state.auto_meme_path,
+                             caption="Generated Meme")
+                    st.success(t("meme_success").format(
+                        path=st.session_state.auto_meme_path))
+
+                if st.button(t("meme_generate_button"), key="generate_auto"):
+                    with st.spinner(t("meme_generating")):
+                        meme_path, error = self.generate_meme(
+                            config, template_id, edited_text0, edited_text1, "impact", 50)
+                        if meme_path:
+                            st.session_state.auto_meme_path = meme_path
+                            st.image(meme_path, caption="Generated Meme")
+                            st.success(
+                                t("meme_success").format(path=meme_path))
+                        elif error:
+                            st.error(t("meme_error").format(error=error))
 
 
 if __name__ == "__main__":
