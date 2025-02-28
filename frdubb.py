@@ -2,7 +2,7 @@ import whisper
 import torch
 from TTS.api import TTS
 from moviepy import VideoFileClip, AudioFileClip, concatenate_audioclips, AudioClip
-import moviepy.video.fx.all as vfx
+import moviepy as vfx
 from moviepy import concatenate_videoclips
 import litellm
 import numpy as np
@@ -144,7 +144,8 @@ class VideoDubber:
             audio_clips.append(french_audio)
 
             # Ajuster la vitesse de la vidéo pour correspondre à l'audio français
-            video_segment = video.subclipped(start_time=segment['start'], end_time=segment['end'])
+            video_segment = video.subclipped(
+                start_time=segment['start'], end_time=segment['end'])
             speed_factor = segment['french_duration'] / \
                 segment['original_duration']
             adjusted_video = video_segment.fx(vfx.speedx, 1/speed_factor)
@@ -250,7 +251,8 @@ class VideoDubber:
             french_audio = AudioFileClip(str(audio_path))
             audio_clips.append(french_audio)
 
-            video_segment = video.subclipped(start_time=segment['start'], end_time=segment['end'])
+            video_segment = video.subclipped(
+                start_time=segment['start'], end_time=segment['end'])
             speed_factor = french_audio.duration / \
                 (segment['end'] - segment['start'])
             adjusted_video = video_segment.fx(vfx.speedx, 1/speed_factor)
