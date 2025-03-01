@@ -5,6 +5,15 @@ from datetime import datetime
 import pytz
 from langdetect import detect
 from googleapiclient.errors import HttpError
+import json
+
+# Liste des statistiques avancées (peut être modifiée sans restructurer le reste)
+ADVANCED_STATS = [
+    "annotationClickThroughRate", "annotationCloseRate", "averageViewDuration",
+    "averageViewPercentage", "comments", "dislikes", "estimatedMinutesWatched",
+    "estimatedAdRevenue", "likes", "shares", "subscribersGained", "subscribersLost",
+    "views"
+]
 
 
 class YoutubeAPI:
@@ -14,6 +23,10 @@ class YoutubeAPI:
         self.analytics = build('youtubeAnalytics', 'v2',
                                credentials=credentials)
         self.channel_id = config['common']['channel_id']
+
+    def get_advanced_stats_list(self):
+        """Retourne la liste des statistiques avancées."""
+        return ADVANCED_STATS
 
     def format_count(self, count: int) -> str:
         """
@@ -650,10 +663,9 @@ class YoutubeAPI:
 
     def get_advanced_video_stats(self, video_id: str) -> Optional[Dict[str, Any]]:
         """
-        Fetch advanced statistics using Analytics API with updated metrics.
+        Fetch advanced statistics using Analytics API with dynamic metrics.
         """
         try:
-            # Basic stats via videos().list
             request = self.youtube.videos().list(
                 part="statistics,contentDetails",
                 id=video_id
@@ -671,8 +683,7 @@ class YoutubeAPI:
                 'duration': video_info['contentDetails']['duration']
             }
 
-            # Analytics API avec les métriques corrigées
-            metrics = "annotationClickThroughRate,annotationCloseRate,averageViewDuration,averageViewPercentage,comments,dislikes,estimatedMinutesWatched,estimatedAdRevenue,likes,shares,subscribersGained,subscribersLost,views"
+            metrics = ",".join(ADVANCED_STATS)
             analytics_response = self.analytics.reports().query(
                 ids=f"channel=={self.channel_id}",
                 startDate="2014-01-01",
@@ -684,43 +695,20 @@ class YoutubeAPI:
 
             if analytics_response.get('rows'):
                 row = analytics_response['rows'][0]
-                stats.update({
-                    'annotation_click_through_rate': float(row[1]) if row[1] else 0.0,
-                    'annotation_close_rate': float(row[2]) if row[2] else 0.0,
-                    'avg_view_duration': float(row[3]) if row[3] else 0.0,
-                    'average_view_percentage': float(row[4]) if row[4] else 0.0,
-                    'comments': int(row[5]) if row[5] else 0,
-                    'dislikes': int(row[6]) if row[6] else 0,
-                    'estimated_minutes_watched': float(row[7]) if row[7] else 0.0,
-                    'estimated_ad_revenue': float(row[8]) if row[8] else 0.0,
-                    'likes': int(row[9]) if row[9] else 0,
-                    'shares': int(row[10]) if row[10] else 0,
-                    'subscribers_gained': int(row[11]) if row[11] else 0,
-                    'subscribers_lost': int(row[12]) if row[12] else 0,
-                    'views': int(row[13]) if row[13] else 0
-                })
+                advanced_stats = {}
+                for i, metric in enumerate(ADVANCED_STATS):
+                    value = row[i + 1]  # +1 car row[0] est l'ID vidéo
+                    advanced_stats[metric] = float(value) if isinstance(
+                        value, (int, float)) and '.' in str(value) else int(value) if value else 0
+                stats['advanced_stats'] = advanced_stats
             else:
-                stats.update({
-                    'annotation_click_through_rate': 0.0,
-                    'annotation_close_rate': 0.0,
-                    'avg_view_duration': 0.0,
-                    'average_view_percentage': 0.0,
-                    'comments': 0,
-                    'dislikes': 0,
-                    'estimated_minutes_watched': 0.0,
-                    'estimated_ad_revenue': 0.0,
-                    'likes': 0,
-                    'shares': 0,
-                    'subscribers_gained': 0,
-                    'subscribers_lost': 0,
-                    'views': 0
-                })
+                stats['advanced_stats'] = {
+                    metric: 0 for metric in ADVANCED_STATS}
 
-            # Calcul du taux de rétention
             total_seconds = self._iso_duration_to_seconds(
                 video_info['contentDetails']['duration'])
             stats['retention_rate'] = (
-                stats['avg_view_duration'] / total_seconds * 100) if total_seconds > 0 else 0.0
+                stats['advanced_stats']['averageViewDuration'] / total_seconds * 100) if total_seconds > 0 else 0.0
 
             return stats
         except HttpError as e:
@@ -733,7 +721,7 @@ class YoutubeAPI:
 
     def debug_advanced_video_stats(self, video_id: str, selected_metrics: List[str]) -> Dict[str, Any]:
         """
-        Debug method to fetch advanced stats for a single video with selectable metrics.
+        Debug method with selectable metrics from ADVANCED_STATS.
         """
         try:
             metrics_str = ",".join(selected_metrics)

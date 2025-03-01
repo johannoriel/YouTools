@@ -172,9 +172,10 @@ class MarketyoutubePlugin(Plugin):
                 col2.write(f"Status: {video['status']}")
         elif tab == t("marketyoutube_tab_stats"):
             stats_data = []
+            advanced_stats_list = self.youtube_api.get_advanced_stats_list()
             for video in videos:
                 latest_stats = get_latest_stats(video['video_id'])
-                stats_data.append({
+                row = {
                     'Title': video['title'],
                     'URL': video['url'],
                     'Published': video['published_at'],
@@ -183,42 +184,42 @@ class MarketyoutubePlugin(Plugin):
                     'Subscribers Gained': latest_stats['subscribers_gained'] if latest_stats else 0,
                     'Subscribers Lost': latest_stats['subscribers_lost'] if latest_stats else 0,
                     'Retention Rate (%)': latest_stats['retention_rate'] if latest_stats else 0.0,
-                    'Avg View Duration (s)': latest_stats['avg_view_duration'] if latest_stats else 0.0,
-                    'Average View Percentage (%)': latest_stats['average_view_percentage'] if latest_stats else 0.0,
-                    'Annotation Click-Through Rate (%)': latest_stats['annotation_click_through_rate'] if latest_stats else 0.0,
-                    'Annotation Close Rate (%)': latest_stats['annotation_close_rate'] if latest_stats else 0.0,
-                    'Comments': latest_stats['comments'] if latest_stats else 0,
-                    'Dislikes': latest_stats['dislikes'] if latest_stats else 0,
-                    'Estimated Minutes Watched': latest_stats['estimated_minutes_watched'] if latest_stats else 0.0,
-                    'Estimated Ad Revenue ($)': latest_stats['estimated_ad_revenue'] if latest_stats else 0.0,
-                    'Likes': latest_stats['likes'] if latest_stats else 0,
-                    'Shares': latest_stats['shares'] if latest_stats else 0
-                })
+                }
+                if latest_stats and 'advanced_stats' in latest_stats:
+                    for stat in advanced_stats_list:
+                        translation_key = f"marketyoutube_{stat.lower()}"
+                        label = t(translation_key) if translation_key in translations["en"] else stat.replace(
+                            "Rate", " Rate (%)")
+                        value = latest_stats['advanced_stats'].get(stat, 0)
+                        row[label] = value
+                else:
+                    for stat in advanced_stats_list:
+                        translation_key = f"marketyoutube_{stat.lower()}"
+                        label = t(translation_key) if translation_key in translations["en"] else stat.replace(
+                            "Rate", " Rate (%)")
+                        row[label] = 0
+                stats_data.append(row)
 
-            st.dataframe(
-                stats_data,
-                column_config={
-                    'Title': st.column_config.TextColumn("Title"),
-                    'URL': st.column_config.LinkColumn("URL", width="small"),
-                    'Published': st.column_config.TextColumn("Published"),
-                    'Status': st.column_config.TextColumn("Status"),
-                    'Views': st.column_config.NumberColumn(t("marketyoutube_views")),
-                    'Subscribers Gained': st.column_config.NumberColumn(t("marketyoutube_subscribers_gained")),
-                    'Subscribers Lost': st.column_config.NumberColumn(t("marketyoutube_subscribers_lost")),
-                    'Retention Rate (%)': st.column_config.NumberColumn(t("marketyoutube_retention_rate"), format="%.1f"),
-                    'Avg View Duration (s)': st.column_config.NumberColumn(t("marketyoutube_avg_view_duration"), format="%.1f"),
-                    'Average View Percentage (%)': st.column_config.NumberColumn(t("marketyoutube_average_view_percentage"), format="%.1f"),
-                    'Annotation Click-Through Rate (%)': st.column_config.NumberColumn(t("marketyoutube_annotation_click_through_rate"), format="%.2f"),
-                    'Annotation Close Rate (%)': st.column_config.NumberColumn(t("marketyoutube_annotation_close_rate"), format="%.2f"),
-                    'Comments': st.column_config.NumberColumn(t("marketyoutube_comments")),
-                    'Dislikes': st.column_config.NumberColumn(t("marketyoutube_dislikes")),
-                    'Estimated Minutes Watched': st.column_config.NumberColumn(t("marketyoutube_estimated_minutes_watched"), format="%.1f"),
-                    'Estimated Ad Revenue ($)': st.column_config.NumberColumn(t("marketyoutube_estimated_ad_revenue"), format="%.2f"),
-                    'Likes': st.column_config.NumberColumn(t("marketyoutube_likes")),
-                    'Shares': st.column_config.NumberColumn(t("marketyoutube_shares"))
-                },
-                use_container_width=True
-            )
+            column_config = {
+                'Title': st.column_config.TextColumn("Title"),
+                'URL': st.column_config.LinkColumn("URL", width="small"),
+                'Published': st.column_config.TextColumn("Published"),
+                'Status': st.column_config.TextColumn("Status"),
+                'Views': st.column_config.NumberColumn(t("marketyoutube_views")),
+                'Subscribers Gained': st.column_config.NumberColumn(t("marketyoutube_subscribers_gained")),
+                'Subscribers Lost': st.column_config.NumberColumn(t("marketyoutube_subscribers_lost")),
+                'Retention Rate (%)': st.column_config.NumberColumn(t("marketyoutube_retention_rate"), format="%.1f"),
+            }
+            for stat in advanced_stats_list:
+                translation_key = f"marketyoutube_{stat.lower()}"
+                label = t(translation_key) if translation_key in translations["en"] else stat.replace(
+                    "Rate", " Rate (%)")
+                format_str = "%.2f" if "Rate" in stat or "Percentage" in stat else "%.1f" if stat == "estimatedMinutesWatched" else "%.2f" if stat == "estimatedAdRevenue" else None
+                column_config[label] = st.column_config.NumberColumn(
+                    label, format=format_str)
+
+            st.dataframe(stats_data, column_config=column_config,
+                         use_container_width=True)
 
     def generate_campaign_responses(self, config, campaign_video: Dict[str, Any], comments: List[Dict[str, Any]]):
         responses = []
@@ -264,6 +265,20 @@ class MarketyoutubePlugin(Plugin):
         progress_bar.empty()
         progress_text.empty()
         return responses
+
+    def sync_stats(self, channel_id: str, progress_callback=None):
+        """Sync stats for all videos with progress callback."""
+        videos = self.youtube_api.get_channel_videos(channel_id)
+        total_videos = len(videos)
+        timestamp = datetime.now(pytz.UTC).isoformat()
+
+        for i, video in enumerate(videos):
+            stats = self.youtube_api.get_advanced_video_stats(
+                video['video_id'])
+            if stats:
+                insert_stats_snapshot(video['video_id'], timestamp, stats)
+            if progress_callback:
+                progress_callback((i + 1) / total_videos)
 
     def run(self, config):
         tab1, tab2, tab3, tab4 = st.tabs([t("marketyoutube_tab_videos"), t(
@@ -314,7 +329,7 @@ class MarketyoutubePlugin(Plugin):
 
                         def update_progress(progress):
                             progress_bar.progress(progress)
-                        self.youtube_api.sync_stats(
+                        self.sync_stats(
                             config['common']['channel_id'], update_progress)
                         progress_bar.empty()
                         st.success(t("marketyoutube_sync_complete"))
@@ -457,13 +472,7 @@ class MarketyoutubePlugin(Plugin):
                 st.write(
                     f"Testing on video: **{last_video['title']}** (ID: {last_video['video_id']})")
 
-                available_metrics = [
-                    "annotationClickThroughRate", "annotationCloseRate", "averageViewDuration",
-                    "averageViewPercentage", "comments", "dislikes", "estimatedMinutesWatched",
-                    "estimatedAdRevenue", "likes", "shares", "subscribersGained", "subscribersLost",
-                    "views"
-                ]
-
+                available_metrics = self.youtube_api.get_advanced_stats_list()
                 selected_metrics = []
                 st.write("Select metrics to fetch:")
                 for metric in available_metrics:

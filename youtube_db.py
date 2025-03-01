@@ -3,6 +3,7 @@ from datetime import datetime
 import pytz
 from typing import List, Dict, Any, Optional
 from youtube_api import YoutubeAPI
+import json
 
 # Database file
 DB_FILE = "youtube_database.db"
@@ -71,6 +72,7 @@ def initialize_database():
         )
     """)
 
+    # Nouvelle structure avec advanced_stats en JSON
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS stats_snapshots (
             snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,16 +82,7 @@ def initialize_database():
             subscribers_gained INTEGER,
             subscribers_lost INTEGER,
             retention_rate REAL,
-            avg_view_duration REAL,
-            annotation_click_through_rate REAL,
-            annotation_close_rate REAL,
-            average_view_percentage REAL,
-            comments INTEGER,
-            dislikes INTEGER,
-            estimated_minutes_watched REAL,
-            estimated_ad_revenue REAL,
-            likes INTEGER,
-            shares INTEGER,
+            advanced_stats TEXT,  -- JSON pour les stats avancées
             FOREIGN KEY (video_id) REFERENCES videos (video_id)
         )
     """)
@@ -112,49 +105,6 @@ def initialize_database():
     conn.close()
 
 
-def sync_stats(self, channel_id: str, progress_callback=None):
-    """Sync stats for all videos with progress callback."""
-    videos = self.get_channel_videos(channel_id)
-    total_videos = len(videos)
-    timestamp = datetime.now(pytz.UTC).isoformat()
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    for i, video in enumerate(videos):
-        stats = self.get_advanced_video_stats(video['video_id'])
-        if stats:
-            cursor.execute("""
-                INSERT INTO stats_snapshots (
-                    video_id, timestamp, view_count, subscribers_gained, subscribers_lost, retention_rate, avg_view_duration,
-                    annotation_click_through_rate, annotation_close_rate, average_view_percentage, comments, dislikes,
-                    estimated_minutes_watched, estimated_ad_revenue, likes, shares
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                video['video_id'],
-                timestamp,
-                stats['view_count'],
-                stats['subscribers_gained'],
-                stats['subscribers_lost'],
-                stats['retention_rate'],
-                stats['avg_view_duration'],
-                stats['annotation_click_through_rate'],
-                stats['annotation_close_rate'],
-                stats['average_view_percentage'],
-                stats['comments'],
-                stats['dislikes'],
-                stats['estimated_minutes_watched'],
-                stats['estimated_ad_revenue'],
-                stats['likes'],
-                stats['shares']
-            ))
-        if progress_callback:
-            progress_callback((i + 1) / total_videos)
-
-    conn.commit()
-    conn.close()
-
-
 def get_latest_stats(video_id: str) -> Optional[Dict[str, Any]]:
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -168,7 +118,34 @@ def get_latest_stats(video_id: str) -> Optional[Dict[str, Any]]:
     stats = cursor.fetchone()
 
     conn.close()
-    return dict(stats) if stats else None
+    if stats:
+        stats_dict = dict(stats)
+        stats_dict['advanced_stats'] = json.loads(stats_dict['advanced_stats'])
+        return stats_dict
+    return None
+
+
+def insert_stats_snapshot(video_id: str, timestamp: str, stats: Dict[str, Any]):
+    """Insère un snapshot de statistiques dans la base."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO stats_snapshots (
+            video_id, timestamp, view_count, subscribers_gained, subscribers_lost, retention_rate, advanced_stats
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        video_id,
+        timestamp,
+        stats['view_count'],
+        stats['advanced_stats'].get('subscribersGained', 0),
+        stats['advanced_stats'].get('subscribersLost', 0),
+        stats['retention_rate'],
+        json.dumps(stats['advanced_stats'])
+    ))
+
+    conn.commit()
+    conn.close()
 
 
 def get_stats_history(video_id: str) -> List[Dict[str, Any]]:
