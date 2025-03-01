@@ -310,8 +310,13 @@ class MarketyoutubePlugin(Plugin):
             with col1:
                 if st.button(t("marketyoutube_sync"), key="sync_stats"):
                     with st.spinner(t("marketyoutube_syncing")):
-                        sync_stats(config['common']
-                                   ['channel_id'], self.youtube_api)
+                        progress_bar = st.progress(0)
+
+                        def update_progress(progress):
+                            progress_bar.progress(progress)
+                        self.youtube_api.sync_stats(
+                            config['common']['channel_id'], update_progress)
+                        progress_bar.empty()
                         st.success(t("marketyoutube_sync_complete"))
             with col2:
                 timestamps = get_stats_snapshots_timestamps()
