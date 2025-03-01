@@ -114,6 +114,21 @@ def initialize_database():
             )
         """)
 
+    cursor.execute("""
+                CREATE TABLE IF NOT EXISTS campaign_responses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id TEXT,
+                    comment_id TEXT,
+                    comment_text TEXT,
+                    response_text TEXT,
+                    video_id TEXT,
+                    channel_id TEXT,
+                    author TEXT,
+                    status TEXT,
+                    timestamp TEXT
+                )
+            """)
+
     conn.commit()
     conn.close()
 
@@ -418,6 +433,31 @@ def get_target_channel(channel_id: str) -> Optional[Dict[str, Any]]:
         channel_dict['keywords'] = json.loads(channel_dict['keywords'])
         return channel_dict
     return None
+
+
+def cache_campaign_response(campaign_id: str, comment_id: str, comment_text: str, response_text: str, video_id: str, channel_id: str, author: str, status: str = "pending"):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    timestamp = datetime.now(pytz.UTC).isoformat()
+    cursor.execute("""
+        INSERT INTO campaign_responses (campaign_id, comment_id, comment_text, response_text, video_id, channel_id, author, status, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (campaign_id, comment_id, comment_text, response_text, video_id, channel_id, author, status, timestamp))
+    conn.commit()
+    conn.close()
+
+
+def update_campaign_response_status(comment_id: str, status: str, campaign_id: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    timestamp = datetime.now(pytz.UTC).isoformat()
+    cursor.execute("""
+        UPDATE campaign_responses
+        SET status = ?, timestamp = ?
+        WHERE comment_id = ? AND campaign_id = ?
+    """, (status, timestamp, comment_id, campaign_id))
+    conn.commit()
+    conn.close()
 
 
 if __name__ == "__main__":
