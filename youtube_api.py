@@ -4,11 +4,15 @@ from googleapiclient.discovery import build
 from datetime import datetime
 import pytz
 from langdetect import detect
+from googleapiclient.errors import HttpError
+
 
 class YoutubeAPI:
     def __init__(self, config):
         credentials = get_credentials()
         self.youtube = build('youtube', 'v3', credentials=credentials)
+        self.analytics = build('youtubeAnalytics', 'v2',
+                               credentials=credentials)
         self.channel_id = config['common']['channel_id']
 
     def format_count(self, count: int) -> str:
@@ -31,7 +35,8 @@ class YoutubeAPI:
         - le nombre de commentaires (moins il y en a, mieux c'est)
         """
         # Convertir la date de publication en datetime
-        published_date = datetime.strptime(video_data['published_at'], "%Y-%m-%dT%H:%M:%SZ")
+        published_date = datetime.strptime(
+            video_data['published_at'], "%Y-%m-%dT%H:%M:%SZ")
         now = datetime.now(pytz.UTC)
         age_in_days = (now - published_date.replace(tzinfo=pytz.UTC)).days
 
@@ -47,11 +52,14 @@ class YoutubeAPI:
             # Pénalisation exponentielle : l'intérêt diminue de moitié tous les 2 jours
             decay_rate = 0.5  # Diminution de 50% tous les 2 jours
             days_over = age_in_days - 5  # Nombre de jours au-delà de 7 jours
-            age_score = decay_rate ** (days_over / 2)  # Décroissance exponentielle
+            # Décroissance exponentielle
+            age_score = decay_rate ** (days_over / 2)
 
         # Normalisation des autres scores entre 0 et 1
-        subs_score = min(1, video_data['subscriber_count'] / 1_000_000)  # Score max à 1M subs
-        comments_score = max(0, 1 - (video_data['comment_count'] / 1000))  # Score max pour < 1000 comments
+        # Score max à 1M subs
+        subs_score = min(1, video_data['subscriber_count'] / 1_000_000)
+        # Score max pour < 1000 comments
+        comments_score = max(0, 1 - (video_data['comment_count'] / 1000))
 
         # Calcul du score final
         relevance_score = (
@@ -69,7 +77,8 @@ class YoutubeAPI:
         """
         try:
             # Utilisation de l'API Service Usage pour récupérer les informations de quota
-            service_usage = build('serviceusage', 'v1', credentials=get_credentials())
+            service_usage = build('serviceusage', 'v1',
+                                  credentials=get_credentials())
             project_id = config['common']['project_number']
 
             # Récupération des métriques de quota
@@ -82,7 +91,8 @@ class YoutubeAPI:
             # Extraction des informations de quota
             quota_metrics = response.get('metrics', [])
             if quota_metrics:
-                quota_limit = quota_metrics[0].get('quotaLimits', [{}])[0].get('maxLimit', 0)
+                quota_limit = quota_metrics[0].get('quotaLimits', [{}])[
+                    0].get('maxLimit', 0)
                 quota_usage = quota_metrics[0].get('quotaUsage', 0)
 
                 # Calcul du pourcentage d'utilisation
@@ -198,14 +208,16 @@ class YoutubeAPI:
                 ).execute()
 
                 # Récupération des IDs des vidéos pour obtenir leur durée
-                video_ids = [item['snippet']['resourceId']['videoId'] for item in playlist_response['items']]
+                video_ids = [item['snippet']['resourceId']['videoId']
+                             for item in playlist_response['items']]
                 video_details = self.youtube.videos().list(
                     part='contentDetails',
                     id=','.join(video_ids)
                 ).execute()
 
                 # Création d'un dictionnaire pour mapper les IDs des vidéos à leur durée
-                duration_map = {item['id']: item['contentDetails']['duration'] for item in video_details['items']}
+                duration_map = {item['id']: item['contentDetails']
+                                ['duration'] for item in video_details['items']}
 
                 for item in playlist_response['items']:
                     video_id = item['snippet']['resourceId']['videoId']
@@ -215,12 +227,15 @@ class YoutubeAPI:
                     is_short = self._is_short_video(duration)
 
                     video = {
-                        'title': item['snippet']['title'],
                         'video_id': video_id,
+                        'url': f"https://www.youtube.com/watch?v={video_id}",
+                        'title': item['snippet']['title'],
                         'thumbnail': item['snippet']['thumbnails']['default']['url'],
-                        'status': item['status']['privacyStatus'],  # Statut de la vidéo
-                        'duration': duration,  # Durée de la vidéo
-                        'is_short': is_short  # Indicateur de Short
+                        'description': item['snippet']['description'],
+                        'published_at': item['snippet']['publishedAt'],
+                        'status': item['status']['privacyStatus'],
+                        'duration': duration,
+                        'is_short': is_short
                     }
                     videos.append(video)
 
@@ -306,7 +321,8 @@ class YoutubeAPI:
                     'id': item['id'],
                     'text': comment['textDisplay'],
                     'author': comment['authorDisplayName'],
-                    'published_at': comment['publishedAt'],  # Ajouter la date de publication
+                    # Ajouter la date de publication
+                    'published_at': comment['publishedAt'],
                     'video_id': video_id,
                     'video_title': "N/A"  # On peut ajouter le titre de la vidéo plus tard si nécessaire
                 })
@@ -402,7 +418,8 @@ class YoutubeAPI:
             video_data['like_count'] = video_details['like_count'] if video_details else 0
 
         if 'published_at' in video_data:
-            published_date = datetime.strptime(video_data['published_at'], "%Y-%m-%dT%H:%M:%SZ")
+            published_date = datetime.strptime(
+                video_data['published_at'], "%Y-%m-%dT%H:%M:%SZ")
             now = datetime.now(pytz.UTC)
             days_old = (now - published_date.replace(tzinfo=pytz.UTC)).days
         else:
@@ -441,27 +458,28 @@ class YoutubeAPI:
             modified_query = f"{query} in {language}"
             modified_query = f"{query}"
 
-            api_max_results = min(max_results * 5, 50)  # Augmenter le nombre de résultats
+            # Augmenter le nombre de résultats
+            api_max_results = min(max_results * 5, 50)
 
-            if (language == "fr" and order!="relevance"):
+            if (language == "fr" and order != "relevance"):
                 request = self.youtube.search().list(
-                            part="snippet",
-                            q=modified_query,
-                            maxResults=api_max_results,
-                            type="video",
-                            order=order,
-                            location="46.2276,2.2137",  # Coordonnées approximatives du centre de la France
-                            locationRadius="1000km"  # Rayon de recherche de 1000 km
-                        )
+                    part="snippet",
+                    q=modified_query,
+                    maxResults=api_max_results,
+                    type="video",
+                    order=order,
+                    location="46.2276,2.2137",  # Coordonnées approximatives du centre de la France
+                    locationRadius="1000km"  # Rayon de recherche de 1000 km
+                )
             else:
                 request = self.youtube.search().list(
-                            part="snippet",
-                            q=modified_query,
-                            maxResults=api_max_results,
-                            type="video",
-                            relevanceLanguage=language,
-                            order=order,
-                        )
+                    part="snippet",
+                    q=modified_query,
+                    maxResults=api_max_results,
+                    type="video",
+                    relevanceLanguage=language,
+                    order=order,
+                )
 
             response = request.execute()
 
@@ -498,7 +516,8 @@ class YoutubeAPI:
 
                 # Normaliser les données de la vidéo
                 normalized_video = self.get_video_infos(video_data)
-                normalized_video['relevance_score'] = self.calculate_relevance_score(normalized_video)
+                normalized_video['relevance_score'] = self.calculate_relevance_score(
+                    normalized_video)
                 videos.append(normalized_video)
 
             return videos[:max_results]
@@ -529,7 +548,7 @@ class YoutubeAPI:
             for item in response['items']:
                 video = {
                     'id': item['id'],
-                    'video_id': item['id'], #compat
+                    'video_id': item['id'],  # compat
                     'title': item['snippet']['title'],
                     'description': item['snippet']['description'],
                     'channel_title': item['snippet']['channelTitle'],
@@ -541,7 +560,8 @@ class YoutubeAPI:
                     'url': f"https://www.youtube.com/watch?v={item['id']}"
                 }
                 normalized_video = self.get_video_infos(video)
-                normalized_video['relevance_score'] = self.calculate_relevance_score(normalized_video)
+                normalized_video['relevance_score'] = self.calculate_relevance_score(
+                    normalized_video)
                 trending_videos.append(normalized_video)
             return trending_videos
         except Exception as e:
@@ -581,7 +601,7 @@ class YoutubeAPI:
                 ).execute()
 
                 video_ids = [item['snippet']['resourceId']['videoId']
-                            for item in playlist_response['items']]
+                             for item in playlist_response['items']]
 
                 # Get detailed video statistics
                 if video_ids:
@@ -616,7 +636,8 @@ class YoutubeAPI:
                             'url': f"https://www.youtube.com/watch?v={item['id']}",
                         }
                         normalized_video = self.get_video_infos(video)
-                        normalized_video['relevance_score'] = self.calculate_relevance_score(normalized_video)
+                        normalized_video['relevance_score'] = self.calculate_relevance_score(
+                            normalized_video)
                         videos.append(normalized_video)
                 next_page_token = playlist_response.get('nextPageToken')
                 if not next_page_token:
@@ -626,3 +647,143 @@ class YoutubeAPI:
         except Exception as e:
             print(f"Error fetching channel videos: {str(e)}")
             return []
+
+    def get_advanced_video_stats(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch advanced statistics using Analytics API with updated metrics.
+        """
+        try:
+            # Basic stats via videos().list
+            request = self.youtube.videos().list(
+                part="statistics,contentDetails",
+                id=video_id
+            )
+            response = request.execute()
+
+            if not response['items']:
+                return None
+
+            video_info = response['items'][0]
+            stats = {
+                'view_count': int(video_info['statistics'].get('viewCount', 0)),
+                'like_count': int(video_info['statistics'].get('likeCount', 0)),
+                'comment_count': int(video_info['statistics'].get('commentCount', 0)),
+                'duration': video_info['contentDetails']['duration']
+            }
+
+            # Analytics API avec les métriques corrigées
+            metrics = "annotationClickThroughRate,annotationCloseRate,averageViewDuration,averageViewPercentage,comments,dislikes,estimatedMinutesWatched,estimatedAdRevenue,likes,shares,subscribersGained,subscribersLost,views"
+            analytics_response = self.analytics.reports().query(
+                ids=f"channel=={self.channel_id}",
+                startDate="2014-01-01",
+                endDate=datetime.now().strftime("%Y-%m-%d"),
+                metrics=metrics,
+                dimensions="video",
+                filters=f"video=={video_id}"
+            ).execute()
+
+            if analytics_response.get('rows'):
+                row = analytics_response['rows'][0]
+                stats.update({
+                    'annotation_click_through_rate': float(row[1]) if row[1] else 0.0,
+                    'annotation_close_rate': float(row[2]) if row[2] else 0.0,
+                    'avg_view_duration': float(row[3]) if row[3] else 0.0,
+                    'average_view_percentage': float(row[4]) if row[4] else 0.0,
+                    'comments': int(row[5]) if row[5] else 0,
+                    'dislikes': int(row[6]) if row[6] else 0,
+                    'estimated_minutes_watched': float(row[7]) if row[7] else 0.0,
+                    'estimated_ad_revenue': float(row[8]) if row[8] else 0.0,
+                    'likes': int(row[9]) if row[9] else 0,
+                    'shares': int(row[10]) if row[10] else 0,
+                    'subscribers_gained': int(row[11]) if row[11] else 0,
+                    'subscribers_lost': int(row[12]) if row[12] else 0,
+                    'views': int(row[13]) if row[13] else 0
+                })
+            else:
+                stats.update({
+                    'annotation_click_through_rate': 0.0,
+                    'annotation_close_rate': 0.0,
+                    'avg_view_duration': 0.0,
+                    'average_view_percentage': 0.0,
+                    'comments': 0,
+                    'dislikes': 0,
+                    'estimated_minutes_watched': 0.0,
+                    'estimated_ad_revenue': 0.0,
+                    'likes': 0,
+                    'shares': 0,
+                    'subscribers_gained': 0,
+                    'subscribers_lost': 0,
+                    'views': 0
+                })
+
+            # Calcul du taux de rétention
+            total_seconds = self._iso_duration_to_seconds(
+                video_info['contentDetails']['duration'])
+            stats['retention_rate'] = (
+                stats['avg_view_duration'] / total_seconds * 100) if total_seconds > 0 else 0.0
+
+            return stats
+        except HttpError as e:
+            print(
+                f"YouTube Analytics API Error (get_advanced_video_stats): {str(e)}")
+            return None
+        except Exception as e:
+            print(f"Unexpected Error (get_advanced_video_stats): {str(e)}")
+            return None
+
+    def debug_advanced_video_stats(self, video_id: str, selected_metrics: List[str]) -> Dict[str, Any]:
+        """
+        Debug method to fetch advanced stats for a single video with selectable metrics.
+        """
+        try:
+            metrics_str = ",".join(selected_metrics)
+            analytics_response = self.analytics.reports().query(
+                ids=f"channel=={self.channel_id}",
+                startDate="2014-01-01",
+                endDate=datetime.now().strftime("%Y-%m-%d"),
+                metrics=metrics_str,
+                dimensions="video",
+                filters=f"video=={video_id}"
+            ).execute()
+
+            request = self.youtube.videos().list(
+                part="statistics,contentDetails",
+                id=video_id
+            )
+            response = request.execute()
+
+            result = {
+                "analytics_response": analytics_response,
+                "basic_stats": response if response['items'] else None,
+                "error": None
+            }
+
+            if response['items'] and 'averageViewDuration' in selected_metrics and analytics_response.get('rows'):
+                duration = response['items'][0]['contentDetails']['duration']
+                total_seconds = self._iso_duration_to_seconds(duration)
+                avg_view_duration_idx = selected_metrics.index(
+                    'averageViewDuration') + 1
+                avg_view_duration = float(
+                    analytics_response['rows'][0][avg_view_duration_idx])
+                result['calculated_retention_rate'] = (
+                    avg_view_duration / total_seconds * 100) if total_seconds > 0 else 0.0
+
+            return result
+        except HttpError as e:
+            print(
+                f"YouTube Analytics API Error (debug_advanced_video_stats): {str(e)}")
+            return {"analytics_response": None, "basic_stats": None, "error": str(e)}
+        except Exception as e:
+            print(f"Unexpected Error (debug_advanced_video_stats): {str(e)}")
+            return {"analytics_response": None, "basic_stats": None, "error": str(e)}
+
+    def _iso_duration_to_seconds(self, duration: str) -> int:
+        """Convert ISO 8601 duration to seconds."""
+        import re
+        match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration)
+        if not match:
+            return 0
+        hours = int(match.group(1)) if match.group(1) else 0
+        minutes = int(match.group(2)) if match.group(2) else 0
+        seconds = int(match.group(3)) if match.group(3) else 0
+        return hours * 3600 + minutes * 60 + seconds
