@@ -61,17 +61,18 @@ def initialize_database():
             "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS videos (
-            video_id TEXT PRIMARY KEY,
-            url TEXT UNIQUE,
-            title TEXT,
-            thumbnail_url TEXT,
-            transcript TEXT,
-            description TEXT,
-            published_at TEXT,
-            status TEXT
-        )
-    """)
+            CREATE TABLE IF NOT EXISTS videos (
+                video_id TEXT PRIMARY KEY,
+                url TEXT UNIQUE,
+                title TEXT,
+                thumbnail_url TEXT,
+                transcript TEXT,
+                description TEXT,
+                published_at TEXT,
+                status TEXT,
+                keywords TEXT DEFAULT '[]'  -- Nouveau champ pour les mots-clés, JSON par défaut une liste vide
+            )
+        """)
 
     # Nouvelle structure avec advanced_stats en JSON
     cursor.execute("""
@@ -307,25 +308,47 @@ def sync_videos(channel_id: str, youtube_api: YoutubeAPI):
     conn.close()
 
 
-def get_videos(filter_type: str = "title", keyword: str = "", page: int = 1, per_page: int = 100) -> List[Dict[str, Any]]:
-    """Retrieve filtered and paginated videos from the database."""
+def update_video_keywords(video_id: str, keywords: List[str]):
+    """Met à jour les mots-clés d'une vidéo."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    keywords_json = json.dumps(keywords)
+    cursor.execute(
+        "UPDATE videos SET keywords = ? WHERE video_id = ?", (keywords_json, video_id))
+    conn.commit()
+    conn.close()
+
+
+def get_videos(filter_type: str = "title", keyword: str = "", page: int = 1, per_page: int = 100, keyword_filter: List[str] = None) -> List[Dict[str, Any]]:
+    """Récupère les vidéos avec un filtre optionnel par mots-clés."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     query_base = "SELECT * FROM videos WHERE "
+    params = []
+    conditions = []
+
     if filter_type == "title":
-        query = query_base + "title LIKE ?"
+        conditions.append("title LIKE ?")
+        params.append(f"%{keyword}%")
     elif filter_type == "title_description":
-        query = query_base + "(title LIKE ? OR description LIKE ?)"
+        conditions.append("(title LIKE ? OR description LIKE ?)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
     elif filter_type == "all":
-        query = query_base + \
-            "(title LIKE ? OR description LIKE ? OR transcript LIKE ?)"
+        conditions.append(
+            "(title LIKE ? OR description LIKE ? OR transcript LIKE ?)")
+        params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+
+    if keyword_filter:
+        # Filtrer par mots-clés (recherche dans le champ JSON)
+        for kw in keyword_filter:
+            conditions.append("keywords LIKE ?")
+            params.append(f"%{kw}%")
+
+    if conditions:
+        query = query_base + " AND ".join(conditions)
     else:
         query = "SELECT * FROM videos"
-
-    keyword_param = f"%{keyword}%"
-    params = [keyword_param] * (1 if filter_type ==
-                                "title" else 2 if filter_type == "title_description" else 3)
 
     # Pagination
     offset = (page - 1) * per_page
@@ -334,6 +357,8 @@ def get_videos(filter_type: str = "title", keyword: str = "", page: int = 1, per
 
     cursor.execute(query, params)
     videos = [dict(row) for row in cursor.fetchall()]
+    for video in videos:
+        video['keywords'] = json.loads(video['keywords'])
 
     conn.close()
     return videos

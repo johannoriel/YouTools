@@ -63,7 +63,11 @@ translations["en"].update({
     "marketyoutube_initial_keywords": "Initial Keywords (comma-separated)",
     "marketyoutube_target_channels": "Target Channels",
     "marketyoutube_update_keywords": "Update Keywords",
-    "marketyoutube_delete_channel": "Delete Channel"
+    "marketyoutube_delete_channel": "Delete Channel",
+    "marketyoutube_keywords": "Keywords",
+    "marketyoutube_edit_keywords": "Edit Keywords",
+    "marketyoutube_suggest_keywords": "Suggest Keywords",
+    "marketyoutube_filter_keywords": "Filter by Keywords",
 })
 
 translations["fr"].update({
@@ -122,7 +126,11 @@ translations["fr"].update({
     "marketyoutube_initial_keywords": "Mots-clés Initiaux (séparés par des virgules)",
     "marketyoutube_target_channels": "Chaînes Cibles",
     "marketyoutube_update_keywords": "Mettre à Jour les Mots-clés",
-    "marketyoutube_delete_channel": "Supprimer la Chaîne"
+    "marketyoutube_delete_channel": "Supprimer la Chaîne",
+    "marketyoutube_keywords": "Mots-clés",
+    "marketyoutube_edit_keywords": "Modifier les mots-clés",
+    "marketyoutube_suggest_keywords": "Suggérer des mots-clés",
+    "marketyoutube_filter_keywords": "Filtrer par mots-clés",
 })
 
 
@@ -175,19 +183,79 @@ class MarketyoutubePlugin(Plugin):
             {"name": "Debug Stats API", "plugin": "marketyoutube"}
         ]
 
-    def display_videos(self, tab: str, filter_type: str, keyword: str, page: int):
-        videos = get_videos(filter_type, keyword, page)
+    def format_count(self, count: int) -> str:
+        """Formate un nombre en K/M si > 1000."""
+        if count >= 1_000_000:
+            return f"{count/1_000_000:.1f}M"
+        elif count >= 1000:
+            return f"{count/1000:.1f}K"
+        return str(count)
+
+    def suggest_keywords(self, title: str, description: str, transcript: str) -> List[str]:
+        """Suggère des mots-clés via LLM."""
+        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
+        prompt = """
+        Suggest 5-10 relevant keywords for a YouTube video based on the following:
+        Title: {title}
+        Description: {description}
+        Transcript: {transcript}
+        Return the keywords as a comma-separated list.
+        """
+        context = f"Title: {title}\nDescription: {description}\nTranscript: {transcript}"
+        llm_response = ragllm_plugin.process_with_llm(
+            prompt.format(title=title, description=description,
+                          transcript=transcript),
+            "",
+            context
+        )
+        return [kw.strip() for kw in llm_response.split(",")]
+
+    def display_videos(self, tab: str, filter_type: str, keyword: str, page: int, keyword_filter: List[str] = None):
+        videos = get_videos(filter_type, keyword, page,
+                            keyword_filter=keyword_filter)
         total_videos = len(videos)
 
         st.write(t("marketyoutube_video_count").format(total_videos))
 
         if tab == t("marketyoutube_tab_videos"):
             for video in videos:
-                col1, col2 = st.columns([1, 3])
-                col1.image(video['thumbnail_url'], width=120)
-                col2.markdown(f"[{video['title']}]({video['url']})")
-                col2.write(f"Published: {video['published_at']}")
-                col2.write(f"Status: {video['status']}")
+                # Ajouter les mots-clés entre parenthèses dans le libellé
+                keywords_str = ", ".join(
+                    video['keywords']) if video['keywords'] else "aucun mot-clé"
+                with st.expander(f"{video['title']} ({keywords_str})"):
+                    col1, col2 = st.columns([1, 3])
+                    col1.image(video['thumbnail_url'], width=120)
+                    col2.markdown(f"[{video['title']}]({video['url']})")
+                    col2.write(f"Published: {video['published_at']}")
+                    col2.write(f"Status: {video['status']}")
+
+                    current_keywords = ", ".join(
+                        video['keywords']) if video['keywords'] else "No keywords"
+                    col2.write(
+                        f"{t('marketyoutube_keywords')}: {current_keywords}")
+
+                    new_keywords = st.text_input(
+                        t("marketyoutube_edit_keywords"),
+                        value=current_keywords,
+                        key=f"edit_keywords_{video['video_id']}"
+                    )
+                    if st.button(t("marketyoutube_edit_keywords"), key=f"save_keywords_{video['video_id']}"):
+                        updated_keywords = [
+                            kw.strip() for kw in new_keywords.split(",") if kw.strip()]
+                        update_video_keywords(
+                            video['video_id'], updated_keywords)
+                        st.success(f"Keywords updated for {video['title']}")
+                        st.rerun()
+
+                    if st.button(t("marketyoutube_suggest_keywords"), key=f"suggest_keywords_{video['video_id']}"):
+                        suggested_keywords = self.suggest_keywords(
+                            video['title'], video['description'], video['transcript'])
+                        update_video_keywords(
+                            video['video_id'], suggested_keywords)
+                        st.success(
+                            f"Suggested keywords applied for {video['title']}")
+                        st.rerun()
+
         elif tab == t("marketyoutube_tab_stats"):
             stats_data = []
             advanced_stats_list = self.youtube_api.get_advanced_stats_list()
@@ -299,6 +367,7 @@ class MarketyoutubePlugin(Plugin):
                 progress_callback((i + 1) / total_videos)
 
     def display_channel_manager(self, config):
+        youtube_api = YoutubeAPI(self.plugin_manager.config)
         st.header("Channel Manager")
 
         # Section pour ajouter une chaîne manuellement
@@ -310,10 +379,7 @@ class MarketyoutubePlugin(Plugin):
 
         if st.button("Add Channel"):
             if channel_url:
-                youtube_api = self.youtube_api
-                # Extraire l'ID de la chaîne à partir de l'URL
                 try:
-                    # Supposons que l'URL est au format @ChannelName ou channel/ChannelID
                     if "/@" in channel_url:
                         handle = channel_url.split("/@")[1].split("/")[0]
                         request = youtube_api.youtube.channels().list(
@@ -359,15 +425,22 @@ class MarketyoutubePlugin(Plugin):
             st.info("No target channels added yet.")
         else:
             for channel in channels:
-                with st.expander(f"{channel['channel_title']} ({channel['subscriber_count']} subscribers)"):
+                # Ajouter les mots-clés entre parenthèses et formater le nombre d'abonnés
+                keywords_str = ", ".join(
+                    channel['keywords']) if channel['keywords'] else "aucun mot-clé"
+                subscriber_count_str = self.format_count(
+                    channel['subscriber_count'])
+                with st.expander(f"{channel['channel_title']} ({subscriber_count_str} subscribers) ({keywords_str}) "):
                     st.write(f"URL: {channel['channel_url']}")
                     st.write(f"Added: {channel['added_at']}")
                     st.write(f"Last Updated: {channel['last_updated']}")
 
-                    # Modifier les mots-clés
                     current_keywords = ", ".join(channel['keywords'])
                     new_keywords = st.text_input(
-                        f"Keywords for {channel['channel_title']}", value=current_keywords, key=f"keywords_{channel['channel_id']}")
+                        f"Keywords for {channel['channel_title']}",
+                        value=current_keywords,
+                        key=f"keywords_{channel['channel_id']}"
+                    )
                     if st.button("Update Keywords", key=f"update_{channel['channel_id']}"):
                         updated_keywords = [k.strip()
                                             for k in new_keywords.split(",")]
@@ -376,12 +449,11 @@ class MarketyoutubePlugin(Plugin):
                         st.success(
                             f"Keywords updated for {channel['channel_title']}!")
 
-                    # Supprimer la chaîne
                     if st.button("Delete Channel", key=f"delete_{channel['channel_id']}"):
                         delete_target_channel(channel['channel_id'])
                         st.success(
                             f"Channel '{channel['channel_title']}' deleted!")
-                        st.rerun()  # Rafraîchir l'affichage
+                        st.rerun()
 
     def display_campaign_tab(self, config, tab):
         with tab:
@@ -395,8 +467,9 @@ class MarketyoutubePlugin(Plugin):
             )
 
             videos = get_videos()
+            # Ajouter les mots-clés dans le libellé des vidéos à promouvoir
             video_options = {
-                f"{v['title']} ({v['published_at']})": v for v in videos}
+                f"{v['title']} ({', '.join(v['keywords']) if v['keywords'] else 'aucun mot-clé'}) ({v['published_at']})": v for v in videos}
             selected_video_title = st.selectbox(
                 t("marketyoutube_select_video"),
                 options=list(video_options.keys()),
@@ -404,7 +477,6 @@ class MarketyoutubePlugin(Plugin):
             )
             campaign_video = video_options[selected_video_title]
 
-            # Persister target_videos dans session_state
             if "campaign_target_videos" not in st.session_state:
                 st.session_state["campaign_target_videos"] = []
 
@@ -444,12 +516,13 @@ class MarketyoutubePlugin(Plugin):
                     if not selected_keywords or any(kw in ch['keywords'] for kw in selected_keywords)
                 ]
 
+                # Ajouter les mots-clés dans le libellé des chaînes
                 selected_channels = st.multiselect(
                     "Select Target Channels",
                     options=[
-                        f"{ch['channel_title']} ({ch['subscriber_count']} subscribers)" for ch in filtered_channels],
+                        f"{ch['channel_title']} ({', '.join(ch['keywords']) if ch['keywords'] else 'aucun mot-clé'}) ({ch['subscriber_count']} subscribers)" for ch in filtered_channels],
                     default=[
-                        f"{ch['channel_title']} ({ch['subscriber_count']} subscribers)" for ch in filtered_channels],
+                        f"{ch['channel_title']} ({', '.join(ch['keywords']) if ch['keywords'] else 'aucun mot-clé'}) ({ch['subscriber_count']} subscribers)" for ch in filtered_channels],
                     key="campaign_select_channels"
                 )
 
@@ -477,14 +550,13 @@ class MarketyoutubePlugin(Plugin):
                     else:
                         target_videos = []
                         for channel in filtered_channels:
-                            if f"{channel['channel_title']} ({channel['subscriber_count']} subscribers)" in selected_channels:
+                            if f"{channel['channel_title']} ({', '.join(channel['keywords']) if channel['keywords'] else 'aucun mot-clé'}) ({channel['subscriber_count']} subscribers)" in selected_channels:
                                 channel_videos = self.youtube_api.get_channel_recent_videos(
                                     channel['channel_id'],
                                     max_results=max_videos_per_channel
                                 )
                                 target_videos.extend(channel_videos)
                     st.session_state["campaign_target_videos"] = target_videos
-                    # Réinitialiser les états liés pour une nouvelle campagne
                     prefix = "campaign_"
                     if f"{prefix}videos" in st.session_state:
                         del st.session_state[f"{prefix}videos"]
@@ -505,7 +577,6 @@ class MarketyoutubePlugin(Plugin):
                     if f"{prefix}campaign_id" in st.session_state:
                         del st.session_state[f"{prefix}campaign_id"]
 
-            # Utiliser target_videos persistant
             if st.session_state["campaign_target_videos"]:
                 promoteyoutube = PromoteyoutubePlugin(
                     "promoteyoutube", self.plugin_manager)
@@ -549,11 +620,34 @@ class MarketyoutubePlugin(Plugin):
                 key="filter_type_videos"
             )
             keyword = st.text_input(
-                t("marketyoutube_keyword"), key="keyword_videos")
+                t("marketyoutube_keyword"),
+                key="keyword_videos"
+            )
+
+            # Filtre par mots-clés des vidéos
+            all_keywords = set()
+            for video in get_videos():  # Récupérer tous les mots-clés disponibles
+                all_keywords.update(video['keywords'])
+            all_keywords = sorted(list(all_keywords))
+            selected_keyword_filter = st.multiselect(
+                t("marketyoutube_filter_keywords"),
+                options=all_keywords,
+                key="keyword_filter_videos"
+            )
+
             page = st.number_input(
-                t("marketyoutube_page"), min_value=1, value=1, key="page_videos")
-            self.display_videos(t("marketyoutube_tab_videos"),
-                                filter_options[filter_type], keyword, page)
+                t("marketyoutube_page"),
+                min_value=1,
+                value=1,
+                key="page_videos"
+            )
+            self.display_videos(
+                t("marketyoutube_tab_videos"),
+                filter_options[filter_type],
+                keyword,
+                page,
+                keyword_filter=selected_keyword_filter if selected_keyword_filter else None
+            )
 
         # Tab 2: Stats (inchangé sauf ajout du statut dans le tableau)
         with tab2:
