@@ -9,3 +9,6 @@ token.json
 __pycache__
 imggen_prompt_history.json
 .aider*
+youtube_database.db
+youtube_database.db-journal
+tests
