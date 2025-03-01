@@ -27,6 +27,7 @@ def reset_database():
     cursor.execute("DROP TABLE IF EXISTS videos")
     cursor.execute("DROP TABLE IF EXISTS stats_snapshots")
     cursor.execute("DROP TABLE IF EXISTS campaign_cache")
+    cursor.execute("DROP TABLE IF EXISTS target_channels")
 
     # Réinitialiser avec la version courante
     initialize_database()
@@ -100,6 +101,18 @@ def initialize_database():
             FOREIGN KEY (campaign_video_id) REFERENCES videos (video_id)
         )
     """)
+
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS target_channels (
+                channel_id TEXT PRIMARY KEY,
+                channel_title TEXT,
+                channel_url TEXT UNIQUE,
+                subscriber_count INTEGER DEFAULT 0,
+                keywords TEXT,  -- JSON contenant la liste des mots-clés
+                added_at TEXT,
+                last_updated TEXT
+            )
+        """)
 
     conn.commit()
     conn.close()
@@ -309,6 +322,102 @@ def get_videos(filter_type: str = "title", keyword: str = "", page: int = 1, per
 
     conn.close()
     return videos
+
+
+def add_target_channel(channel_id: str, channel_title: str, channel_url: str, keywords: List[str], subscriber_count: int = 0) -> None:
+    """Ajoute une chaîne cible à la base de données."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    timestamp = datetime.now(pytz.UTC).isoformat()
+    keywords_json = json.dumps(keywords)
+
+    cursor.execute("""
+        INSERT OR REPLACE INTO target_channels (channel_id, channel_title, channel_url, subscriber_count, keywords, added_at, last_updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (channel_id, channel_title, channel_url, subscriber_count, keywords_json, timestamp, timestamp))
+
+    conn.commit()
+    conn.close()
+
+
+def update_target_channel_keywords(channel_id: str, keywords: List[str]) -> None:
+    """Met à jour les mots-clés d'une chaîne cible."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    timestamp = datetime.now(pytz.UTC).isoformat()
+    keywords_json = json.dumps(keywords)
+
+    cursor.execute("""
+        UPDATE target_channels
+        SET keywords = ?, last_updated = ?
+        WHERE channel_id = ?
+    """, (keywords_json, timestamp, channel_id))
+
+    conn.commit()
+    conn.close()
+
+
+def update_target_channel_stats(channel_id: str, subscriber_count: int) -> None:
+    """Met à jour les statistiques d'une chaîne cible."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    timestamp = datetime.now(pytz.UTC).isoformat()
+
+    cursor.execute("""
+        UPDATE target_channels
+        SET subscriber_count = ?, last_updated = ?
+        WHERE channel_id = ?
+    """, (subscriber_count, timestamp, channel_id))
+
+    conn.commit()
+    conn.close()
+
+
+def delete_target_channel(channel_id: str) -> None:
+    """Supprime une chaîne cible de la base de données."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "DELETE FROM target_channels WHERE channel_id = ?", (channel_id,))
+
+    conn.commit()
+    conn.close()
+
+
+def get_target_channels() -> List[Dict[str, Any]]:
+    """Récupère toutes les chaînes cibles avec leurs informations."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM target_channels")
+    channels = [dict(row) for row in cursor.fetchall()]
+
+    for channel in channels:
+        channel['keywords'] = json.loads(channel['keywords'])
+
+    conn.close()
+    return channels
+
+
+def get_target_channel(channel_id: str) -> Optional[Dict[str, Any]]:
+    """Récupère les informations d'une chaîne cible spécifique."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT * FROM target_channels WHERE channel_id = ?", (channel_id,))
+    channel = cursor.fetchone()
+
+    conn.close()
+    if channel:
+        channel_dict = dict(channel)
+        channel_dict['keywords'] = json.loads(channel_dict['keywords'])
+        return channel_dict
+    return None
 
 
 if __name__ == "__main__":

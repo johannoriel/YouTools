@@ -6,6 +6,7 @@ import pandas as pd
 from global_vars import translations, t
 from plugins.ragllm import RagllmPlugin
 import os
+from youtube_db import *
 
 # Add new translations for sorting functionality
 translations["en"].update({
@@ -32,6 +33,7 @@ translations["en"].update({
     "trendsyoutube_keywords_list": "Keywords List (comma separated)",
     "trendsyoutube_suggest_keywords": "Suggest Keywords",
     "trendsyoutube_theme_for_suggestions": "Theme for keyword suggestions",
+    "trendsyoutube_add_to_targets": "Add to Targets",
 })
 
 translations["fr"].update({
@@ -58,6 +60,7 @@ translations["fr"].update({
     "trendsyoutube_keywords_list": "Liste de mots-clés (séparés par des virgules)",
     "trendsyoutube_suggest_keywords": "Suggérer des mots-clés",
     "trendsyoutube_theme_for_suggestions": "Thème pour les suggestions",
+    "trendsyoutube_add_to_targets": "Ajouter aux Cibles"
 })
 
 
@@ -122,7 +125,8 @@ class TrendsyoutubePlugin(Plugin):
         if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
             base_columns.append('search_keyword')
 
-        df = pd.DataFrame(st.session_state.subscription_videos, columns=base_columns)
+        df = pd.DataFrame(st.session_state.subscription_videos,
+                          columns=base_columns)
 
         # Applique le tri
         st.session_state.sorted_df = df.sort_values(
@@ -145,7 +149,8 @@ class TrendsyoutubePlugin(Plugin):
         with st.spinner(t("trendsyoutube_loading")):
             # Get subscriptions
             subscriptions = youtube_api.get_subscriptions(
-                max_results=int(self.plugin_manager.config['trendsyoutube']['max_subscriptions'])
+                max_results=int(
+                    self.plugin_manager.config['trendsyoutube']['max_subscriptions'])
             )
 
             # Fetch recent videos for each subscription
@@ -159,7 +164,8 @@ class TrendsyoutubePlugin(Plugin):
 
             # Store in session state
             st.session_state.subscription_videos = all_videos
-            st.session_state.selected_videos = {i: False for i in range(len(all_videos))}
+            st.session_state.selected_videos = {
+                i: False for i in range(len(all_videos))}
 
     def load_trending_videos(self, max_videos: int) -> None:
         """
@@ -171,9 +177,11 @@ class TrendsyoutubePlugin(Plugin):
         youtube_api = YoutubeAPI(self.plugin_manager.config)
 
         with st.spinner("Loading trending videos..."):
-            trending_videos = youtube_api.get_trending_videos(language=st.session_state.lang, max_results=max_videos)
+            trending_videos = youtube_api.get_trending_videos(
+                language=st.session_state.lang, max_results=max_videos)
             st.session_state.subscription_videos = trending_videos
-            st.session_state.selected_videos = {i: False for i in range(len(trending_videos))}
+            st.session_state.selected_videos = {
+                i: False for i in range(len(trending_videos))}
 
     def search_videos(self, keywords: str, max_videos: int, order: str) -> None:
         """
@@ -187,16 +195,18 @@ class TrendsyoutubePlugin(Plugin):
         youtube_api = YoutubeAPI(self.plugin_manager.config)
 
         with st.spinner("Searching videos..."):
-            search_results = youtube_api.search_videos(keywords, max_videos, order=order, language=st.session_state.lang)
+            search_results = youtube_api.search_videos(
+                keywords, max_videos, order=order, language=st.session_state.lang)
 
             all_videos = []
             for video in search_results:
-                video['relevance_score'] = youtube_api.calculate_relevance_score(video)
+                video['relevance_score'] = youtube_api.calculate_relevance_score(
+                    video)
                 all_videos.append(video)
 
             st.session_state.subscription_videos = all_videos
-            st.session_state.selected_videos = {i: False for i in range(len(all_videos))}
-
+            st.session_state.selected_videos = {
+                i: False for i in range(len(all_videos))}
 
     def recalculate_scores(self, youtube_api: YoutubeAPI) -> None:
         """
@@ -204,7 +214,8 @@ class TrendsyoutubePlugin(Plugin):
         la méthode standardisée de l'API YouTube.
         """
         for video in st.session_state.subscription_videos:
-            video['relevance_score'] = youtube_api.calculate_relevance_score(video)
+            video['relevance_score'] = youtube_api.calculate_relevance_score(
+                video)
 
         # Force le rafraîchissement du DataFrame trié
         if st.session_state.sorted_df is not None:
@@ -236,11 +247,13 @@ class TrendsyoutubePlugin(Plugin):
                 )
 
                 for video in search_results:
-                    video['search_keyword'] = keyword.strip()  # Add keyword information
+                    # Add keyword information
+                    video['search_keyword'] = keyword.strip()
                     all_videos.append(video)
 
             st.session_state.subscription_videos = all_videos
-            st.session_state.selected_videos = {i: False for i in range(len(all_videos))}
+            st.session_state.selected_videos = {
+                i: False for i in range(len(all_videos))}
 
     def get_keyword_suggestions(self, theme: str, config: dict) -> List[str]:
         """
@@ -288,10 +301,10 @@ class TrendsyoutubePlugin(Plugin):
         youtube_api = YoutubeAPI(self.plugin_manager.config)
 
         base_columns = [
-                'title', 'video_id', 'channel_title', 'channel_id', 'view_count', 'like_count',
-                'comment_count', 'days_old', 'published_at', 'url', 'language', 'subscriber_count',
-                'relevance_score'
-            ]
+            'title', 'video_id', 'channel_title', 'channel_id', 'view_count', 'like_count',
+            'comment_count', 'days_old', 'published_at', 'url', 'language', 'subscriber_count',
+            'relevance_score'
+        ]
 
         # Utilise le DataFrame trié s'il existe, sinon crée un nouveau
         if st.session_state.sorted_df is None:
@@ -331,24 +344,26 @@ class TrendsyoutubePlugin(Plugin):
             df = df[df['channel_title'].isin(selected_channels)]
 
         if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
-                available_keywords = df['search_keyword'].unique().tolist()
-                available_keywords.sort()
-                selected_keywords = st.multiselect(
-                    "Filter by keyword",
-                    options=available_keywords,
-                    default=available_keywords
-                )
-                if selected_keywords:
-                    df = df[df['search_keyword'].isin(selected_keywords)]
+            available_keywords = df['search_keyword'].unique().tolist()
+            available_keywords.sort()
+            selected_keywords = st.multiselect(
+                "Filter by keyword",
+                options=available_keywords,
+                default=available_keywords
+            )
+            if selected_keywords:
+                df = df[df['search_keyword'].isin(selected_keywords)]
 
         # Add selection controls
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             if st.button(t("trendsyoutube_select_all")):
-                st.session_state.selected_videos = {i: True for i in range(len(st.session_state.subscription_videos))}
+                st.session_state.selected_videos = {i: True for i in range(
+                    len(st.session_state.subscription_videos))}
         with col2:
             if st.button(t("trendsyoutube_deselect_all")):
-                st.session_state.selected_videos = {i: False for i in range(len(st.session_state.subscription_videos))}
+                st.session_state.selected_videos = {i: False for i in range(
+                    len(st.session_state.subscription_videos))}
         with col3:
             st.write(t("trendsyoutube_selected_count").format(
                 sum(st.session_state.selected_videos.values())
@@ -368,12 +383,13 @@ class TrendsyoutubePlugin(Plugin):
             ("Subscribers", "subscriber_count"),
             ("Likes", "like_count"),
             ("Score", "relevance_score"),
-            ("Lang", "language")
+            ("Lang", "language"),
+            ("Action", None),
         ]
 
         if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
             headers.append(("Keyword", "search_keyword"))
-            cols = st.columns([0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1])  # Ajout d'une colonne
+            cols = st.columns([0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1])
         else:
             cols = st.columns([0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1])
 
@@ -391,69 +407,84 @@ class TrendsyoutubePlugin(Plugin):
         # Display video rows
         for index, video in df.iterrows():
             with st.container():
-                columns_width = [0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1]
+                columns_width = [0.5, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1]
                 if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
-                    headers.append(("Keyword", "search_keyword"))
-                    columns_width.append(1)
+                    columns_width.insert(-1, 1)
+                    cols = st.columns(columns_width)
+                else:
+                    cols = st.columns(columns_width)
 
-                cols = st.columns(columns_width)
-
-                # Trouver l'index original en comparant uniquement les champs clés
                 original_index = next(
                     (i for i, v in enumerate(st.session_state.subscription_videos)
-                     if v['video_id'] == video['video_id']),
+                        if v['video_id'] == video['video_id']),
                     index
                 )
 
-                cols[0].checkbox(
-                    "",
-                    key=f"video_{original_index}",
-                    value=st.session_state.selected_videos.get(original_index, False),
-                    on_change=lambda i=original_index: self._update_selection(i)
-                )
-
-                # Video information
+                cols[0].checkbox("", key=f"video_{original_index}", value=st.session_state.selected_videos.get(
+                    original_index, False), on_change=lambda i=original_index: self._update_selection(i))
                 cols[1].markdown(f"[{video['title']}]({video['url']})")
                 cols[2].write(video['channel_title'])
                 cols[3].write(youtube_api.format_count(video['view_count']))
                 cols[4].write(str(video['comment_count']))
                 cols[5].write(f"{video['days_old']}d")
-                cols[6].write(youtube_api.format_count(video['subscriber_count']))
+                cols[6].write(youtube_api.format_count(
+                    video['subscriber_count']))
                 cols[7].write(youtube_api.format_count(video['like_count']))
                 cols[8].write(f"{video['relevance_score']:.1f}")
                 cols[9].write(video['language'])
                 if st.session_state.video_source == t("trendsyoutube_source_keywords_compare"):
                     cols[10].write(video.get('search_keyword', ''))
+                    action_col = cols[11]
+                else:
+                    action_col = cols[10]
+
+                # Bouton "Add to Targets"
+                if action_col.button("Add to Targets", key=f"add_target_{video['channel_id']}_{index}"):
+                    channel_info = youtube_api.get_channel_info(
+                        video['channel_id'])
+                    if channel_info:
+                        channel_url = f"https://www.youtube.com/channel/{video['channel_id']}"
+                        add_target_channel(
+                            channel_id=video['channel_id'],
+                            channel_title=video['channel_title'],
+                            channel_url=channel_url,
+                            keywords=[],  # Mots-clés initiaux vides, modifiables dans Channel Manager
+                            subscriber_count=channel_info['subscriber_count']
+                        )
+                        st.success(
+                            f"Channel '{video['channel_title']}' added to target channels!")
 
     def _update_selection(self, index: int):
         """Update video selection in session state."""
-        st.session_state.selected_videos[index] = not st.session_state.selected_videos.get(index, False)
+        st.session_state.selected_videos[index] = not st.session_state.selected_videos.get(
+            index, False)
 
     def extract_comments(self, youtube_api: YoutubeAPI, work_directory: str, max_comments: int) -> None:
-            """
-            Extrait les commentaires des vidéos sélectionnées et les écrit dans un fichier.
+        """
+        Extrait les commentaires des vidéos sélectionnées et les écrit dans un fichier.
 
-            Args:
-                youtube_api: Instance de YoutubeAPI
-                work_directory: Répertoire de travail pour sauvegarder le fichier
-                max_comments: Nombre maximum de commentaires à extraire par vidéo
-            """
-            selected_indices = [i for i, selected in st.session_state.selected_videos.items() if selected]
-            if not selected_indices:
-                st.warning("Please select at least one video to extract comments.")
-                return
+        Args:
+            youtube_api: Instance de YoutubeAPI
+            work_directory: Répertoire de travail pour sauvegarder le fichier
+            max_comments: Nombre maximum de commentaires à extraire par vidéo
+        """
+        selected_indices = [
+            i for i, selected in st.session_state.selected_videos.items() if selected]
+        if not selected_indices:
+            st.warning("Please select at least one video to extract comments.")
+            return
 
-            # Créer le fichier comments.txt
-            comments_file = os.path.join(work_directory, "comments.txt")
-            comment_id = 1  # Pour générer des IDs uniques
+        # Créer le fichier comments.txt
+        comments_file = os.path.join(work_directory, "comments.txt")
+        comment_id = 1  # Pour générer des IDs uniques
 
-            with st.spinner("Extracting comments..."):
-                with open(comments_file, "w", encoding="utf-8") as f:
-                    for index in selected_indices:
-                        video = st.session_state.subscription_videos[index]
+        with st.spinner("Extracting comments..."):
+            with open(comments_file, "w", encoding="utf-8") as f:
+                for index in selected_indices:
+                    video = st.session_state.subscription_videos[index]
 
-                        # Écrire l'en-tête de la vidéo
-                        header = f"""
+                    # Écrire l'en-tête de la vidéo
+                    header = f"""
 === VIDEO INFORMATION ===
 Title: {video['title']}
 Channel: {video['channel_title']}
@@ -466,36 +497,36 @@ Video Language: {video.get('language', 'unknown')}
 
 --- COMMENTS ---
 """
-                        f.write(header)
+                    f.write(header)
 
-                        # Récupérer et écrire les commentaires
-                        comments = youtube_api.get_comments(
-                            video_id=video['video_id'],
-                            max_results=max_comments,
-                            order="relevance"  # Trier par pertinence
-                        )
+                    # Récupérer et écrire les commentaires
+                    comments = youtube_api.get_comments(
+                        video_id=video['video_id'],
+                        max_results=max_comments,
+                        order="relevance"  # Trier par pertinence
+                    )
 
-                        for comment in comments:
-                            comment_text = f"""
+                    for comment in comments:
+                        comment_text = f"""
 [COMMENT ID: {comment['id']}]
 Author: {comment['author']}
 Posted: {comment['published_at']}
 Content: {comment['text']}
 ----------------------------------------
 """
-                            f.write(comment_text)
-                            comment_id += 1
+                        f.write(comment_text)
+                        comment_id += 1
 
-                        f.write("\n\n")  # Séparateur entre les vidéos
+                    f.write("\n\n")  # Séparateur entre les vidéos
 
-            st.success(f"Comments extracted and saved to {comments_file}")
+        st.success(f"Comments extracted and saved to {comments_file}")
 
     def run(self, config):
         """Main plugin execution."""
         st.header(t("trendsyoutube_subscriptions"))
-        #youtube_api = YoutubeAPI(config)
-        #stats = youtube_api.get_quota_usage(config)
-        #st.info(f"Quota utilisé : {stats['usage_percentage']}%")
+        # youtube_api = YoutubeAPI(config)
+        # stats = youtube_api.get_quota_usage(config)
+        # st.info(f"Quota utilisé : {stats['usage_percentage']}%")
 
         if st.button("Reset Results"):
             self.reset_session_state()
@@ -503,15 +534,15 @@ Content: {comment['text']}
 
         # Sélection de la source des vidéos
         video_source = st.radio(
-                t("trendsyoutube_source"),
-                options=[
-                    t("trendsyoutube_source_subscriptions"),
-                    t("trendsyoutube_source_trending"),
-                    t("trendsyoutube_source_search"),
-                    t("trendsyoutube_source_keywords_compare")  # New option
-                ],
-                index=0
-            )
+            t("trendsyoutube_source"),
+            options=[
+                t("trendsyoutube_source_subscriptions"),
+                t("trendsyoutube_source_trending"),
+                t("trendsyoutube_source_search"),
+                t("trendsyoutube_source_keywords_compare")  # New option
+            ],
+            index=0
+        )
         st.session_state.video_source = video_source
 
         if video_source == t("trendsyoutube_source_subscriptions"):
@@ -563,8 +594,10 @@ Content: {comment['text']}
                 theme = st.text_input(t("trendsyoutube_theme_for_suggestions"))
             with col2:
                 if st.button(t("trendsyoutube_suggest_keywords")) and theme:
-                    suggested_keywords = self.get_keyword_suggestions(theme, config)
-                    st.session_state.suggested_keywords = ", ".join(suggested_keywords)
+                    suggested_keywords = self.get_keyword_suggestions(
+                        theme, config)
+                    st.session_state.suggested_keywords = ", ".join(
+                        suggested_keywords)
 
             # Keywords input
             keywords = st.text_input(
@@ -587,8 +620,10 @@ Content: {comment['text']}
 
             if st.button(t("trendsyoutube_search_button")):
                 if keywords:
-                    keywords_list = [k.strip() for k in keywords.split(',') if k.strip()]
-                    self.search_multiple_keywords(keywords_list, int(max_videos), order)
+                    keywords_list = [k.strip()
+                                     for k in keywords.split(',') if k.strip()]
+                    self.search_multiple_keywords(
+                        keywords_list, int(max_videos), order)
                 else:
                     st.warning("Please enter keywords to search.")
 
@@ -609,4 +644,5 @@ Content: {comment['text']}
             if st.button("Extract Comments"):
                 youtube_api = YoutubeAPI(config)
                 work_directory = config['common']['work_directory']
-                self.extract_comments(youtube_api, work_directory, max_comments)
+                self.extract_comments(
+                    youtube_api, work_directory, max_comments)

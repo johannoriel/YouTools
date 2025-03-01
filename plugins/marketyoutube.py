@@ -55,6 +55,13 @@ translations["en"].update({
     "marketyoutube_audience_watch_ratio": "Audience Watch Ratio",
     "marketyoutube_relative_retention_performance": "Relative Retention Performance",
     "marketyoutube_estimated_ad_revenue": "Estimated Ad Revenue ($)",
+    "marketyoutube_tab_channel_manager": "Channel Manager",
+    "marketyoutube_add_channel": "Add New Target Channel",
+    "marketyoutube_channel_url": "Channel URL",
+    "marketyoutube_initial_keywords": "Initial Keywords (comma-separated)",
+    "marketyoutube_target_channels": "Target Channels",
+    "marketyoutube_update_keywords": "Update Keywords",
+    "marketyoutube_delete_channel": "Delete Channel"
 })
 
 translations["fr"].update({
@@ -106,6 +113,13 @@ translations["fr"].update({
     "marketyoutube_audience_watch_ratio": "Ratio de visionnage de l'audience",
     "marketyoutube_relative_retention_performance": "Performance relative de rétention",
     "marketyoutube_estimated_ad_revenue": "Revenus publicitaires estimés ($)",
+    "marketyoutube_tab_channel_manager": "Gestion des Chaînes",
+    "marketyoutube_add_channel": "Ajouter une Nouvelle Chaîne Cible",
+    "marketyoutube_channel_url": "URL de la Chaîne",
+    "marketyoutube_initial_keywords": "Mots-clés Initiaux (séparés par des virgules)",
+    "marketyoutube_target_channels": "Chaînes Cibles",
+    "marketyoutube_update_keywords": "Mettre à Jour les Mots-clés",
+    "marketyoutube_delete_channel": "Supprimer la Chaîne"
 })
 
 
@@ -154,6 +168,7 @@ class MarketyoutubePlugin(Plugin):
              "plugin": "marketyoutube"},
             {"name": t("marketyoutube_tab_campaigns"),
              "plugin": "marketyoutube"},
+            {"name": "Channel Manager", "plugin": "marketyoutube"},
             {"name": "Debug Stats API", "plugin": "marketyoutube"}
         ]
 
@@ -280,9 +295,94 @@ class MarketyoutubePlugin(Plugin):
             if progress_callback:
                 progress_callback((i + 1) / total_videos)
 
+    def display_channel_manager(self, config):
+        st.header("Channel Manager")
+
+        # Section pour ajouter une chaîne manuellement
+        st.subheader("Add New Target Channel")
+        channel_url = st.text_input(
+            "Channel URL (e.g., https://www.youtube.com/@ChannelName)", "")
+        initial_keywords = st.text_input(
+            "Initial Keywords (comma-separated)", "")
+
+        if st.button("Add Channel"):
+            if channel_url:
+                youtube_api = self.youtube_api
+                # Extraire l'ID de la chaîne à partir de l'URL
+                try:
+                    # Supposons que l'URL est au format @ChannelName ou channel/ChannelID
+                    if "/@" in channel_url:
+                        handle = channel_url.split("/@")[1].split("/")[0]
+                        request = youtube_api.youtube.channels().list(
+                            part="id,snippet,statistics",
+                            forHandle=handle
+                        )
+                    elif "/channel/" in channel_url:
+                        channel_id = channel_url.split(
+                            "/channel/")[1].split("/")[0]
+                        request = youtube_api.youtube.channels().list(
+                            part="id,snippet,statistics",
+                            id=channel_id
+                        )
+                    else:
+                        st.error("Invalid channel URL format.")
+                        return
+
+                    response = request.execute()
+                    if response['items']:
+                        channel = response['items'][0]
+                        channel_id = channel['id']
+                        channel_title = channel['snippet']['title']
+                        subscriber_count = int(
+                            channel['statistics'].get('subscriberCount', 0))
+                        keywords = [k.strip() for k in initial_keywords.split(
+                            ",")] if initial_keywords else []
+
+                        add_target_channel(
+                            channel_id, channel_title, channel_url, keywords, subscriber_count)
+                        st.success(
+                            f"Channel '{channel_title}' added successfully!")
+                    else:
+                        st.error("Channel not found.")
+                except Exception as e:
+                    st.error(f"Error adding channel: {str(e)}")
+            else:
+                st.warning("Please provide a channel URL.")
+
+        # Liste des chaînes cibles
+        st.subheader("Target Channels")
+        channels = get_target_channels()
+        if not channels:
+            st.info("No target channels added yet.")
+        else:
+            for channel in channels:
+                with st.expander(f"{channel['channel_title']} ({channel['subscriber_count']} subscribers)"):
+                    st.write(f"URL: {channel['channel_url']}")
+                    st.write(f"Added: {channel['added_at']}")
+                    st.write(f"Last Updated: {channel['last_updated']}")
+
+                    # Modifier les mots-clés
+                    current_keywords = ", ".join(channel['keywords'])
+                    new_keywords = st.text_input(
+                        f"Keywords for {channel['channel_title']}", value=current_keywords, key=f"keywords_{channel['channel_id']}")
+                    if st.button("Update Keywords", key=f"update_{channel['channel_id']}"):
+                        updated_keywords = [k.strip()
+                                            for k in new_keywords.split(",")]
+                        update_target_channel_keywords(
+                            channel['channel_id'], updated_keywords)
+                        st.success(
+                            f"Keywords updated for {channel['channel_title']}!")
+
+                    # Supprimer la chaîne
+                    if st.button("Delete Channel", key=f"delete_{channel['channel_id']}"):
+                        delete_target_channel(channel['channel_id'])
+                        st.success(
+                            f"Channel '{channel['channel_title']}' deleted!")
+                        st.rerun()  # Rafraîchir l'affichage
+
     def run(self, config):
-        tab1, tab2, tab3, tab4 = st.tabs([t("marketyoutube_tab_videos"), t(
-            "marketyoutube_tab_stats"), t("marketyoutube_tab_campaigns"), "Debug Stats API"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([t("marketyoutube_tab_videos"), t(
+            "marketyoutube_tab_stats"), t("marketyoutube_tab_campaigns"), "Channel Manager", "Debug Stats API"])
 
         filter_options = {
             t("marketyoutube_filter_title"): "title",
@@ -361,42 +461,62 @@ class MarketyoutubePlugin(Plugin):
         with tab3:
             st.header(t("marketyoutube_header_campaigns"))
 
-            # Select video to promote
+            # Source des vidéos cibles
+            target_source = st.radio(
+                "Target Source",
+                options=["Search by Keywords", "Target Channels"],
+                index=0
+            )
+
+            # Sélectionner la vidéo à promouvoir (inchangé)
             videos = get_videos()
             video_options = {
                 f"{v['title']} ({v['published_at']})": v for v in videos}
             selected_video_title = st.selectbox(
-                t("marketyoutube_select_video"),
-                options=list(video_options.keys())
-            )
+                t("marketyoutube_select_video"), options=list(video_options.keys()))
             campaign_video = video_options[selected_video_title]
 
-            # Campaign parameters
-            keywords = st.text_input(
-                t("marketyoutube_keywords"),
-                value=config['marketyoutube']['campaign_keywords']
-            )
-            max_videos = st.number_input(
-                t("marketyoutube_max_videos"),
-                min_value=1,
-                max_value=50,
-                value=int(config['marketyoutube']['max_campaign_videos'])
-            )
-            max_comments = st.number_input(
-                t("marketyoutube_max_comments"),
-                min_value=1,
-                max_value=10,
-                value=int(config['marketyoutube']['max_campaign_comments'])
-            )
+            # Paramètres de la campagne
+            if target_source == "Search by Keywords":
+                keywords = st.text_input(
+                    t("marketyoutube_keywords"), value=config['marketyoutube']['campaign_keywords'])
+                max_videos = st.number_input(t("marketyoutube_max_videos"), min_value=1, max_value=50, value=int(
+                    config['marketyoutube']['max_campaign_videos']))
+            else:  # Target Channels
+                target_channels = get_target_channels()
+                if not target_channels:
+                    st.warning(
+                        "No target channels available. Please add some in the Channel Manager tab.")
+                    return
+                selected_channels = st.multiselect(
+                    "Select Target Channels",
+                    options=[
+                        f"{ch['channel_title']} ({ch['subscriber_count']} subscribers)" for ch in target_channels],
+                    default=[
+                        f"{ch['channel_title']} ({ch['subscriber_count']} subscribers)" for ch in target_channels]
+                )
+                max_videos_per_channel = st.number_input(
+                    "Max Videos per Channel", min_value=1, max_value=50, value=5)
+                keywords = ",".join([",".join(
+                    ch['keywords']) for ch in target_channels if f"{ch['channel_title']} ({ch['subscriber_count']} subscribers)" in selected_channels])
+
+            max_comments = st.number_input(t("marketyoutube_max_comments"), min_value=1, max_value=10, value=int(
+                config['marketyoutube']['max_campaign_comments']))
 
             if st.button(t("marketyoutube_start_campaign")):
                 with st.spinner(t("marketyoutube_searching")):
-                    # Step 1: Search for relevant videos
-                    target_videos = self.youtube_api.search_videos(
-                        keywords, max_videos)
+                    if target_source == "Search by Keywords":
+                        target_videos = self.youtube_api.search_videos(
+                            keywords, max_videos)
+                    else:
+                        target_videos = []
+                        for channel in target_channels:
+                            if f"{channel['channel_title']} ({channel['subscriber_count']} subscribers)" in selected_channels:
+                                channel_videos = self.youtube_api.get_channel_recent_videos(
+                                    channel['channel_id'], max_results=max_videos_per_channel)
+                                target_videos.extend(channel_videos)
 
                 with st.spinner(t("marketyoutube_fetching_comments")):
-                    # Step 2: Fetch comments
                     comments = []
                     for video in target_videos:
                         video_comments = self.youtube_api.get_comments(
@@ -407,16 +527,6 @@ class MarketyoutubePlugin(Plugin):
                             cache_campaign_data(
                                 campaign_video['video_id'], video['video_id'], comment['id'], comment['text'])
                         comments.extend(video_comments)
-
-                with st.spinner(t("marketyoutube_generating_responses")):
-                    # Step 3: Generate responses
-                    st.session_state.campaign_responses = self.generate_campaign_responses(
-                        config, campaign_video, comments)
-                    for resp in st.session_state.campaign_responses:
-                        cache_campaign_data(campaign_video['video_id'], resp['target_video_id'],
-                                            resp['comment_id'], resp['comment_text'], resp['response'], "pending")
-                    st.session_state.selected_responses = {
-                        i: False for i in range(len(st.session_state.campaign_responses))}
 
             # Step 4: Display and validate responses
             if st.session_state.campaign_responses:
@@ -460,8 +570,12 @@ class MarketyoutubePlugin(Plugin):
                                 st.error(f"Error posting response: {str(e)}")
                         st.success(t("marketyoutube_campaign_complete"))
 
-        # Tab 4: Debug Stats API
+        # Tab 4: Channel Manager
         with tab4:
+            self.display_channel_manager(config)
+
+            # Tab 5: Debug Stats API (inchangé)
+        with tab5:
             st.header("Debug YouTube Analytics API")
 
             videos = get_videos(page=1, per_page=1)
