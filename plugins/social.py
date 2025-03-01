@@ -32,6 +32,9 @@ translations["en"].update({
     "social_validate": "Validate Character Count",
     "social_ghost": "Ghost",
     "social_youtube": "YouTube",
+    "auto_generate_meme_with_posts": "Generate Meme with Posts",
+    "meme_preview": "Meme Preview and Edit",
+    "select_meme_for_first_post": "Select Meme for First Post (Optional)",
 })
 
 translations["fr"].update({
@@ -59,6 +62,9 @@ translations["fr"].update({
     "social_validate": "Vérifier le nombre de caractères",
     "social_ghost": "Ghost",
     "social_youtube": "YouTube",
+    "auto_generate_meme_with_posts": "Générer un mème avec les posts",
+    "meme_preview": "Prévisualisation et édition du mème",
+    "select_meme_for_first_post": "Sélectionner un mème pour le premier post (facultatif)",
 })
 
 
@@ -77,6 +83,7 @@ class SocialPlugin(Plugin):
         super().__init__(name, plugin_manager)
         self._initialize_session_state()
         self._setup_social_networks()
+        self.memegen_plugin = self.plugin_manager.get_plugin('memegen')
 
     def _initialize_session_state(self):
         if 'generated_posts' not in st.session_state:
@@ -93,6 +100,8 @@ class SocialPlugin(Plugin):
             st.session_state.has_generated = False
         if 'selected_meme' not in st.session_state:
             st.session_state.selected_meme = None
+        if 'auto_meme_suggestion' not in st.session_state:
+            st.session_state.auto_meme_suggestion = None
 
     def _get_image_files(self, work_dir):
         image_extensions = ('.png', '.jpg', '.jpeg', '.gif')
@@ -298,7 +307,7 @@ Chaque tweet doit faire maximum 280 caractères."""
     def run(self, config):
         st.header(t("social_header"))
 
-        # Load or input transcript
+        # Recap transcription and video URL
         work_dir = config['common']['work_directory']
         transcript_path = os.path.join(work_dir, "transcript.txt")
         if os.path.exists(transcript_path):
@@ -309,7 +318,6 @@ Chaque tweet doit faire maximum 280 caractères."""
         else:
             transcript = st.text_area(t("social_transcript"), height=200)
 
-        # Load or input URL
         url_path = os.path.join(work_dir, "url.txt")
         if os.path.exists(url_path):
             with open(url_path, 'r') as f:
@@ -318,71 +326,113 @@ Chaque tweet doit faire maximum 280 caractères."""
         else:
             url = st.text_input(t("social_url"))
 
-        # Meme selection
-        st.subheader("Select Meme for First Post (Optional)")
-        image_files = self._get_image_files(work_dir)
-        meme_options = ["None"] + image_files
-        selected_meme = st.selectbox(
-            "Choose an image file",
-            options=meme_options,
-            index=0
-        )
-        st.session_state.selected_meme = selected_meme if selected_meme != "None" else None
-
-        # Generate posts
+        # LLM Prompt
         prompt = st.text_area(t("social_prompt"),
                               value=config['social']['default_prompt'])
 
-        # Manual post at start
+        # Checkbox for generating meme with posts
+        generate_meme_with_posts = st.checkbox(
+            t("auto_generate_meme_with_posts"), key="generate_meme_with_posts")
+
+        # Meme preview (before selection)
+        if st.session_state.auto_meme_suggestion and generate_meme_with_posts:
+            st.subheader(t("meme_preview"))
+            suggestion = st.session_state.auto_meme_suggestion
+
+            # Récupérer la liste des titres de mèmes depuis MemegenPlugin
+            meme_titles = [meme["name"] for meme in self.memegen_plugin.memes]
+            default_meme_index = meme_titles.index(
+                suggestion["meme_name"]) if suggestion["meme_name"] in meme_titles else 0
+            selected_meme_name = st.selectbox(
+                t("auto_selected_meme"),
+                options=meme_titles,
+                index=default_meme_index,
+                key="auto_meme_selectbox"
+            )
+
+            # Mettre à jour le template_id si le titre change
+            if selected_meme_name != suggestion["meme_name"]:
+                suggestion["meme_name"] = selected_meme_name
+                suggestion["template_id"] = next(
+                    (m["id"] for m in self.memegen_plugin.memes if m["name"]
+                     == selected_meme_name),
+                    self.memegen_plugin.memes[0]["id"]
+                )
+
+            edited_text0 = st.text_input(
+                t("meme_text0_label"), suggestion["text0"], key="auto_text0")
+            edited_text1 = st.text_input(
+                t("meme_text1_label"), suggestion["text1"], key="auto_text1")
+            st.image(suggestion["meme_path"], caption="Generated Meme")
+            if st.button("Regenerate Meme", key="regenerate_meme"):
+                with st.spinner(t("meme_generating")):
+                    meme_path, error = self.memegen_plugin.generate_meme(
+                        config, suggestion["template_id"], edited_text0, edited_text1, "impact", 50
+                    )
+                    if meme_path:
+                        st.session_state.auto_meme_suggestion["meme_path"] = meme_path
+                        st.session_state.selected_meme = os.path.basename(
+                            meme_path)
+                        st.image(meme_path, caption="Updated Meme")
+                        st.success(t("meme_success").format(path=meme_path))
+                    elif error:
+                        st.error(t("meme_generation_error").format(error=error))
+
+        if st.session_state.auto_meme_suggestion and generate_meme_with_posts:
+            st.subheader(t("meme_preview"))
+            suggestion = st.session_state.auto_meme_suggestion
+            selected_meme_name = st.text_input(
+                t("auto_selected_meme"), suggestion["meme_name"], key="auto_meme")
+            edited_text0 = st.text_input(
+                t("meme_text0_label"), suggestion["text0"], key="auto_text0")
+            edited_text1 = st.text_input(
+                t("meme_text1_label"), suggestion["text1"], key="auto_text1")
+            st.image(suggestion["meme_path"], caption="Generated Meme")
+            if st.button("Regenerate Meme", key="regenerate_meme"):
+                with st.spinner(t("meme_generating")):
+                    meme_path, error = self.memegen_plugin.generate_meme(
+                        config, suggestion["template_id"], edited_text0, edited_text1, "impact", 50
+                    )
+                    if meme_path:
+                        st.session_state.auto_meme_suggestion["meme_path"] = meme_path
+                        st.session_state.selected_meme = os.path.basename(
+                            meme_path)
+                        st.image(meme_path, caption="Updated Meme")
+                        st.success(t("meme_success").format(path=meme_path))
+                    elif error:
+                        st.error(t("meme_generation_error").format(error=error))
+
+        # Meme selection (pre-filled if generated)
+        st.subheader(t("select_meme_for_first_post"))
+        image_files = self._get_image_files(work_dir)
+        meme_options = ["None"] + image_files
+        default_index = meme_options.index(
+            st.session_state.selected_meme) if st.session_state.selected_meme in meme_options else 0
+        selected_meme = st.selectbox(
+            "Choose an image file", options=meme_options, index=default_index)
+        if selected_meme != st.session_state.selected_meme:
+            st.session_state.selected_meme = selected_meme if selected_meme != "None" else None
+        if st.session_state.selected_meme and selected_meme != "None":
+            st.image(os.path.join(
+                work_dir, st.session_state.selected_meme), caption="Selected Meme")
+
+        # Manual start post
         st.subheader(t("social_manual_start"))
         manual_post_start = st.text_area(
             "", key="manual_post_start", height=100)
         cols = self.create_platform_columns()
         start_platforms = self.render_platform_checkboxes(cols, "start", True)
+        if not st.session_state.has_generated and manual_post_start:
+            st.session_state.generated_posts = [manual_post_start]
+            st.session_state.selected_platforms = {0: start_platforms}
 
-        # Handle manual start post
-        if not st.session_state.has_generated:
-            if manual_post_start:
-                st.session_state.generated_posts = [manual_post_start]
-                st.session_state.selected_platforms = {0: start_platforms}
-
-        # Generate button
-        if st.button(t("social_generate")) and transcript:
-            st.session_state.has_generated = True
-            with st.spinner(t("social_generating")):
-                ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
-                llm_response = ragllm_plugin.process_with_llm(
-                    prompt,
-                    config.get('llm', {}).get('llm_sys_prompt', ''),
-                    transcript
-                )
-
-                # Reset and rebuild posts list
-                st.session_state.generated_posts = []
-                if manual_post_start:
-                    st.session_state.generated_posts.append(manual_post_start)
-                    st.session_state.selected_platforms[0] = start_platforms
-
-                # Add generated posts
-                st.session_state.generated_posts.extend(
-                    self.parse_posts(llm_response))
-
-                # Add URL suffix if present
-                if url:
-                    url_suffix = config['social']['url_suffix_template'].format(
-                        url=url)
-                    st.session_state.generated_posts.append(url_suffix)
-
-        # Display posts
+        # Generated posts
         if st.session_state.generated_posts:
             st.subheader(t("social_preview"))
-
-            # Select All / Deselect All buttons
             if st.session_state.has_generated:
                 cols = self.create_platform_columns()
                 self.render_select_all_buttons(cols)
 
-            # Display posts
             for i, post in enumerate(st.session_state.generated_posts):
                 if st.session_state.has_generated and not (manual_post_start and i == 0):
                     post_label = "" if (
@@ -390,33 +440,29 @@ Chaque tweet doit faire maximum 280 caractères."""
                     edited_post = st.text_area(
                         post_label, post, key=f"post_{i}", height=100)
                     st.session_state.generated_posts[i] = edited_post
-
                     cols = self.create_platform_columns()
-                    is_manual_start = i == 0 and manual_post_start
                     platforms = self.render_platform_checkboxes(cols, i)
                     st.session_state.selected_platforms[i] = platforms
 
-        # Manual post at end
+        # Manual end post
         st.subheader(t("social_manual_end"))
         manual_post_end = st.text_area("", key="manual_post_end", height=100)
         cols = self.create_platform_columns()
         end_platforms = self.render_platform_checkboxes(cols, "end", True)
-
-        # Add manual end post if present
         if manual_post_end and st.session_state.generated_posts:
             st.session_state.generated_posts.append(manual_post_end)
             last_index = len(st.session_state.generated_posts) - 1
             st.session_state.selected_platforms[last_index] = end_platforms
 
-        # Validate character count
-        if st.button(t("social_validate")):
-            self.validate_posts()
-
-        # Debug button
-        if st.button("Debug"):
-            for i, post in enumerate(st.session_state.generated_posts):
-                st.info(post)
-
-        # Post button
-        if st.button(t("social_post")):
-            self.post_content(config)
+        # Buttons on one line
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button(t("social_validate")):
+                self.validate_posts()
+        with col2:
+            if st.button("Debug"):
+                for i, post in enumerate(st.session_state.generated_posts):
+                    st.info(post)
+        with col3:
+            if st.button(t("social_post")):
+                self.post_content(config)

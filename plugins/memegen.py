@@ -29,6 +29,8 @@ translations["en"].update({
     "auto_prompt_label": "LLM Sub-Prompt",
     "auto_selected_meme": "Selected Meme",
     "auto_result_label": "LLM Reasoning",
+    "transcript_meme_prompt_label": "Transcript Meme Subject Prompt",
+    "meme_generation_error": "Failed to generate meme: {error}",
 })
 
 translations["fr"].update({
@@ -53,6 +55,8 @@ translations["fr"].update({
     "auto_prompt_label": "Sous-prompt LLM",
     "auto_selected_meme": "Mème sélectionné",
     "auto_result_label": "Raisonnement du LLM",
+    "transcript_meme_prompt_label": "Prompt pour sujet de mème à partir du transcript",
+    "meme_generation_error": "Échec de la génération du mème : {error}",
 })
 
 
@@ -83,8 +87,12 @@ class MemegenPlugin(Plugin):
                 "type": "textarea",
                 "label": t("auto_prompt_label"),
                 "default": "Based on the subject '{subject}', select an appropriate meme template from this list: {meme_list}. Return a plain JSON string (no ```json markers) with: 1) 'meme_name' (exact name of the chosen meme), 2) 'text0' (short top text), 3) 'text1' (short optionnal bottom text)."
-            }
-        }
+            },
+            "memegen_transcript_meme_prompt": {
+                "type": "textarea",
+                "label": t("transcript_meme_prompt_label"),
+                "default": "Generate a meme subject for the video using the transcript '{transcript}' to highlight the most striking moment. Return a plain string with the subject."
+            }}
 
     def get_tabs(self):
         """Define plugin tabs."""
@@ -130,6 +138,44 @@ class MemegenPlugin(Plugin):
             return None, result["error_message"]
         except Exception as e:
             return None, str(e)
+
+    def generate_meme_from_theme(self, config, theme):
+        """Generate a meme based on a given theme (manual or transcript-derived)."""
+        if not self.ragllm_plugin:
+            return None, "RAG LLM plugin not available."
+
+        meme_list = json.dumps([{m["id"]: m["name"]} for m in self.memes])
+        auto_prompt = config.get(self.name, {}).get("memegen_auto_prompt", "")
+        prompt = auto_prompt.format(subject=theme, meme_list=meme_list)
+        llm_sys_prompt = config['ragllm']['llm_sys_prompt']
+
+        try:
+            llm_response = self.ragllm_plugin.process_with_llm(
+                prompt, llm_sys_prompt, theme)
+            cleaned_response = llm_response.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:].strip()
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3].strip()
+
+            suggestion = json.loads(cleaned_response)
+            meme_name = suggestion.get("meme_name", self.memes[0]["name"])
+            text0 = suggestion.get("text0", "AUTO GENERATED")
+            text1 = suggestion.get("text1", "")
+            template_id = next(
+                (m["id"] for m in self.memes if m["name"] == meme_name), self.memes[0]["id"])
+
+            font = "impact"
+            font_size = 50
+            meme_path, error = self.generate_meme(
+                config, template_id, text0, text1, font, font_size)
+            if meme_path:
+                return {"meme_name": meme_name, "text0": text0, "text1": text1, "template_id": template_id, "meme_path": meme_path}, None
+            return None, error
+        except json.JSONDecodeError as e:
+            return None, f"Failed to parse LLM response as JSON: {str(e)}. Raw response: {llm_response}"
+        except Exception as e:
+            return None, f"Error processing meme generation: {str(e)}"
 
     def run(self, config):
         """Main plugin logic with two tabs."""
@@ -187,11 +233,9 @@ class MemegenPlugin(Plugin):
         # Tab 2: Automatic Meme Generation
         with tabs[1]:
             st.header(t("meme_generator_header"))
-
             subject = st.text_input(
                 t("auto_subject_label"), "", key="auto_subject")
 
-            # Initialize session state for auto generation
             if "auto_suggestion" not in st.session_state:
                 st.session_state.auto_suggestion = None
             if "auto_meme_path" not in st.session_state:
@@ -199,66 +243,20 @@ class MemegenPlugin(Plugin):
 
             if st.button("Suggest Meme", key="suggest_auto"):
                 with st.spinner(t("meme_generating")):
-                    if not self.ragllm_plugin:
-                        st.error("RAG LLM plugin not available.")
-                        return
+                    meme_suggestion, error = self.generate_meme_from_theme(
+                        config, subject)
+                    if meme_suggestion:
+                        st.session_state.auto_suggestion = meme_suggestion
+                        st.session_state.auto_meme_path = meme_suggestion["meme_path"]
+                    elif error:
+                        st.error(t("meme_generation_error").format(error=error))
 
-                    meme_list = json.dumps(
-                        [{m["id"]: m["name"]} for m in self.memes])
-                    auto_prompt = config.get(self.name, {}).get(
-                        "memegen_auto_prompt", "")
-                    prompt = auto_prompt.format(
-                        subject=subject, meme_list=meme_list)
-                    llm_sys_prompt = config['ragllm']['llm_sys_prompt']
-                    llm_response = self.ragllm_plugin.process_with_llm(
-                        prompt, llm_sys_prompt, subject)
-
-                    st.subheader(t("auto_result_label"))
-                    st.write(llm_response)
-
-                    # Trim ```json markers if present
-                    cleaned_response = llm_response.strip()
-                    if cleaned_response.startswith("```json"):
-                        cleaned_response = cleaned_response[7:].strip()
-                    if cleaned_response.endswith("```"):
-                        cleaned_response = cleaned_response[:-3].strip()
-
-                    try:
-                        suggestion = json.loads(cleaned_response)
-                        st.session_state.auto_suggestion = suggestion
-                        meme_name = suggestion.get(
-                            "meme_name", self.memes[0]["name"])
-                        text0 = suggestion.get("text0", "AUTO GENERATED")
-                        text1 = suggestion.get("text1", "")
-                        template_id = next(
-                            (m["id"] for m in self.memes if m["name"] == meme_name), self.memes[0]["id"])
-
-                        # Generate first shot
-                        font = "impact"
-                        font_size = 50
-                        meme_path, error = self.generate_meme(
-                            config, template_id, text0, text1, font, font_size)
-                        if meme_path:
-                            st.session_state.auto_meme_path = meme_path
-                        elif error:
-                            st.error(t("meme_error").format(error=error))
-
-                    except json.JSONDecodeError as e:
-                        st.error(
-                            f"Failed to parse LLM response as JSON: {str(e)}. Raw response: {llm_response}")
-                        return
-                    except Exception as e:
-                        st.error(f"Error processing suggestion: {str(e)}")
-                        return
-
-            # Display suggestion and editable fields if available
             if st.session_state.auto_suggestion:
                 suggestion = st.session_state.auto_suggestion
-                meme_name = suggestion.get("meme_name", self.memes[0]["name"])
-                text0 = suggestion.get("text0", "AUTO GENERATED")
-                text1 = suggestion.get("text1", "")
-                template_id = next(
-                    (m["id"] for m in self.memes if m["name"] == meme_name), self.memes[0]["id"])
+                meme_name = suggestion["meme_name"]
+                text0 = suggestion["text0"]
+                text1 = suggestion["text1"]
+                template_id = suggestion["template_id"]
 
                 selected_meme = st.text_input(
                     t("auto_selected_meme"), meme_name, key="auto_meme")
@@ -283,7 +281,8 @@ class MemegenPlugin(Plugin):
                             st.success(
                                 t("meme_success").format(path=meme_path))
                         elif error:
-                            st.error(t("meme_error").format(error=error))
+                            st.error(
+                                t("meme_generation_error").format(error=error))
 
 
 if __name__ == "__main__":

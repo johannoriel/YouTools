@@ -207,10 +207,7 @@ class BlueskyAPI:
                 else:
                     prepared_text = self._prepare_post(post)
                     if root_ref is None:
-                        response = self.client.send_post(
-                            text=prepared_text if isinstance(
-                                prepared_text, str) else prepared_text.build()
-                        )
+                        response = self.client.send_post(text=prepared_text)
                         root_ref = models.create_strong_ref(response)
                         parent_ref = root_ref
                     else:
@@ -219,10 +216,7 @@ class BlueskyAPI:
                             parent=parent_ref
                         )
                         response = self.client.send_post(
-                            text=prepared_text if isinstance(
-                                prepared_text, str) else prepared_text.build(),
-                            reply_to=reply_ref
-                        )
+                            text=prepared_text, reply_to=reply_ref)
                         parent_ref = models.create_strong_ref(response)
 
                 responses.append(response)
