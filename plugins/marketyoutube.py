@@ -89,7 +89,7 @@ translations["fr"].update({
     "marketyoutube_video_count": "Total des vidéos : {}",
     "marketyoutube_views": "Vues",
     "marketyoutube_subscriber_gains": "Abonnés gagnés",
-    "marketyoutube_retention_rate": "Taux de rétention (%)",
+    "marketyoutube_retention_rate": "Rétention%",
     "marketyoutube_avg_view_duration": "Durée moyenne de visionnage (s)",
     "marketyoutube_syncing": "Synchronisation avec YouTube...",
     "marketyoutube_sync_complete": "Synchronisation terminée avec succès !",
@@ -286,8 +286,6 @@ class MarketyoutubePlugin(Plugin):
                 t("marketyoutube_status"): video['status'],
                 t("marketyoutube_keywords"): keywords_str,
                 t("marketyoutube_views"): latest_stats['view_count'] if latest_stats else 0,
-                t("marketyoutube_subscribers_gained"): latest_stats['subscribers_gained'] if latest_stats else 0,
-                t("marketyoutube_subscribers_lost"): latest_stats['subscribers_lost'] if latest_stats else 0,
                 t("marketyoutube_retention_rate"): latest_stats['retention_rate'] if latest_stats else 0.0,
             }
             if latest_stats and 'advanced_stats' in latest_stats:
@@ -318,10 +316,6 @@ class MarketyoutubePlugin(Plugin):
                 t("marketyoutube_keywords")),
             t("marketyoutube_views"): st.column_config.NumberColumn(
                 t("marketyoutube_views")),
-            t("marketyoutube_subscribers_gained"): st.column_config.NumberColumn(
-                t("marketyoutube_subscribers_gained")),
-            t("marketyoutube_subscribers_lost"): st.column_config.NumberColumn(
-                t("marketyoutube_subscribers_lost")),
             t("marketyoutube_retention_rate"): st.column_config.NumberColumn(
                 t("marketyoutube_retention_rate"), format="%.1f"),
         }
