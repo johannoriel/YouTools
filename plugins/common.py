@@ -203,7 +203,9 @@ class CommonPlugin(Plugin):
 SCOPES = [
     'https://www.googleapis.com/auth/youtube.force-ssl',
     'https://www.googleapis.com/auth/yt-analytics.readonly',
-    'https://www.googleapis.com/auth/yt-analytics-monetary.readonly'
+    'https://www.googleapis.com/auth/yt-analytics-monetary.readonly',
+    'https://www.googleapis.com/auth/cloud-platform.read-only',
+    'https://www.googleapis.com/auth/monitoring.read',
 ]
 
 
@@ -234,8 +236,6 @@ def get_credentials():
             token.write(creds.to_json())
 
     return creds
-
-# Fonction pour uploader la vidéo sur YouTube
 
 
 def upload_video(filename, title, description, category, keywords, privacy_status):

@@ -84,56 +84,48 @@ class YoutubeAPI:
         return round(relevance_score * 100)  # Score sur 100
 
     def get_quota_usage(self, config) -> Dict[str, float]:
-        """
-        Récupère l'utilisation du quota de l'API YouTube en pourcentage.
-        :return: Dictionnaire contenant l'utilisation actuelle et le quota total.
-        """
         try:
-            # Utilisation de l'API Service Usage pour récupérer les informations de quota
-            service_usage = build('serviceusage', 'v1',
+            service_usage = build('serviceusage', 'v1beta1',
                                   credentials=get_credentials())
-            project_id = config['common']['project_number']
-
-            # Récupération des métriques de quota
+            # Format correct
+            project_id = f"projects/{config['common']['project_number']}"
             request = service_usage.services().consumerQuotaMetrics().list(
-                parent=project_id,
-                filter="metric=youtube.googleapis.com/quota"
+                # Spécifie le service YouTube
+                parent=f"{project_id}/services/youtube.googleapis.com"
             )
             response = request.execute()
 
-            # Extraction des informations de quota
             quota_metrics = response.get('metrics', [])
             if quota_metrics:
-                quota_limit = quota_metrics[0].get('quotaLimits', [{}])[
-                    0].get('maxLimit', 0)
-                quota_usage = quota_metrics[0].get('quotaUsage', 0)
-
-                # Calcul du pourcentage d'utilisation
-                if quota_limit > 0:
-                    usage_percentage = (quota_usage / quota_limit) * 100
-                    remaining_percentage = 100 - usage_percentage
-                else:
-                    usage_percentage = 0
-                    remaining_percentage = 100
-
-                return {
-                    'usage_percentage': round(usage_percentage, 2),
-                    'remaining_percentage': round(remaining_percentage, 2),
-                    'quota_usage': quota_usage,
-                    'quota_limit': quota_limit
-                }
-            else:
-                return {
-                    'usage_percentage': 0,
-                    'remaining_percentage': 100,
-                    'quota_usage': 0,
-                    'quota_limit': 0
-                }
-        except Exception as e:
-            print(f"Error fetching quota usage: {str(e)}")
+                for metric in quota_metrics:
+                    # Métrique par défaut pour YouTube Data API
+                    if 'youtube.googleapis.com/default' in metric['metric']:
+                        print(metric)
+                        quota_limit = int(metric.get('consumerQuotaLimits', [{}])[1].get(
+                            'quotaBuckets', [{}])[0].get('effectiveLimit', 10000))
+                        # metric.get('metricValues', [{}])[0].get('longValue', 0)
+                        usage = 0
+                        usage_percentage = (
+                            usage / quota_limit) * 100 if quota_limit > 0 else 0
+                        remaining_percentage = 100 - usage_percentage
+                        return {
+                            'usage_percentage': round(usage_percentage, 2),
+                            'remaining_percentage': round(remaining_percentage, 2),
+                            'quota_usage': usage,
+                            'quota_limit': quota_limit
+                        }
             return {
                 'usage_percentage': 0,
-                'remaining_percentage': 100,
+                'remaining_percentage': 0,
+                'quota_usage': 0,
+                'quota_limit': 0  # Valeur par défaut si pas de données
+            }
+        except Exception as e:
+            print(f"Error fetching quota usage: {str(e)}")
+            raise e
+            return {
+                'usage_percentage': 0,
+                'remaining_percentage': 0,
                 'quota_usage': 0,
                 'quota_limit': 0
             }
@@ -316,6 +308,7 @@ class YoutubeAPI:
         :param video_id: ID de la vidéo
         :param max_results: Nombre maximum de commentaires à récupérer
         :param order: Ordre des commentaires ("relevance" ou "time")
+        :return: Liste des commentaires ou liste vide si les commentaires sont désactivés
         """
         try:
             request = self.youtube.commentThreads().list(
@@ -334,13 +327,20 @@ class YoutubeAPI:
                     'id': item['id'],
                     'text': comment['textDisplay'],
                     'author': comment['authorDisplayName'],
-                    # Ajouter la date de publication
                     'published_at': comment['publishedAt'],
                     'video_id': video_id,
-                    'video_title': "N/A"  # On peut ajouter le titre de la vidéo plus tard si nécessaire
+                    'video_title': "N/A"  # Peut être ajouté plus tard si nécessaire
                 })
 
             return comments
+        except HttpError as e:
+            if e.resp.status == 403 and 'commentsDisabled' in str(e):
+                print(
+                    f"YouTube API Warning (get_comments): Comments are disabled for video {video_id}")
+                return []  # Retourne une liste vide si les commentaires sont désactivés
+            else:
+                print(f"YouTube API Error (get_comments): {str(e)}")
+                return []  # Retourne une liste vide pour les autres erreurs aussi
         except Exception as e:
             print(f"YouTube API Error (get_comments): {str(e)}")
             return []
@@ -467,22 +467,18 @@ class YoutubeAPI:
 
     def search_videos(self, query: str, max_results: int = 5, order: str = "date", language: str = "fr") -> List[Dict[str, Any]]:
         try:
-            # Modifier la query pour inclure la langue
-            modified_query = f"{query} in {language}"
             modified_query = f"{query}"
-
-            # Augmenter le nombre de résultats
             api_max_results = min(max_results * 5, 50)
 
-            if (language == "fr" and order != "relevance"):
+            if language == "fr" and order != "relevance":
                 request = self.youtube.search().list(
                     part="snippet",
                     q=modified_query,
                     maxResults=api_max_results,
                     type="video",
                     order=order,
-                    location="46.2276,2.2137",  # Coordonnées approximatives du centre de la France
-                    locationRadius="1000km"  # Rayon de recherche de 1000 km
+                    location="46.2276,2.2137",
+                    locationRadius="1000km"
                 )
             else:
                 request = self.youtube.search().list(
@@ -493,48 +489,63 @@ class YoutubeAPI:
                     relevanceLanguage=language,
                     order=order,
                 )
-
             response = request.execute()
 
             videos = []
-            for item in response['items']:
-                video_id = item['id']['videoId']
-                title = item['snippet']['title']
-                description = item['snippet']['description']
-                try:
-                    video_language = detect(title + " " + description)
-                except:
-                    video_language = 'unknown'
-                channel_title = item['snippet']['channelTitle']
-                channel_id = item['snippet']['channelId']
-                published_at = item['snippet']['publishedAt']
-                video_details = self.get_video_details(video_id)
+            video_ids = [item['id']['videoId'] for item in response['items']]
 
-                channel_info = self.get_channel_info(channel_id)
-                subscriber_count = channel_info['subscriber_count'] if channel_info else 0
+            # Requête groupée pour les détails des vidéos
+            if video_ids:
+                video_details_request = self.youtube.videos().list(
+                    part="snippet,statistics",
+                    # Limité à 50 IDs par appel (max de l'API)
+                    id=",".join(video_ids[:50])
+                )
+                video_details_response = video_details_request.execute()
 
-                video_data = {
-                    'id': video_id,
-                    'title': title,
-                    'description': description,
-                    'channel_title': channel_title,
-                    'channel_id': channel_id,
-                    'subscriber_count': subscriber_count,
-                    'view_count': video_details['view_count'],
-                    'like_count': video_details['like_count'],
-                    'comment_count': video_details['comment_count'],
-                    'published_at': published_at,
-                    'url': f"https://www.youtube.com/watch?v={video_id}"
-                }
+                # Créer un dictionnaire des détails pour un accès rapide
+                video_details_map = {
+                    item['id']: item for item in video_details_response['items']}
 
-                # Normaliser les données de la vidéo
-                normalized_video = self.get_video_infos(video_data)
-                normalized_video['relevance_score'] = self.calculate_relevance_score(
-                    normalized_video)
-                videos.append(normalized_video)
+                for item in response['items']:
+                    video_id = item['id']['videoId']
+                    details = video_details_map.get(video_id, {})
+                    title = item['snippet']['title']
+                    description = item['snippet']['description']
+                    try:
+                        video_language = detect(title + " " + description)
+                    except:
+                        video_language = 'unknown'
+                    channel_title = item['snippet']['channelTitle']
+                    channel_id = item['snippet']['channelId']
+                    published_at = item['snippet']['publishedAt']
+
+                    # Utiliser les détails groupés si disponibles
+                    subscriber_count = 0
+                    channel_info = self.get_channel_info(channel_id)
+                    if channel_info:
+                        subscriber_count = channel_info['subscriber_count']
+
+                    video_data = {
+                        'id': video_id,
+                        'title': title,
+                        'description': description,
+                        'channel_title': channel_title,
+                        'channel_id': channel_id,
+                        'subscriber_count': subscriber_count,
+                        'view_count': int(details.get('statistics', {}).get('viewCount', 0)) if details else 0,
+                        'like_count': int(details.get('statistics', {}).get('likeCount', 0)) if details else 0,
+                        'comment_count': int(details.get('statistics', {}).get('commentCount', 0)) if details else 0,
+                        'published_at': published_at,
+                        'url': f"https://www.youtube.com/watch?v={video_id}"
+                    }
+
+                    normalized_video = self.get_video_infos(video_data)
+                    normalized_video['relevance_score'] = self.calculate_relevance_score(
+                        normalized_video)
+                    videos.append(normalized_video)
 
             return videos[:max_results]
-
         except Exception as e:
             print(f"YouTube API Error (search_videos): {str(e)}")
             return []
