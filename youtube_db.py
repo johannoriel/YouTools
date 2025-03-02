@@ -81,8 +81,6 @@ def initialize_database():
             video_id TEXT,
             timestamp TEXT,
             view_count INTEGER,
-            subscribers_gained INTEGER,
-            subscribers_lost INTEGER,
             retention_rate REAL,
             advanced_stats TEXT,  -- JSON pour les stats avancées
             FOREIGN KEY (video_id) REFERENCES videos (video_id)
@@ -161,14 +159,12 @@ def insert_stats_snapshot(video_id: str, timestamp: str, stats: Dict[str, Any]):
 
     cursor.execute("""
         INSERT INTO stats_snapshots (
-            video_id, timestamp, view_count, subscribers_gained, subscribers_lost, retention_rate, advanced_stats
+            video_id, timestamp, view_count, retention_rate, advanced_stats
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
         video_id,
         timestamp,
         stats['view_count'],
-        stats['advanced_stats'].get('subscribersGained', 0),
-        stats['advanced_stats'].get('subscribersLost', 0),
         stats['retention_rate'],
         json.dumps(stats['advanced_stats'])
     ))

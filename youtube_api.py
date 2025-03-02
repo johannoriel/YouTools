@@ -9,7 +9,7 @@ import json
 
 # Liste des statistiques avancées (peut être modifiée sans restructurer le reste)
 ADVANCED_STATS = [
-    "annotationClickThroughRate", "annotationCloseRate", "averageViewDuration",
+    "averageViewDuration",
     "averageViewPercentage", "comments", "dislikes", "estimatedMinutesWatched",
     "estimatedAdRevenue", "likes", "shares", "subscribersGained", "subscribersLost",
     "views"
