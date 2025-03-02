@@ -11,6 +11,7 @@ from typing import List, Dict, Any
 import requests
 import torch
 from transformers import AutoTokenizer, AutoModel
+import time
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 MAX_LENGTH = 512
@@ -283,8 +284,22 @@ class RagllmPlugin(Plugin):
         except Exception as e:
             return f"{t('rag_error_calling_llm')}{str(e)}"
 
-    def process_with_llm(self, prompt: str, sysprompt: str, context: str) -> str:
-        return self.call_llm(f"{context}\n\n{prompt}", sysprompt)
+    def process_with_llm(self, prompt: str, sysprompt: str, context: str, repeat_on_failure: bool = True, number_repeat: int = 8) -> str:
+        attempt = 0
+        max_delay = 60  # Maximum 1 minute entre appels
+        while attempt <= number_repeat:
+            try:
+                return self.call_llm(f"{context}\n\n{prompt}", sysprompt)
+            except Exception as e:
+                if not repeat_on_failure or attempt == number_repeat:
+                    return f"{t('rag_error_calling_llm')}{str(e)}"
+                # Calcul du délai exponentiel : 1s, 2s, 4s, 8s, 16s, 32s, capped à 60s
+                delay = min(2 ** attempt, max_delay)
+                st.warning(
+                    f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay} seconds...")
+                time.sleep(delay)
+                attempt += 1
+        return f"{t('rag_error_calling_llm')}Max retries exceeded"
 
     def run(self, config):
         st.write(t("rag_plugin_loaded"))
