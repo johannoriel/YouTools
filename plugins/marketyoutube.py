@@ -68,6 +68,10 @@ translations["en"].update({
     "marketyoutube_edit_keywords": "Edit Keywords",
     "marketyoutube_suggest_keywords": "Suggest Keywords",
     "marketyoutube_filter_keywords": "Filter by Keywords",
+    "marketyoutube_title": "Title",
+    "marketyoutube_url": "URL",
+    "marketyoutube_published": "Published",
+    "marketyoutube_status": "Status",
 })
 
 translations["fr"].update({
@@ -131,6 +135,10 @@ translations["fr"].update({
     "marketyoutube_edit_keywords": "Modifier les mots-clés",
     "marketyoutube_suggest_keywords": "Suggérer des mots-clés",
     "marketyoutube_filter_keywords": "Filtrer par mots-clés",
+    "marketyoutube_title": "Titre",
+    "marketyoutube_url": "URL",
+    "marketyoutube_published": "Publié",
+    "marketyoutube_status": "Statut",
 })
 
 
@@ -210,102 +218,123 @@ class MarketyoutubePlugin(Plugin):
         )
         return [kw.strip() for kw in llm_response.split(",")]
 
-    def display_videos(self, tab: str, filter_type: str, keyword: str, page: int, keyword_filter: List[str] = None):
+    def display_video_database(self, filter_type: str, keyword: str, page: int, keyword_filter: List[str] = None):
         videos = get_videos(filter_type, keyword, page,
                             keyword_filter=keyword_filter)
         total_videos = len(videos)
 
         st.write(t("marketyoutube_video_count").format(total_videos))
 
-        if tab == t("marketyoutube_tab_videos"):
-            for video in videos:
-                # Ajouter les mots-clés entre parenthèses dans le libellé
-                keywords_str = ", ".join(
-                    video['keywords']) if video['keywords'] else "aucun mot-clé"
-                with st.expander(f"{video['title']} ({keywords_str})"):
-                    col1, col2 = st.columns([1, 3])
-                    col1.image(video['thumbnail_url'], width=120)
-                    col2.markdown(f"[{video['title']}]({video['url']})")
-                    col2.write(f"Published: {video['published_at']}")
-                    col2.write(f"Status: {video['status']}")
+        for video in videos:
+            keywords_str = ", ".join(
+                video['keywords']) if video['keywords'] else "--"
+            with st.expander(f"{video['title']} ({keywords_str})"):
+                col1, col2 = st.columns([1, 3])
+                col1.image(video['thumbnail_url'], width=120)
+                col2.markdown(f"[{video['title']}]({video['url']})")
+                col2.write(f"Published: {video['published_at']}")
+                col2.write(f"Status: {video['status']}")
 
-                    current_keywords = ", ".join(
-                        video['keywords']) if video['keywords'] else "No keywords"
-                    col2.write(
-                        f"{t('marketyoutube_keywords')}: {current_keywords}")
+                current_keywords = ", ".join(
+                    video['keywords']) if video['keywords'] else "No keywords"
+                col2.write(
+                    f"{t('marketyoutube_keywords')}: {current_keywords}")
 
-                    new_keywords = st.text_input(
-                        t("marketyoutube_edit_keywords"),
-                        value=current_keywords,
-                        key=f"edit_keywords_{video['video_id']}"
-                    )
-                    if st.button(t("marketyoutube_edit_keywords"), key=f"save_keywords_{video['video_id']}"):
-                        updated_keywords = [
-                            kw.strip() for kw in new_keywords.split(",") if kw.strip()]
-                        update_video_keywords(
-                            video['video_id'], updated_keywords)
-                        st.success(f"Keywords updated for {video['title']}")
-                        st.rerun()
+                new_keywords = st.text_input(
+                    t("marketyoutube_edit_keywords"),
+                    value=current_keywords,
+                    key=f"edit_keywords_{video['video_id']}"
+                )
+                if st.button(t("marketyoutube_edit_keywords"), key=f"save_keywords_{video['video_id']}"):
+                    updated_keywords = [
+                        kw.strip() for kw in new_keywords.split(",") if kw.strip()]
+                    update_video_keywords(video['video_id'], updated_keywords)
+                    st.success(f"Keywords updated for {video['title']}")
+                    st.rerun()
 
-                    if st.button(t("marketyoutube_suggest_keywords"), key=f"suggest_keywords_{video['video_id']}"):
-                        suggested_keywords = self.suggest_keywords(
-                            video['title'], video['description'], video['transcript'])
-                        update_video_keywords(
-                            video['video_id'], suggested_keywords)
-                        st.success(
-                            f"Suggested keywords applied for {video['title']}")
-                        st.rerun()
+                if st.button(t("marketyoutube_suggest_keywords"), key=f"suggest_keywords_{video['video_id']}"):
+                    suggested_keywords = self.suggest_keywords(
+                        video['title'], video['description'], video['transcript'])
+                    update_video_keywords(
+                        video['video_id'], suggested_keywords)
+                    st.success(
+                        f"Suggested keywords applied for {video['title']}")
+                    st.rerun()
 
-        elif tab == t("marketyoutube_tab_stats"):
-            stats_data = []
-            advanced_stats_list = self.youtube_api.get_advanced_stats_list()
-            for video in videos:
-                latest_stats = get_latest_stats(video['video_id'])
-                row = {
-                    'Title': video['title'],
-                    'URL': video['url'],
-                    'Published': video['published_at'],
-                    'Status': video['status'],
-                    'Views': latest_stats['view_count'] if latest_stats else 0,
-                    'Subscribers Gained': latest_stats['subscribers_gained'] if latest_stats else 0,
-                    'Subscribers Lost': latest_stats['subscribers_lost'] if latest_stats else 0,
-                    'Retention Rate (%)': latest_stats['retention_rate'] if latest_stats else 0.0,
-                }
-                if latest_stats and 'advanced_stats' in latest_stats:
-                    for stat in advanced_stats_list:
-                        translation_key = f"marketyoutube_{stat.lower()}"
-                        label = t(translation_key) if translation_key in translations["en"] else stat.replace(
-                            "Rate", " Rate (%)")
-                        value = latest_stats['advanced_stats'].get(stat, 0)
-                        row[label] = value
-                else:
-                    for stat in advanced_stats_list:
-                        translation_key = f"marketyoutube_{stat.lower()}"
-                        label = t(translation_key) if translation_key in translations["en"] else stat.replace(
-                            "Rate", " Rate (%)")
-                        row[label] = 0
-                stats_data.append(row)
+    def display_video_stats(self, filter_type: str, keyword: str, keyword_filter: List[str] = None):
+        from datetime import datetime  # Importer datetime pour formater la date
 
-            column_config = {
-                'Title': st.column_config.TextColumn("Title"),
-                'URL': st.column_config.LinkColumn("URL", width="small"),
-                'Published': st.column_config.TextColumn("Published"),
-                'Status': st.column_config.TextColumn("Status"),
-                'Views': st.column_config.NumberColumn(t("marketyoutube_views")),
-                'Subscribers Gained': st.column_config.NumberColumn(t("marketyoutube_subscribers_gained")),
-                'Subscribers Lost': st.column_config.NumberColumn(t("marketyoutube_subscribers_lost")),
-                'Retention Rate (%)': st.column_config.NumberColumn(t("marketyoutube_retention_rate"), format="%.1f"),
+        videos = get_videos(filter_type, keyword,
+                            keyword_filter=keyword_filter)
+        total_videos = len(videos)
+
+        st.write(t("marketyoutube_video_count").format(total_videos))
+
+        stats_data = []
+        advanced_stats_list = self.youtube_api.get_advanced_stats_list()
+        for video in videos:
+            latest_stats = get_latest_stats(video['video_id'])
+            keywords_str = ", ".join(
+                video['keywords']) if video['keywords'] else "--"
+            # Formater la date pour n'afficher que le jour (YYYY-MM-DD)
+            published_date = datetime.strptime(
+                video['published_at'], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d") if video['published_at'] else "--"
+            row = {
+                t("marketyoutube_title"): video['title'],
+                t("marketyoutube_url"): video['url'],
+                t("marketyoutube_published"): published_date,  # Uniquement la date
+                t("marketyoutube_status"): video['status'],
+                t("marketyoutube_keywords"): keywords_str,
+                t("marketyoutube_views"): latest_stats['view_count'] if latest_stats else 0,
+                t("marketyoutube_subscribers_gained"): latest_stats['subscribers_gained'] if latest_stats else 0,
+                t("marketyoutube_subscribers_lost"): latest_stats['subscribers_lost'] if latest_stats else 0,
+                t("marketyoutube_retention_rate"): latest_stats['retention_rate'] if latest_stats else 0.0,
             }
-            for stat in advanced_stats_list:
-                translation_key = f"marketyoutube_{stat.lower()}"
-                label = t(translation_key) if translation_key in translations["en"] else stat.replace(
-                    "Rate", " Rate (%)")
-                format_str = "%.2f" if "Rate" in stat or "Percentage" in stat else "%.1f" if stat == "estimatedMinutesWatched" else "%.2f" if stat == "estimatedAdRevenue" else None
-                column_config[label] = st.column_config.NumberColumn(
-                    label, format=format_str)
+            if latest_stats and 'advanced_stats' in latest_stats:
+                for stat in advanced_stats_list:
+                    translation_key = f"marketyoutube_{stat.lower()}"
+                    label = t(translation_key) if translation_key in translations["en"] else stat.replace(
+                        "Rate", " Rate (%)")
+                    value = latest_stats['advanced_stats'].get(stat, 0)
+                    row[label] = value
+            else:
+                for stat in advanced_stats_list:
+                    translation_key = f"marketyoutube_{stat.lower()}"
+                    label = t(translation_key) if translation_key in translations["en"] else stat.replace(
+                        "Rate", " Rate (%)")
+                    row[label] = 0
+            stats_data.append(row)
 
-            st.dataframe(stats_data, column_config=column_config,
-                         use_container_width=True)
+        column_config = {
+            t("marketyoutube_title"): st.column_config.TextColumn(
+                t("marketyoutube_title"), width="small"),  # Réduction de la largeur
+            t("marketyoutube_url"): st.column_config.LinkColumn(
+                t("marketyoutube_url"), width="small"),
+            t("marketyoutube_published"): st.column_config.TextColumn(
+                t("marketyoutube_published")),
+            t("marketyoutube_status"): st.column_config.TextColumn(
+                t("marketyoutube_status")),
+            t("marketyoutube_keywords"): st.column_config.TextColumn(
+                t("marketyoutube_keywords")),
+            t("marketyoutube_views"): st.column_config.NumberColumn(
+                t("marketyoutube_views")),
+            t("marketyoutube_subscribers_gained"): st.column_config.NumberColumn(
+                t("marketyoutube_subscribers_gained")),
+            t("marketyoutube_subscribers_lost"): st.column_config.NumberColumn(
+                t("marketyoutube_subscribers_lost")),
+            t("marketyoutube_retention_rate"): st.column_config.NumberColumn(
+                t("marketyoutube_retention_rate"), format="%.1f"),
+        }
+        for stat in advanced_stats_list:
+            translation_key = f"marketyoutube_{stat.lower()}"
+            label = t(translation_key) if translation_key in translations["en"] else stat.replace(
+                "Rate", " Rate (%)")
+            format_str = "%.2f" if "Rate" in stat or "Percentage" in stat else "%.1f" if stat == "estimatedMinutesWatched" else "%.2f" if stat == "estimatedAdRevenue" else None
+            column_config[label] = st.column_config.NumberColumn(
+                label, format=format_str)
+
+        st.dataframe(stats_data, column_config=column_config,
+                     use_container_width=True)
 
     def generate_campaign_responses(self, config, campaign_video: Dict[str, Any], comments: List[Dict[str, Any]]):
         responses = []
@@ -427,7 +456,7 @@ class MarketyoutubePlugin(Plugin):
             for channel in channels:
                 # Ajouter les mots-clés entre parenthèses et formater le nombre d'abonnés
                 keywords_str = ", ".join(
-                    channel['keywords']) if channel['keywords'] else "aucun mot-clé"
+                    channel['keywords']) if channel['keywords'] else "--"
                 subscriber_count_str = self.format_count(
                     channel['subscriber_count'])
                 with st.expander(f"{channel['channel_title']} ({subscriber_count_str} subscribers) ({keywords_str}) "):
@@ -469,7 +498,7 @@ class MarketyoutubePlugin(Plugin):
             videos = get_videos()
             # Ajouter les mots-clés dans le libellé des vidéos à promouvoir
             video_options = {
-                f"{v['title']} ({', '.join(v['keywords']) if v['keywords'] else 'aucun mot-clé'}) ({v['published_at']})": v for v in videos}
+                f"{v['title']} ({v['published_at']}) ({', '.join(v['keywords']) if v['keywords'] else '--'}) ": v for v in videos}
             selected_video_title = st.selectbox(
                 t("marketyoutube_select_video"),
                 options=list(video_options.keys()),
@@ -520,9 +549,9 @@ class MarketyoutubePlugin(Plugin):
                 selected_channels = st.multiselect(
                     "Select Target Channels",
                     options=[
-                        f"{ch['channel_title']} ({', '.join(ch['keywords']) if ch['keywords'] else 'aucun mot-clé'}) ({ch['subscriber_count']} subscribers)" for ch in filtered_channels],
+                        f"{ch['channel_title']} ({', '.join(ch['keywords']) if ch['keywords'] else '--'}) ({ch['subscriber_count']} subscribers)" for ch in filtered_channels],
                     default=[
-                        f"{ch['channel_title']} ({', '.join(ch['keywords']) if ch['keywords'] else 'aucun mot-clé'}) ({ch['subscriber_count']} subscribers)" for ch in filtered_channels],
+                        f"{ch['channel_title']} ({', '.join(ch['keywords']) if ch['keywords'] else '--'}) ({ch['subscriber_count']} subscribers)" for ch in filtered_channels],
                     key="campaign_select_channels"
                 )
 
@@ -550,7 +579,7 @@ class MarketyoutubePlugin(Plugin):
                     else:
                         target_videos = []
                         for channel in filtered_channels:
-                            if f"{channel['channel_title']} ({', '.join(channel['keywords']) if channel['keywords'] else 'aucun mot-clé'}) ({channel['subscriber_count']} subscribers)" in selected_channels:
+                            if f"{channel['channel_title']} ({', '.join(channel['keywords']) if channel['keywords'] else '--'}) ({channel['subscriber_count']} subscribers)" in selected_channels:
                                 channel_videos = self.youtube_api.get_channel_recent_videos(
                                     channel['channel_id'],
                                     max_results=max_videos_per_channel
@@ -624,9 +653,8 @@ class MarketyoutubePlugin(Plugin):
                 key="keyword_videos"
             )
 
-            # Filtre par mots-clés des vidéos
             all_keywords = set()
-            for video in get_videos():  # Récupérer tous les mots-clés disponibles
+            for video in get_videos():
                 all_keywords.update(video['keywords'])
             all_keywords = sorted(list(all_keywords))
             selected_keyword_filter = st.multiselect(
@@ -641,15 +669,14 @@ class MarketyoutubePlugin(Plugin):
                 value=1,
                 key="page_videos"
             )
-            self.display_videos(
-                t("marketyoutube_tab_videos"),
+            self.display_video_database(
                 filter_options[filter_type],
                 keyword,
                 page,
                 keyword_filter=selected_keyword_filter if selected_keyword_filter else None
             )
 
-        # Tab 2: Stats (inchangé sauf ajout du statut dans le tableau)
+        # Tab 2: Stats
         with tab2:
             st.header(t("marketyoutube_header_stats"))
             col1, col2 = st.columns(2)
@@ -683,10 +710,12 @@ class MarketyoutubePlugin(Plugin):
             )
             keyword = st.text_input(
                 t("marketyoutube_keyword"), key="keyword_stats")
-            page = st.number_input(
-                t("marketyoutube_page"), min_value=1, value=1, key="page_stats")
-            self.display_videos(t("marketyoutube_tab_stats"),
-                                filter_options[filter_type], keyword, page)
+            # Plus de pagination dans les stats
+            self.display_video_stats(
+                filter_options[filter_type],
+                keyword,
+                keyword_filter=selected_keyword_filter if selected_keyword_filter else None
+            )
 
         # Tab 3: Campaigns
         self.display_campaign_tab(config, tab3)
