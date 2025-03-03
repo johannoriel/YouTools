@@ -107,7 +107,7 @@ class YoutubeAPI:
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
 
-    def get_quota_usage(self, config) -> Dict[str, float]:
+    def get_quota_usage(self) -> Dict[str, float]:
         quota_limit = 10000  # Valeur par défaut
         self.track_quota_usage(0)
         usage = st.session_state.get('global_quota_usage', 0)
@@ -800,3 +800,12 @@ class YoutubeAPI:
         minutes = int(match.group(2)) if match.group(2) else 0
         seconds = int(match.group(3)) if match.group(3) else 0
         return hours * 3600 + minutes * 60 + seconds
+
+    def get_recent_videos_by_keyword(self, keyword: str, max_results: int = 10, order: str = "date") -> List[Dict[str, Any]]:
+        """Récupère les vidéos récentes pour un mot-clé donné."""
+        return self.search_videos(
+            query=keyword,
+            max_results=max_results,
+            order=order,
+            language="fr"  # Peut être configuré plus tard
+        )
