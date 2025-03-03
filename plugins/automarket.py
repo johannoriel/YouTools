@@ -451,6 +451,7 @@ class AutomarketPlugin(Plugin):
         # 3. Lancement de la campagne avec barre de progression
         if st.button(t("automarket_start_campaign")):
             with st.spinner(t("automarket_processing")):
+                initial_quota = self.youtube_api.quota_usage
                 st.session_state.rejected_videos = []
                 target_videos = []
 
@@ -530,6 +531,9 @@ class AutomarketPlugin(Plugin):
                 progress_bar.progress(current_step / total_steps)
 
                 progress_bar.empty()
+
+        quota_used = self.youtube_api.quota_usage - initial_quota
+        st.info(t("automarket_quota_consumed").format(units=quota_used))
 
         # 4. Affichage des résultats
         if st.session_state.rejected_videos:
