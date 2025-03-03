@@ -126,6 +126,7 @@ class YoutubeAPI:
                     part='snippet',
                     mine=True
                 ).execute()
+                self.track_quota_usage(1)
 
                 # Obtenir les informations de quota depuis les en-têtes de la réponse
                 quota_info = response.get('quotaInfo', {})
@@ -243,6 +244,7 @@ class YoutubeAPI:
                 part='snippet',
                 body=body
             ).execute()
+            self.track_quota_usage(50)
 
             return response
         except Exception as e:
@@ -255,13 +257,13 @@ class YoutubeAPI:
         :param channel_id: ID de la chaîne
         :return: Dictionnaire contenant les informations de la chaîne
         """
-        self.track_quota_usage(1)
         try:
             request = self.youtube.channels().list(
                 part="snippet,statistics",
                 id=channel_id
             )
             response = request.execute()
+            self.track_quota_usage(1)
 
             if response['items']:
                 channel_info = response['items'][0]
@@ -293,6 +295,7 @@ class YoutubeAPI:
                 part='contentDetails',
                 id=channel_id
             ).execute()
+            self.track_quota_usage(1)
 
             uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
 
@@ -307,6 +310,7 @@ class YoutubeAPI:
                     maxResults=50,  # Nombre maximal de vidéos par requête
                     pageToken=next_page_token  # Gestion des pages
                 ).execute()
+                self.track_quota_usage(1)
 
                 # Récupération des IDs des vidéos pour obtenir leur durée
                 video_ids = [item['snippet']['resourceId']['videoId']
@@ -315,6 +319,7 @@ class YoutubeAPI:
                     part='contentDetails',
                     id=','.join(video_ids)
                 ).execute()
+                self.track_quota_usage(1)
 
                 # Création d'un dictionnaire pour mapper les IDs des vidéos à leur durée
                 duration_map = {item['id']: item['contentDetails']
@@ -384,6 +389,7 @@ class YoutubeAPI:
                 id=video_id
             )
             response = request.execute()
+            self.track_quota_usage(1)
 
             if response['items']:
                 video_info = response['items'][0]
@@ -406,7 +412,6 @@ class YoutubeAPI:
         :param order: Ordre des commentaires ("relevance" ou "time")
         :return: Liste des commentaires ou liste vide si les commentaires sont désactivés
         """
-        self.track_quota_usage(1)
         try:
             request = self.youtube.commentThreads().list(
                 part="snippet",
@@ -416,6 +421,7 @@ class YoutubeAPI:
                 order=order  # Utiliser l'ordre spécifié
             )
             response = request.execute()
+            self.track_quota_usage(1)
 
             comments = []
             for item in response['items']:
@@ -446,7 +452,6 @@ class YoutubeAPI:
         """
         Poste une réponse à un commentaire.
         """
-        self.track_quota_usage(1)
         try:
             request = self.youtube.comments().insert(
                 part="snippet",
@@ -458,6 +463,7 @@ class YoutubeAPI:
                 }
             )
             response = request.execute()
+            self.track_quota_usage(50)
             return response
         except Exception as e:
             print(f"YouTube API Error (post_comment_reply): {str(e)}")
@@ -485,6 +491,7 @@ class YoutubeAPI:
                     pageToken=next_page_token
                 )
                 response = request.execute()
+                self.track_quota_usage(1)
 
                 for item in response['items']:
                     channel_id = item['snippet']['resourceId']['channelId']
@@ -563,10 +570,12 @@ class YoutubeAPI:
 
         return normalized_video
 
-    def search_videos(self, query: str, max_results: int = 5, order: str = "date", language: str = "fr") -> List[Dict[str, Any]]:
-        self.track_quota_usage(100)
+    def search_videos(self, query: str, max_results: int = 5, order: str = "date", language: str = "fr", combine_keywords: bool = False) -> List[Dict[str, Any]]:
         try:
-            modified_query = f"{query}"
+            if combine_keywords:
+                modified_query = query.replace(" ", " | ")
+            else:
+                modified_query = query
             api_max_results = min(max_results * 5, 50)
 
             if language == "fr" and order != "relevance":
@@ -589,6 +598,7 @@ class YoutubeAPI:
                     order=order,
                 )
             response = request.execute()
+            self.track_quota_usage(100)
 
             videos = []
             video_ids = [item['id']['videoId'] for item in response['items']]
@@ -601,6 +611,7 @@ class YoutubeAPI:
                     id=",".join(video_ids[:50])
                 )
                 video_details_response = video_details_request.execute()
+                self.track_quota_usage(1)
 
                 # Créer un dictionnaire des détails pour un accès rapide
                 video_details_map = {
@@ -666,6 +677,7 @@ class YoutubeAPI:
                 maxResults=max_results
             )
             response = request.execute()
+            self.track_quota_usage(1)
 
             trending_videos = []
             for item in response['items']:
@@ -702,14 +714,13 @@ class YoutubeAPI:
         Returns:
             List of video information including views, likes, comments, etc.
         """
-        self.track_quota_usage(100)
-        self.track_quota_usage(1)
         try:
             # Get channel's uploads playlist ID
             channel_response = self.youtube.channels().list(
                 part='contentDetails',
                 id=channel_id
             ).execute()
+            self.track_quota_usage(1)
 
             uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
 
@@ -724,6 +735,7 @@ class YoutubeAPI:
                     maxResults=min(50, max_results - len(videos)),
                     pageToken=next_page_token
                 ).execute()
+                self.track_quota_usage(1)
 
                 video_ids = [item['snippet']['resourceId']['videoId']
                              for item in playlist_response['items']]
@@ -734,6 +746,7 @@ class YoutubeAPI:
                         part='statistics,snippet',
                         id=','.join(video_ids)
                     ).execute()
+                    self.track_quota_usage(1)
 
                     for item in video_response['items']:
                         published_at = datetime.strptime(
@@ -783,6 +796,7 @@ class YoutubeAPI:
                 id=video_id
             )
             response = request.execute()
+            self.track_quota_usage(1)
 
             if not response['items']:
                 return None

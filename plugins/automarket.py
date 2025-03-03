@@ -42,7 +42,8 @@ translations["en"].update({
     "automarket_max_comments_debug": "Max Comments in Debug Mode",
     "automarket_excluded_comments": "Excluded Comments (Log)",
     "automarket_exclusion_keyword": "Exclusion Keyword",
-    "automarket_quota_consumed": "Quota consumed during campaign: {units} units"
+    "automarket_quota_consumed": "Quota consumed during campaign: {units} units",
+    "automarket_progress": "Progression...",
 })
 
 translations["fr"].update({
@@ -77,7 +78,8 @@ translations["fr"].update({
     "automarket_max_comments_debug": "Nombre max de commentaires en mode Debug",
     "automarket_excluded_comments": "Commentaires Exclus (Log)",
     "automarket_exclusion_keyword": "Mot-clé d'Exclusion",
-    "automarket_quota_consumed": "Quota consommé pendant la campagne : {units} unités"
+    "automarket_quota_consumed": "Quota consommé pendant la campagne : {units} unités",
+    "automarket_progress": "Progression...",
 })
 
 
@@ -97,6 +99,8 @@ class AutomarketPlugin(Plugin):
             st.session_state.rejected_videos = []
         if 'expand_all' not in st.session_state:
             st.session_state.expand_all = True
+        if 'excluded_comments' not in st.session_state:
+            st.session_state.excluded_comments = []
 
     def get_config_fields(self):
         return {
@@ -145,12 +149,13 @@ class AutomarketPlugin(Plugin):
     def get_tabs(self):
         return [{"name": t("automarket_tab"), "plugin": "automarket"}]
 
-    def fetch_videos_for_keyword(self, keyword: str, max_videos: int, min_subscribers: int, expiry_days: int, view_threshold: int) -> List[Dict[str, Any]]:
+    def fetch_videos_for_keyword(self, keyword: str, max_videos: int, min_subscribers: int, expiry_days: int, view_threshold: int, combine_keywords: bool = False) -> List[Dict[str, Any]]:
         """Récupère les vidéos pour un mot-clé avec filtres et détection de langue."""
         videos = []
         for order in ["relevance", "date"]:
             search_results = self.youtube_api.search_videos(
-                keyword, max_videos * 2, order=order, language=st.session_state.lang)
+                keyword, max_videos * 2, order=order, language=st.session_state.lang, combine_keywords=combine_keywords)
+
             for video in search_results:
                 # Détection de la langue
                 video_language = detect(
@@ -281,86 +286,86 @@ class AutomarketPlugin(Plugin):
                 break
         return videos[:max_videos]
 
-        def generate_responses(self, config, campaign_video: Dict[str, Any], comments: List[Dict[str, Any]], max_comments_debug: int = None):
-            """Génère les réponses tout en excluant celles marquées par le mot-clé d'exclusion."""
-            responses = []
-            total_comments = min(
-                len(comments), max_comments_debug) if max_comments_debug else len(comments)
-            progress_bar = st.progress(0)
-            progress_text = st.empty()
-            exclusion_keyword = config['automarket']['exclusion_keyword'].strip(
-            )
+    def generate_responses(self, config, campaign_video: Dict[str, Any], comments: List[Dict[str, Any]], max_comments_debug: int = None):
+        """Génère les réponses tout en excluant celles marquées par le mot-clé d'exclusion."""
+        responses = []
+        total_comments = min(
+            len(comments), max_comments_debug) if max_comments_debug else len(comments)
+        progress_bar = st.progress(0)
+        progress_text = st.empty()
+        exclusion_keyword = config['automarket']['exclusion_keyword'].strip(
+        )
 
-            prompt = config['automarket']['response_prompt'].format(
-                url=campaign_video['url'],
-                transcript=campaign_video.get('transcript', '')
-            )
+        prompt = config['automarket']['response_prompt'].format(
+            url=campaign_video['url'],
+            transcript=campaign_video.get('transcript', '')
+        )
 
-            for idx, comment in enumerate(comments[:total_comments]):
-                progress = (idx + 1) / total_comments
-                progress_bar.progress(progress)
-                progress_text.text(
-                    t("automarket_progress").format(idx + 1, total_comments))
+        for idx, comment in enumerate(comments[:total_comments]):
+            progress = (idx + 1) / total_comments
+            progress_bar.progress(progress)
+            progress_text.text(
+                t("automarket_progress").format(idx + 1, total_comments))
 
-                comment_context = f"Comment by {comment['author']} on {comment['video_title']} from {comment['channel_title']}:\n{comment['text']}"
-                try:
-                    llm_response = self.ragllm_plugin.process_with_llm(
-                        prompt,
-                        config.get('ragllm', {}).get('llm_sys_prompt', ''),
-                        comment_context
-                    )
-                    clean_response = llm_response.strip()
-                    if clean_response.startswith('"') and clean_response.endswith('"'):
-                        clean_response = clean_response[1:-1]
+            comment_context = f"Comment by {comment['author']} on {comment['video_title']} from {comment['channel_title']}:\n{comment['text']}"
+            try:
+                llm_response = self.ragllm_plugin.process_with_llm(
+                    prompt,
+                    config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                    comment_context
+                )
+                clean_response = llm_response.strip().strip(".")
+                if clean_response.startswith('"') and clean_response.endswith('"'):
+                    clean_response = clean_response[1:-1]
 
-                    # Vérification du mot-clé d'exclusion
-                    if clean_response.strip() == exclusion_keyword:
-                        st.session_state.excluded_comments.append({
-                            'text': comment['text'],
-                            'author': comment['author'],
-                            'video_title': comment['video_title'],
-                            'video_id': comment['video_id'],
-                            'published_at': comment['published_at']
-                        })
-                        continue
-
-                    responses.append({
-                        'comment_id': comment['id'],
-                        'response': clean_response,
-                        'target_video_id': comment['video_id'],
-                        'comment_text': comment['text'],
-                        'channel_id': comment['channel_id'],
-                        'channel_title': comment['channel_title'],
+                # Vérification du mot-clé d'exclusion
+                if clean_response == exclusion_keyword:
+                    st.session_state.excluded_comments.append({
+                        'text': comment['text'],
+                        'author': comment['author'],
                         'video_title': comment['video_title'],
-                        'view_count': comment.get('view_count', 0),
-                        'like_count': comment.get('like_count', 0),
-                        'comment_count': comment.get('comment_count', 0),
-                        'days_old': comment.get('days_old', 0),
-                        'subscriber_count': comment.get('subscriber_count', 0),
-                        'keyword': comment.get('keyword', 'unknown'),
-                        'criterion': comment.get('criterion', 'unknown')
+                        'video_id': comment['video_id'],
+                        'published_at': comment['published_at']
                     })
-                except Exception as e:
-                    responses.append({
-                        'comment_id': comment['id'],
-                        'response': f"Error: {str(e)}",
-                        'target_video_id': comment['video_id'],
-                        'comment_text': comment['text'],
-                        'channel_id': comment['channel_id'],
-                        'channel_title': comment['channel_title'],
-                        'video_title': comment['video_title'],
-                        'view_count': comment.get('view_count', 0),
-                        'like_count': comment.get('like_count', 0),
-                        'comment_count': comment.get('comment_count', 0),
-                        'days_old': comment.get('days_old', 0),
-                        'subscriber_count': comment.get('subscriber_count', 0),
-                        'keyword': comment.get('keyword', 'unknown'),
-                        'criterion': comment.get('criterion', 'unknown')
-                    })
+                    continue
 
-            progress_bar.empty()
-            progress_text.empty()
-            return responses
+                responses.append({
+                    'comment_id': comment['id'],
+                    'response': clean_response,
+                    'target_video_id': comment['video_id'],
+                    'comment_text': comment['text'],
+                    'channel_id': comment['channel_id'],
+                    'channel_title': comment['channel_title'],
+                    'video_title': comment['video_title'],
+                    'view_count': comment.get('view_count', 0),
+                    'like_count': comment.get('like_count', 0),
+                    'comment_count': comment.get('comment_count', 0),
+                    'days_old': comment.get('days_old', 0),
+                    'subscriber_count': comment.get('subscriber_count', 0),
+                    'keyword': comment.get('keyword', 'unknown'),
+                    'criterion': comment.get('criterion', 'unknown')
+                })
+            except Exception as e:
+                responses.append({
+                    'comment_id': comment['id'],
+                    'response': f"Error: {str(e)}",
+                    'target_video_id': comment['video_id'],
+                    'comment_text': comment['text'],
+                    'channel_id': comment['channel_id'],
+                    'channel_title': comment['channel_title'],
+                    'video_title': comment['video_title'],
+                    'view_count': comment.get('view_count', 0),
+                    'like_count': comment.get('like_count', 0),
+                    'comment_count': comment.get('comment_count', 0),
+                    'days_old': comment.get('days_old', 0),
+                    'subscriber_count': comment.get('subscriber_count', 0),
+                    'keyword': comment.get('keyword', 'unknown'),
+                    'criterion': comment.get('criterion', 'unknown')
+                })
+
+        progress_bar.empty()
+        progress_text.empty()
+        return responses
 
     def post_responses(self, selected_responses):
         """Poste les réponses sélectionnées."""
@@ -444,43 +449,47 @@ class AutomarketPlugin(Plugin):
             "Combine Keywords", value=False, key="automarket_combine_keywords")
 
         # Affichage du quota restant
-        quota_info = self.youtube_api.get_quota_usage(config)
-        st.info(
-            f"Quota : {quota_info['usage_percentage']:.2f}% ({quota_info['quota_usage']} / {quota_info['quota_limit']})")
+        # quota_info = self.youtube_api.get_quota_usage(config)
+        # st.info(
+        #    f"Quota : {quota_info['usage_percentage']:.2f}% ({quota_info['quota_usage']} / {quota_info['quota_limit']})")
+        quota_used = self.youtube_api.quota_usage
+        st.info(t("automarket_quota_consumed").format(units=quota_used))
 
         # 3. Lancement de la campagne avec barre de progression
         if st.button(t("automarket_start_campaign")):
             with st.spinner(t("automarket_processing")):
+                # Sauvegarde du quota initial
                 initial_quota = self.youtube_api.quota_usage
                 st.session_state.rejected_videos = []
+                st.session_state.excluded_comments = []
                 target_videos = []
 
                 # Initialisation de la barre de progression
                 progress_bar = st.progress(0)
+                num_keywords = len(campaign_video['keywords'])
                 if combine_keywords:
-                    total_steps = 2 + 1  # 1 recherche combinée + chaînes de confiance + génération
+                    # 1 recherche combinée + chaînes par mot-clé + génération
+                    total_steps = 1 + num_keywords + 1
                 else:
-                    # 2 recherches par mot-clé + génération
-                    total_steps = len(campaign_video['keywords']) * 2 + 1
+                    total_steps = num_keywords * 2 + 1  # 2 recherches par mot-clé + génération
                 current_step = 0
 
                 # Recherche des vidéos
                 if combine_keywords:
-                    # Combiner tous les mots-clés en une seule requête
                     combined_query = " ".join(campaign_video['keywords'])
                     videos = self.fetch_videos_for_keyword(
-                        combined_query, max_videos_per_keyword, min_subscribers, expiry_days, view_threshold)
+                        combined_query, max_videos_per_keyword, min_subscribers, expiry_days, view_threshold, combine_keywords=True)
                     target_videos.extend(videos)
                     current_step += 1
-                    progress_bar.progress(current_step / total_steps)
+                    progress_bar.progress(min(current_step / total_steps, 1.0))
                 else:
-                    # Recherche individuelle par mot-clé
                     for keyword in campaign_video['keywords']:
                         videos = self.fetch_videos_for_keyword(
-                            keyword, max_videos_per_keyword, min_subscribers, expiry_days, view_threshold)
+                            keyword, max_videos_per_keyword, min_subscribers, expiry_days, view_threshold, combine_keywords=False)
                         target_videos.extend(videos)
                         current_step += 1
-                        progress_bar.progress(current_step / total_steps)
+                        progress_bar.progress(
+                            min(current_step / total_steps, 1.0))
 
                 # Recherche dans les chaînes de confiance
                 for keyword in campaign_video['keywords']:
@@ -488,7 +497,7 @@ class AutomarketPlugin(Plugin):
                         keyword, trusted_channel_videos, min_subscribers, expiry_days, view_threshold)
                     target_videos.extend(trusted_videos)
                     current_step += 1
-                    progress_bar.progress(current_step / total_steps)
+                    progress_bar.progress(min(current_step / total_steps, 1.0))
 
                 # Récupération et traitement des commentaires
                 comments = []
@@ -528,12 +537,13 @@ class AutomarketPlugin(Plugin):
                 st.session_state.selected_responses = {
                     i: not debug_mode for i in range(len(st.session_state.campaign_responses))}
                 current_step += 1
-                progress_bar.progress(current_step / total_steps)
+                progress_bar.progress(min(current_step / total_steps, 1.0))
 
                 progress_bar.empty()
 
-        quota_used = self.youtube_api.quota_usage - initial_quota
-        st.info(t("automarket_quota_consumed").format(units=quota_used))
+                # Affichage du quota consommé à la fin
+                quota_used = self.youtube_api.quota_usage - initial_quota
+                st.info(t("automarket_quota_consumed").format(units=quota_used))
 
         # 4. Affichage des résultats
         if st.session_state.rejected_videos:
@@ -573,8 +583,13 @@ class AutomarketPlugin(Plugin):
                 if st.button(t("automarket_collapse_all")):
                     st.session_state.expand_all = False
 
+            exclusion_keyword = config['automarket']['exclusion_keyword'].strip(
+            )
             for i, response in enumerate(st.session_state.campaign_responses):
-                with st.expander(f"Response {i+1}", expanded=st.session_state.expand_all):
+                title = f"Reponse {format(i+1)} : {response['video_title']}"
+                if response['response'].strip().strip(".") == exclusion_keyword:
+                    title += " - Exclus"
+                with st.expander(title, expanded=st.session_state.expand_all):
                     st.write(f"{t('automarket_channel')}: {response['channel_title']} "
                              f"({self.youtube_api.format_count(response['subscriber_count'])} subscribers)")
                     if st.button(t("automarket_add_to_trusted"), key=f"add_trusted_{i}"):
