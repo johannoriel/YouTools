@@ -7,7 +7,7 @@ import json
 
 # Database file
 DB_FILE = "youtube_database.db"
-SCHEMA_VERSION = 2  # Nouvelle version avec le statut
+SCHEMA_VERSION = 3  # Nouvelle version avec le statut
 
 
 def get_db_connection():
@@ -28,6 +28,7 @@ def reset_database():
     cursor.execute("DROP TABLE IF EXISTS stats_snapshots")
     cursor.execute("DROP TABLE IF EXISTS campaign_cache")
     cursor.execute("DROP TABLE IF EXISTS target_channels")
+    cursor.execute("DROP TABLE IF EXISTS posted_responses")
 
     # Réinitialiser avec la version courante
     initialize_database()
@@ -38,10 +39,24 @@ def reset_database():
 
 def upgrade_database(current_version: int, target_version: int, cursor):
     """Handle database schema upgrades."""
-    if current_version < 2 < target_version:
-        # Placeholder for future upgrades
+    if current_version < 2 and target_version >= 2:
+        # Upgrade de la version 1 à 2 (si pertinent)
         pass
-    # Add more upgrade steps as schema evolves
+    if current_version < 3 and target_version >= 3:
+        # Upgrade vers version 3 : ajout de la table posted_responses
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS posted_responses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_timestamp TEXT,  -- Timestamp de la campagne
+                video_id TEXT,           -- ID de la vidéo commentée
+                comment_id TEXT,         -- ID du commentaire répondu
+                response_id TEXT,        -- ID de la réponse postée
+                channel_id TEXT,         -- ID de la chaîne de la vidéo
+                keyword TEXT,            -- Mot-clé ayant généré la réponse
+                response_text TEXT,      -- Texte de la réponse
+                posted_at TEXT           -- Timestamp de l'envoi
+            )
+        """)
 
 
 def initialize_database():
@@ -128,6 +143,19 @@ def initialize_database():
                 )
             """)
 
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS posted_responses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_timestamp TEXT,
+                video_id TEXT,
+                comment_id TEXT,
+                response_id TEXT,
+                channel_id TEXT,
+                keyword TEXT,
+                response_text TEXT,
+                posted_at TEXT
+            )
+        """)
     conn.commit()
     conn.close()
 
@@ -479,6 +507,64 @@ def update_campaign_response_status(comment_id: str, status: str, campaign_id: s
     """, (status, timestamp, comment_id, campaign_id))
     conn.commit()
     conn.close()
+
+
+def save_response(campaign_timestamp: str, video_id: str, comment_id: str, response_id: str, channel_id: str, keyword: str, response_text: str):
+    """Sauvegarde une réponse postée dans la base."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    posted_at = datetime.now(pytz.UTC).isoformat()
+    cursor.execute("""
+        INSERT INTO posted_responses (campaign_timestamp, video_id, comment_id, response_id, channel_id, keyword, response_text, posted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (campaign_timestamp, video_id, comment_id, response_id, channel_id, keyword, response_text, posted_at))
+    conn.commit()
+    conn.close()
+
+
+def check_existing_response(video_id: str, comment_id: str) -> bool:
+    """Vérifie si une réponse existe déjà pour ce commentaire sur cette vidéo."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) FROM posted_responses
+        WHERE video_id = ? AND comment_id = ?
+    """, (video_id, comment_id))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count > 0
+
+
+def get_posted_responses() -> List[Dict[str, Any]]:
+    """Récupère toutes les réponses postées."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM posted_responses")
+    responses = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return responses
+
+
+def get_response_count_by_video(video_id: str) -> int:
+    """Compte le nombre de réponses postées pour une vidéo donnée."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) FROM posted_responses WHERE video_id = ?", (video_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_response_count_by_channel(channel_id: str) -> int:
+    """Compte le nombre de réponses postées pour une chaîne donnée."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) FROM posted_responses WHERE channel_id = ?", (channel_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
 
 
 if __name__ == "__main__":
