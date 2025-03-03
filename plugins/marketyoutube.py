@@ -624,7 +624,7 @@ class MarketyoutubePlugin(Plugin):
         # Tab 1: Videos
         with tab1:
             st.header(t("marketyoutube_header_videos"))
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button(t("marketyoutube_sync")):
                     with st.spinner(t("marketyoutube_syncing")):
@@ -636,6 +636,15 @@ class MarketyoutubePlugin(Plugin):
                     with st.spinner("Resetting database..."):
                         reset_database()
                         st.success("Database structure reset successfully!")
+
+            with col3:
+                if st.button("Upgrade Database Structure"):
+                    try:
+                        auto_upgrade_database()
+                        st.info("Database upgraded")
+                    except Exception as e:
+                        print(f"Database error: {str(e)}")
+
 
             filter_type = st.selectbox(
                 t("marketyoutube_filter_label"),

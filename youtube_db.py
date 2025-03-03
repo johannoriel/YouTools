@@ -37,6 +37,19 @@ def reset_database():
     conn.close()
 
 
+def auto_upgrade_database():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT version FROM schema_version")
+    current_version = cursor.fetchone()['version']
+    if current_version < SCHEMA_VERSION:
+        upgrade_database(current_version, SCHEMA_VERSION, cursor)
+        cursor.execute("UPDATE schema_version SET version = ?",
+                       (SCHEMA_VERSION,))
+        conn.commit()
+        conn.close()
+
+
 def upgrade_database(current_version: int, target_version: int, cursor):
     """Handle database schema upgrades."""
     if current_version < 2 and target_version >= 2:
