@@ -44,6 +44,9 @@ translations["en"].update({
     "automarket_exclusion_keyword": "Exclusion Keyword",
     "automarket_quota_consumed": "Quota consumed during campaign: {units} units",
     "automarket_progress": "Progression...",
+    "automarket_search_keywords": "Search by Keywords",
+    "automarket_search_trusted": "Search in Trusted Channels",
+    "promoteyoutube_response_to_comment": "Response to:",
 })
 
 translations["fr"].update({
@@ -80,6 +83,9 @@ translations["fr"].update({
     "automarket_exclusion_keyword": "Mot-clé d'Exclusion",
     "automarket_quota_consumed": "Quota consommé pendant la campagne : {units} unités",
     "automarket_progress": "Progression...",
+    "automarket_search_keywords": "Recherche par Mots-clés",
+    "automarket_search_trusted": "Recherche dans les Chaînes de Confiance",
+    "promoteyoutube_response_to_comment": "Réponse à:",
 })
 
 
@@ -431,6 +437,10 @@ class AutomarketPlugin(Plugin):
             value=int(config['automarket']['trusted_channel_videos']),
             key="automarket_trusted_channel_videos"
         )
+        search_keywords = st.checkbox(
+            t("automarket_search_keywords"), value=True, key="automarket_search_keywords")
+        search_trusted = st.checkbox(
+            t("automarket_search_trusted"), value=True, key="automarket_search_trusted")
 
         # Mode Debug
         debug_mode = st.checkbox(
@@ -449,16 +459,13 @@ class AutomarketPlugin(Plugin):
             "Combine Keywords", value=False, key="automarket_combine_keywords")
 
         # Affichage du quota restant
-        # quota_info = self.youtube_api.get_quota_usage(config)
-        # st.info(
-        #    f"Quota : {quota_info['usage_percentage']:.2f}% ({quota_info['quota_usage']} / {quota_info['quota_limit']})")
-        quota_used = self.youtube_api.quota_usage
-        st.info(t("automarket_quota_consumed").format(units=quota_used))
+        quota_info = self.youtube_api.get_quota_usage(config)
+        st.info(
+            f"Quota : {quota_info['usage_percentage']:.2f}% ({quota_info['quota_usage']} / {quota_info['quota_limit']})")
 
         # 3. Lancement de la campagne avec barre de progression
         if st.button(t("automarket_start_campaign")):
             with st.spinner(t("automarket_processing")):
-                # Sauvegarde du quota initial
                 initial_quota = self.youtube_api.quota_usage
                 st.session_state.rejected_videos = []
                 st.session_state.excluded_comments = []
@@ -467,37 +474,42 @@ class AutomarketPlugin(Plugin):
                 # Initialisation de la barre de progression
                 progress_bar = st.progress(0)
                 num_keywords = len(campaign_video['keywords'])
-                if combine_keywords:
-                    # 1 recherche combinée + chaînes par mot-clé + génération
-                    total_steps = 1 + num_keywords + 1
-                else:
-                    total_steps = num_keywords * 2 + 1  # 2 recherches par mot-clé + génération
+                total_steps = 0
+                if search_keywords:
+                    total_steps += 1 if combine_keywords else num_keywords
+                if search_trusted:
+                    total_steps += num_keywords
+                total_steps += 1  # Pour la génération
                 current_step = 0
 
                 # Recherche des vidéos
-                if combine_keywords:
-                    combined_query = " ".join(campaign_video['keywords'])
-                    videos = self.fetch_videos_for_keyword(
-                        combined_query, max_videos_per_keyword, min_subscribers, expiry_days, view_threshold, combine_keywords=True)
-                    target_videos.extend(videos)
-                    current_step += 1
-                    progress_bar.progress(min(current_step / total_steps, 1.0))
-                else:
-                    for keyword in campaign_video['keywords']:
+                if search_keywords:
+                    if combine_keywords:
+                        combined_query = " ".join(campaign_video['keywords'])
                         videos = self.fetch_videos_for_keyword(
-                            keyword, max_videos_per_keyword, min_subscribers, expiry_days, view_threshold, combine_keywords=False)
+                            combined_query, max_videos_per_keyword, min_subscribers, expiry_days, view_threshold, combine_keywords=True)
                         target_videos.extend(videos)
                         current_step += 1
                         progress_bar.progress(
                             min(current_step / total_steps, 1.0))
+                    else:
+                        for keyword in campaign_video['keywords']:
+                            videos = self.fetch_videos_for_keyword(
+                                keyword, max_videos_per_keyword, min_subscribers, expiry_days, view_threshold, combine_keywords=False)
+                            target_videos.extend(videos)
+                            current_step += 1
+                            progress_bar.progress(
+                                min(current_step / total_steps, 1.0))
 
                 # Recherche dans les chaînes de confiance
-                for keyword in campaign_video['keywords']:
-                    trusted_videos = self.fetch_videos_from_trusted_channels(
-                        keyword, trusted_channel_videos, min_subscribers, expiry_days, view_threshold)
-                    target_videos.extend(trusted_videos)
-                    current_step += 1
-                    progress_bar.progress(min(current_step / total_steps, 1.0))
+                if search_trusted:
+                    for keyword in campaign_video['keywords']:
+                        trusted_videos = self.fetch_videos_from_trusted_channels(
+                            keyword, trusted_channel_videos, min_subscribers, expiry_days, view_threshold)
+                        target_videos.extend(trusted_videos)
+                        current_step += 1
+                        progress_bar.progress(
+                            min(current_step / total_steps, 1.0))
 
                 # Récupération et traitement des commentaires
                 comments = []
@@ -586,9 +598,7 @@ class AutomarketPlugin(Plugin):
             exclusion_keyword = config['automarket']['exclusion_keyword'].strip(
             )
             for i, response in enumerate(st.session_state.campaign_responses):
-                title = f"Reponse {format(i+1)} : {response['video_title']}"
-                if response['response'].strip().strip(".") == exclusion_keyword:
-                    title += " - Exclus"
+                title = f"{t('promoteyoutube_response_to_comment').format(i+1)} : {response['video_title']}"
                 with st.expander(title, expanded=st.session_state.expand_all):
                     st.write(f"{t('automarket_channel')}: {response['channel_title']} "
                              f"({self.youtube_api.format_count(response['subscriber_count'])} subscribers)")
@@ -618,16 +628,21 @@ class AutomarketPlugin(Plugin):
                         f"{t('automarket_comment')}: {response['comment_text']}")
                     st.write(
                         f"{t('automarket_response')}: {response['response']}")
-                    st.session_state.selected_responses[i] = st.checkbox(
+
+                    # Gestion correcte de la case à cocher pour chaque réponse
+                    current_value = st.session_state.selected_responses.get(
+                        i, False)
+                    new_value = st.checkbox(
                         t("automarket_exclude_response"),
-                        value=not st.session_state.selected_responses[i],
+                        value=current_value,
                         key=f"exclude_{i}"
                     )
+                    st.session_state.selected_responses[i] = new_value
 
             # 5. Bouton pour poster les réponses
             if st.button(t("automarket_post_responses")):
                 with st.spinner(t("automarket_posting")):
                     selected_responses = [r for i, r in enumerate(st.session_state.campaign_responses)
-                                          if not st.session_state.selected_responses[i]]
+                                          if not st.session_state.selected_responses.get(i, False)]
                     self.post_responses(selected_responses)
                     st.success(t("automarket_campaign_complete"))

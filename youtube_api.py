@@ -6,6 +6,7 @@ import pytz
 from langdetect import detect
 from googleapiclient.errors import HttpError
 import json
+import streamlit as st
 
 # Liste des statistiques avancées (peut être modifiée sans restructurer le reste)
 ADVANCED_STATS = [
@@ -23,18 +24,25 @@ class YoutubeAPI:
         self.analytics = build('youtubeAnalytics', 'v2',
                                credentials=credentials)
         self.channel_id = config['common']['channel_id']
-        self.reset_quota_usage()
+        self.quota_usage = 0
 
     def reset_quota_usage(self):
         """Réinitialise le compteur de quota consommé."""
         self.quota_usage = 0
-        self.quota_last_reset = datetime.now().date()
+        st.session_state['global_quota_usage'] = 0
+        print("Quota reset")
 
     def track_quota_usage(self, units: int):
-        """Ajoute des unités au compteur de quota consommé."""
-        if self.quota_last_reset < datetime.now().date():
+        """Ajoute des unités aux compteurs de quota (local et global)."""
+        if 'global_quota_usage' not in st.session_state:
             self.reset_quota_usage()
+
         self.quota_usage += units
+        st.session_state['global_quota_usage'] += units
+
+    def set_global_quota_usage(self, usage: int):
+        """Force la valeur du quota global."""
+        st.session_state['global_quota_usage'] = usage
 
     def get_advanced_stats_list(self):
         """Retourne la liste des statistiques avancées."""
@@ -100,131 +108,22 @@ class YoutubeAPI:
     from googleapiclient.errors import HttpError
 
     def get_quota_usage(self, config) -> Dict[str, float]:
-        """
-        Récupère le quota restant pour l'API YouTube v3.
+        quota_limit = 10000  # Valeur par défaut
+        self.track_quota_usage(0)
+        usage = st.session_state.get('global_quota_usage', 0)
 
-        Args:
-            config: La configuration contenant les paramètres nécessaires
+        usage_percentage = (usage / quota_limit) * \
+            100 if quota_limit > 0 else 0
+        remaining_percentage = 100 - usage_percentage
 
-        Returns:
-            Dict[str, float]: Un dictionnaire contenant les informations de quota
-                - 'usage_percentage': Pourcentage d'utilisation du quota
-                - 'remaining_percentage': Pourcentage restant du quota
-                - 'quota_usage': Quota utilisé aujourd'hui
-                - 'quota_limit': Limite de quota quotidienne
-        """
-        try:
-            # Obtenir les credentials
-            credentials = get_credentials()
-
-            # Créer le service YouTube avec les credentials
-            youtube = build('youtube', 'v3', credentials=credentials)
-
-            try:
-                # Récupérer les informations de quota
-                response = youtube.channels().list(
-                    part='snippet',
-                    mine=True
-                ).execute()
-                self.track_quota_usage(1)
-
-                # Obtenir les informations de quota depuis les en-têtes de la réponse
-                quota_info = response.get('quotaInfo', {})
-                quota_usage = float(quota_info.get('quotaConsumed', 0))
-                # La limite par défaut est 10000 unités
-                quota_limit = float(quota_info.get('quotaLimit', 10000))
-
-                # Si les informations de quota ne sont pas disponibles via la réponse directe,
-                # nous pouvons les obtenir via une requête à l'API de reporting
-                if not quota_info:
-                    # Créer un service de reporting
-                    reporting = build('youtubereporting', 'v1',
-                                      credentials=credentials)
-
-                    # Obtenir les informations de quota
-                    quota_response = reporting.media().download(
-                        resourceName='quotaStatus'
-                    ).execute()
-
-                    if quota_response and 'quotaStatus' in quota_response:
-                        quota_usage = float(
-                            quota_response['quotaStatus'].get('quotaUsed', 0))
-                        quota_limit = float(
-                            quota_response['quotaStatus'].get('quotaLimit', 10000))
-
-                # Calculer les pourcentages
-                usage_percentage = (quota_usage / quota_limit) * \
-                    100 if quota_limit > 0 else 0
-                remaining_percentage = 100 - usage_percentage
-
-                return {
-                    'usage_percentage': usage_percentage,
-                    'remaining_percentage': remaining_percentage,
-                    'quota_usage': quota_usage,
-                    'quota_limit': quota_limit
-                }
-
-            except HttpError as e:
-                # Vérifier si l'erreur est due à un dépassement de quota
-                if 'quota' in str(e) and ('exceeded' in str(e) or 'quotaExceeded' in str(e)):
-                    print("Quota YouTube dépassé!")
-                    return {
-                        'usage_percentage': 100.0,
-                        'remaining_percentage': 0.0,
-                        # Valeur hypothétique - le quota est à 100%
-                        'quota_usage': 10000.0,
-                        'quota_limit': 10000.0
-                    }
-                else:
-                    # Une autre erreur HTTP
-                    raise e
-
-        except Exception as e:
-            print(
-                f"Une erreur s'est produite lors de la récupération du quota YouTube: {e}")
-            return {
-                'usage_percentage': 0,
-                'remaining_percentage': 0,
-                'quota_usage': 0,
-                'quota_limit': 0
-            }
-
-    def get_quota_usage_v2(self, config) -> Dict[str, float]:
-        try:
-            from googleapiclient.discovery import build
-
-            service = build('youtubeAnalytics', 'v2',
-                            credentials=get_credentials())
-
-            # Récupérer les informations de quota actuelles
-            response = service.quotas().get().execute()
-
-            # Extraire les informations de l'API YouTube Data
-            for quota in response.get('items', []):
-                if quota.get('id') == 'youtube.googleapis.com/default':
-                    quota_limit = int(quota.get('limit', 10000))
-                    usage = int(quota.get('usage', 0))
-
-                    usage_percentage = (usage / quota_limit) * \
-                        100 if quota_limit > 0 else 0
-                    remaining_percentage = 100 - usage_percentage
-
-                    return {
-                        'usage_percentage': round(usage_percentage, 2),
-                        'remaining_percentage': round(remaining_percentage, 2),
-                        'quota_usage': usage,
-                        'quota_limit': quota_limit
-                    }
-
-            return {
-                'usage_percentage': 0,
-                'remaining_percentage': 0,
-                'quota_usage': 0,
-                'quota_limit': 0
-            }
-        except Exception as e:
-            print(f"Error fetching quota usage: {str(e)}")
-            raise e
+        print(
+            f"Quota info - Limit: {quota_limit}, Estimated Usage: {usage}")
+        return {
+            'usage_percentage': round(usage_percentage, 2),
+            'remaining_percentage': round(remaining_percentage, 2),
+            'quota_usage': usage,
+            'quota_limit': quota_limit
+        }
 
     def post(self, content: str) -> Optional[Dict[str, Any]]:
         try:

@@ -722,6 +722,24 @@ class MarketyoutubePlugin(Plugin):
         with tab5:
             st.header("Debug YouTube Analytics API")
 
+            st.subheader("Gestion du Quota YouTube")
+            st.write(
+                "Vous pouvez vérifier l'usage réel du quota ici : [Google Cloud Console Quotas](https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas?hl=fr&inv=1&invt=AbrCIQ&pageState=(%22allQuotasTable%22%253A(%22c%22%253A%5B%22displayDimensions%22%5D)))")
+            # Création d'une instance pour accéder à set_global_quota_usage
+            youtube_api = YoutubeAPI(config)
+            current_quota = youtube_api.get_quota_usage(config)['quota_usage']
+            st.write(f"Quota estimé actuel : {current_quota} unités")
+            forced_quota = st.number_input(
+                "Forcer la valeur du quota utilisé (unités)",
+                min_value=0,
+                value=current_quota,
+                step=1,
+                key="forced_quota_usage"
+            )
+            if st.button("Mettre à jour le quota"):
+                youtube_api.set_global_quota_usage(forced_quota)
+                st.success(f"Quota global mis à jour à {forced_quota} unités")
+
             videos = get_videos(page=1, per_page=1)
             if not videos:
                 st.warning("No videos in database. Please sync videos first.")
