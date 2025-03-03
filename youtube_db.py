@@ -201,7 +201,7 @@ def insert_stats_snapshot(video_id: str, timestamp: str, stats: Dict[str, Any]):
     cursor.execute("""
         INSERT INTO stats_snapshots (
             video_id, timestamp, view_count, retention_rate, advanced_stats
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?)
     """, (
         video_id,
         timestamp,
