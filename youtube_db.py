@@ -70,6 +70,21 @@ def upgrade_database(current_version: int, target_version: int, cursor):
                 posted_at TEXT           -- Timestamp de l'envoi
             )
         """)
+    if current_version < 4 and target_version >= 4:
+        # Nouvelle table pour les stats de campagne
+        cursor.execute("""
+                CREATE TABLE IF NOT EXISTS campaign_stats (
+                    campaign_id TEXT PRIMARY KEY,
+                    total_videos INTEGER,
+                    excluded_videos INTEGER,
+                    total_comments INTEGER,
+                    stop_comments INTEGER,
+                    excluded_comments INTEGER,
+                    refused_responses INTEGER,
+                    posted_responses INTEGER,
+                    recorded_at TEXT
+                )
+            """)
 
 
 def initialize_database():
@@ -166,9 +181,24 @@ def initialize_database():
                 channel_id TEXT,
                 keyword TEXT,
                 response_text TEXT,
-                posted_at TEXT
+                posted_at TEXT,
+                campaign_id TEXT  -- Nouvelle colonne
             )
         """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS campaign_stats (
+            campaign_id TEXT PRIMARY KEY,
+            total_videos INTEGER,
+            excluded_videos INTEGER,
+            total_comments INTEGER,
+            stop_comments INTEGER,
+            excluded_comments INTEGER,
+            refused_responses INTEGER,
+            posted_responses INTEGER,
+            recorded_at TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -522,14 +552,35 @@ def update_campaign_response_status(comment_id: str, status: str, campaign_id: s
     conn.close()
 
 
+def save_campaign_stats(campaign_id: str, stats: Dict[str, int]):
+    """Sauvegarde les statistiques d'une campagne."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    recorded_at = datetime.now(pytz.UTC).isoformat()
+    cursor.execute("""
+        INSERT OR REPLACE INTO campaign_stats (
+            campaign_id, total_videos, excluded_videos, total_comments,
+            stop_comments, excluded_comments, refused_responses, posted_responses, recorded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        campaign_id, stats['total_videos'], stats['excluded_videos'], stats['total_comments'],
+        stats['stop_comments'], stats['excluded_comments'], stats['refused_responses'],
+        stats['posted_responses'], recorded_at
+    ))
+    conn.commit()
+    conn.close()
+
+
 def save_response(campaign_timestamp: str, video_id: str, comment_id: str, response_id: str, channel_id: str, keyword: str, response_text: str):
-    """Sauvegarde une réponse postée dans la base."""
+    """Sauvegarde une réponse postée avec campaign_id."""
     conn = get_db_connection()
     cursor = conn.cursor()
     posted_at = datetime.now(pytz.UTC).isoformat()
     cursor.execute("""
-        INSERT INTO posted_responses (campaign_timestamp, video_id, comment_id, response_id, channel_id, keyword, response_text, posted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO posted_responses (
+            campaign_timestamp, video_id, comment_id, response_id, channel_id,
+            keyword, response_text, posted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (campaign_timestamp, video_id, comment_id, response_id, channel_id, keyword, response_text, posted_at))
     conn.commit()
     conn.close()

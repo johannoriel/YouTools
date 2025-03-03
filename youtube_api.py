@@ -352,6 +352,7 @@ class YoutubeAPI:
         Poste une réponse à un commentaire.
         """
         try:
+            print(f"Réponse au commentaire {comment_id} : {text}")
             request = self.youtube.comments().insert(
                 part="snippet",
                 body={
@@ -362,6 +363,7 @@ class YoutubeAPI:
                 }
             )
             response = request.execute()
+            print(response)
             self.track_quota_usage(50)
             return response
         except Exception as e:

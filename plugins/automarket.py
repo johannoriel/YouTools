@@ -22,6 +22,7 @@ translations["en"].update({
     "automarket_trusted_channel_videos": "Videos from Trusted Channels",
     "automarket_start_campaign": "Start Campaign",
     "automarket_processing": "Processing campaign...",
+    "automarket_generating_responses": "Generating reséponses...",
     "automarket_rejected_videos": "Rejected Videos (Log)",
     "automarket_responses": "Generated Responses",
     "automarket_post_responses": "Post Responses",
@@ -57,6 +58,7 @@ translations["en"].update({
     "monitor_trends_time": "Recent Videos (Time)",
     "monitor_trends_relevant": "Relevant Videos",
     "monitor_trends_trusted": "Trusted Channels",
+    "automarket_selected_videos": "Selected Videos (Log)",
 })
 
 translations["fr"].update({
@@ -71,6 +73,7 @@ translations["fr"].update({
     "automarket_trusted_channel_videos": "Vidéos des chaînes de confiance",
     "automarket_start_campaign": "Lancer la campagne",
     "automarket_processing": "Traitement de la campagne...",
+    "automarket_generating_responses": "Génération des réponses...",
     "automarket_rejected_videos": "Vidéos rejetées (Log)",
     "automarket_responses": "Réponses générées",
     "automarket_post_responses": "Poster les réponses",
@@ -106,6 +109,7 @@ translations["fr"].update({
     "monitor_trends_time": "Vidéos Récentes (Temps)",
     "monitor_trends_relevant": "Vidéos Pertinentes",
     "monitor_trends_trusted": "Chaînes de Confiance",
+    "automarket_selected_videos": "Vidéos retenues (Log)",
 })
 
 
@@ -496,6 +500,8 @@ class AutomarketPlugin(Plugin):
                 st.write(
                     f"{t('automarket_comment')}: {response['comment_text']}")
                 st.write(f"{t('automarket_response')}: {response['response']}")
+                # Ajout du titre de la vidéo promue
+                st.write(f"Promoted Video: {campaign_video['title']}")
 
                 current_value = st.session_state.selected_responses.get(
                     i, False)
@@ -511,7 +517,75 @@ class AutomarketPlugin(Plugin):
                 selected_responses = [r for i, r in enumerate(responses)
                                       if not st.session_state.selected_responses.get(i, False)]
                 self.post_responses(selected_responses, campaign_timestamp)
+
+                # Calcul des statistiques
+                total_videos = len(set(
+                    r['target_video_id'] for r in responses)) + len(st.session_state.rejected_videos)
+                excluded_videos = len(st.session_state.rejected_videos)
+                total_comments = len(
+                    st.session_state.current_comments) if 'current_comments' in st.session_state else len(responses)
+                stop_comments = len([c for c in st.session_state.excluded_comments if c['text'].strip(
+                ).lower() == config['automarket']['exclusion_keyword'].strip().lower()])
+                excluded_comments = len(st.session_state.excluded_comments)
+                refused_responses = len(responses) - len(selected_responses)
+                posted_responses = len(selected_responses)
+
+                # Sauvegarde des stats en base
+                save_campaign_stats(campaign_timestamp, {
+                    'total_videos': total_videos,
+                    'excluded_videos': excluded_videos,
+                    'total_comments': total_comments,
+                    'stop_comments': stop_comments,
+                    'excluded_comments': excluded_comments,
+                    'refused_responses': refused_responses,
+                    'posted_responses': posted_responses
+                })
+
                 st.success(t("automarket_campaign_complete"))
+
+                # Affichage des statistiques
+                with st.expander("Campaign Statistics"):
+                    st.write(f"Total videos found: {total_videos}")
+                    st.write(f"Excluded videos: {excluded_videos}")
+                    st.write(f"Total comments analyzed: {total_comments}")
+                    st.write(f"Comments marked as 'stop': {stop_comments}")
+                    st.write(f"Total excluded comments: {excluded_comments}")
+                    st.write(f"Refused responses: {refused_responses}")
+                    st.write(f"Responses posted: {posted_responses}")
+
+    def log_selected_videos(self, prefix: str, videos: List[Dict[str, Any]], keyword: str = "N/A"):
+        """Affiche un log des vidéos retenues avec leurs statistiques."""
+        with st.expander(t("automarket_selected_videos")):
+            for video in videos:
+                st.markdown(f"Video: [**{video['title']}**]({video['url']})")
+                st.markdown(
+                    f"Channel: [**{video['channel_title']}**](https://www.youtube.com/channel/{video['channel_id']})")
+                st.write(
+                    f"Keyword: {keyword if keyword != 'N/A' else video.get('keyword', 'N/A')}")
+                st.write(f"Stats: Subscribers: {self.youtube_api.format_count(video['subscriber_count'])}, "
+                         f"Views: {self.youtube_api.format_count(video['view_count'])}, "
+                         f"Likes: {self.youtube_api.format_count(video['like_count'])}, "
+                         f"Comments: {video['comment_count']}, "
+                         f"Age: {video['days_old']} days")
+                st.write("---")
+
+    def log_rejected_videos(self, prefix: str, rejected_videos: List[Dict[str, Any]]):
+        """Affiche un log des vidéos rejetées avec leurs statistiques."""
+        with st.expander(t("automarket_rejected_videos")):
+            for rejected in rejected_videos:
+                st.markdown(
+                    f"Video: [**{rejected['title']}**]({rejected['url']})")
+                channel_url = rejected.get(
+                    'channel_url', f"https://www.youtube.com/channel/{rejected.get('channel_id', '')}")
+                st.markdown(
+                    f"Channel: [**{rejected['channel_title']}**]({channel_url})")
+                st.write(f"{t('automarket_keyword')}: {rejected['keyword']}")
+                st.write(
+                    f"{t('automarket_criterion')}: {rejected['criterion']}")
+                st.write(t("automarket_rejected_reason").format(
+                    rejected['reason']))
+                st.write(f"Stats: {rejected['stats']}")
+                st.write("---")
 
     def run(self, config):
         tab1, tab2, tab3 = st.tabs(
@@ -676,6 +750,8 @@ class AutomarketPlugin(Plugin):
                                 'relevance' if video in videos[:max_videos_per_keyword] else 'date')
                         comments.extend(video_comments)
 
+                    self.log_selected_videos("campaign", target_videos)
+                    st.info(t("automarket_generating_responses"))
                     st.session_state.campaign_responses = self.generate_responses(
                         config, campaign_video, comments, max_comments_debug if debug_mode else None)
                     st.session_state.selected_responses = {
@@ -695,8 +771,10 @@ class AutomarketPlugin(Plugin):
                     for rejected in st.session_state.rejected_videos:
                         st.markdown(
                             f"Video: [**{rejected['title']}**]({rejected['url']})")
+                        channel_url = rejected.get(
+                            'channel_url', f"https://www.youtube.com/channel/{rejected.get('channel_id', '')}")
                         st.markdown(
-                            f"Channel: [**{rejected['channel_title']}**]({rejected['channel_url']})")
+                            f"Channel: [**{rejected['channel_title']}**]({channel_url})")
                         st.write(
                             f"{t('automarket_keyword')}: {rejected['keyword']}")
                         st.write(
@@ -705,6 +783,8 @@ class AutomarketPlugin(Plugin):
                             rejected['reason']))
                         st.write(f"Stats: {rejected['stats']}")
                         st.write("---")
+            self.log_rejected_videos(
+                "campaign", st.session_state.rejected_videos)
 
             if st.session_state.excluded_comments:
                 with st.expander(t("automarket_excluded_comments")):
@@ -722,19 +802,46 @@ class AutomarketPlugin(Plugin):
 
         with tab2:
             st.header("Réponses Existantes")
+            st.markdown(
+                f"[Lien vers mes commentaires](https://myactivity.google.com/page?hl=fr&utm_medium=web&utm_source=youtube&page=youtube_comments)")
             responses = get_posted_responses()
             if responses:
-                df_data = [
-                    {
+                df_data = []
+                for r in responses:
+                    # Essayer de parser avec le décalage UTC, sinon avec Z
+                    try:
+                        posted_at = datetime.strptime(
+                            r['posted_at'], "%Y-%m-%dT%H:%M:%S.%f%z")
+                    except ValueError:
+                        posted_at = datetime.strptime(
+                            r['posted_at'], "%Y-%m-%dT%H:%M:%S.%fZ")
+                    df_data.append({
                         "Mot-clé": r['keyword'],
-                        "Date": r['posted_at'],
-                        "Chaîne": r['channel_id'],
+                        "Date": posted_at.strftime("%Y-%m-%d"),  # Sans l'heure
+                        "Chaîne": f"https://www.youtube.com/channel/{r['channel_id']}",
                         "Vidéo": f"https://www.youtube.com/watch?v={r['video_id']}&lc={r['comment_id']}",
                         "Réponse": r['response_text']
-                    }
-                    for r in responses
-                ]
-                st.dataframe(df_data, use_container_width=True)
+                    })
+                # Ajuster la largeur des colonnes
+                st.dataframe(
+                    df_data,
+                    column_config={
+                        "Chaîne": st.column_config.LinkColumn(
+                            label="Chaîne",
+                            width="small",
+                            display_text="Chaîne"  # Texte affiché pour le lien
+                        ),
+                        "Vidéo": st.column_config.LinkColumn(
+                            label="Vidéo",
+                            width="small",
+                            display_text="Vidéo"  # Texte affiché pour le lien
+                        ),
+                        "Date": st.column_config.TextColumn(width="medium"),
+                        "Mot-clé": st.column_config.TextColumn(width="medium"),
+                        "Réponse": st.column_config.TextColumn(width="large")
+                    },
+                    use_container_width=True
+                )
             else:
                 st.info("Aucune réponse postée trouvée dans la base.")
 
@@ -918,6 +1025,9 @@ class AutomarketPlugin(Plugin):
                         progress_bar.progress(
                             min(current_step / total_steps, 1.0))
 
+                    self.log_selected_videos(
+                        "monitor", filtered_videos, selected_keyword)
+                    st.info(t("automarket_generating_responses"))
                     st.session_state.campaign_responses = self.generate_responses(
                         config, campaign_video, comments)
                     st.session_state.selected_responses = {
@@ -955,6 +1065,9 @@ class AutomarketPlugin(Plugin):
                             f"Video: [{excluded['video_title']}](https://www.youtube.com/watch?v={excluded['video_id']})")
                         st.write(f"Published: {excluded['published_at']}")
                         st.write("---")
+
+            self.log_rejected_videos(
+                "monitor", st.session_state.rejected_videos)
 
             if st.session_state.campaign_responses:
                 self.display_responses("monitor", config, campaign_video,
