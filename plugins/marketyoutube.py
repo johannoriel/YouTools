@@ -645,7 +645,6 @@ class MarketyoutubePlugin(Plugin):
                     except Exception as e:
                         print(f"Database error: {str(e)}")
 
-
             filter_type = st.selectbox(
                 t("marketyoutube_filter_label"),
                 options=list(filter_options.keys()),
@@ -736,7 +735,7 @@ class MarketyoutubePlugin(Plugin):
                 "Vous pouvez vérifier l'usage réel du quota ici : [Google Cloud Console Quotas](https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas?hl=fr&inv=1&invt=AbrCIQ&pageState=(%22allQuotasTable%22%253A(%22c%22%253A%5B%22displayDimensions%22%5D)))")
             # Création d'une instance pour accéder à set_global_quota_usage
             youtube_api = YoutubeAPI(config)
-            current_quota = youtube_api.get_quota_usage(config)['quota_usage']
+            current_quota = youtube_api.get_quota_usage()['quota_usage']
             st.write(f"Quota estimé actuel : {current_quota} unités")
             forced_quota = st.number_input(
                 "Forcer la valeur du quota utilisé (unités)",
