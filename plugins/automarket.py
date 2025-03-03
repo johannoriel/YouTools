@@ -40,6 +40,9 @@ translations["en"].update({
     "automarket_collapse_all": "Collapse All",
     "automarket_debug_mode": "Debug Mode",
     "automarket_max_comments_debug": "Max Comments in Debug Mode",
+    "automarket_excluded_comments": "Excluded Comments (Log)",
+    "automarket_exclusion_keyword": "Exclusion Keyword",
+    "automarket_quota_consumed": "Quota consumed during campaign: {units} units"
 })
 
 translations["fr"].update({
@@ -72,6 +75,9 @@ translations["fr"].update({
     "automarket_collapse_all": "Tout replier",
     "automarket_debug_mode": "Mode Debug",
     "automarket_max_comments_debug": "Nombre max de commentaires en mode Debug",
+    "automarket_excluded_comments": "Commentaires Exclus (Log)",
+    "automarket_exclusion_keyword": "Mot-clé d'Exclusion",
+    "automarket_quota_consumed": "Quota consommé pendant la campagne : {units} unités"
 })
 
 
@@ -128,7 +134,12 @@ class AutomarketPlugin(Plugin):
                 "type": "textarea",
                 "label": "LLM Prompt for Responses",
                 "default": """Suggest a concise response (<500 chars) to this comment, promoting the video at {url} (mention it). Use a direct tone, as if you're the commenter, inspired by this transcript: {transcript}"""
-            }
+            },
+            "exclusion_keyword": {
+                "type": "text",
+                "label": "Keyword to Exclude Comments",
+                "default": "Stop"
+            },
         }
 
     def get_tabs(self):
@@ -270,72 +281,86 @@ class AutomarketPlugin(Plugin):
                 break
         return videos[:max_videos]
 
-    def generate_responses(self, config, campaign_video: Dict[str, Any], comments: List[Dict[str, Any]], max_comments_debug: int = None):
-        """Génère les réponses pour les commentaires avec limite en mode debug."""
-        responses = []
-        total_comments = min(
-            len(comments), max_comments_debug) if max_comments_debug else len(comments)
-        progress_bar = st.progress(0)
-        progress_text = st.empty()
+        def generate_responses(self, config, campaign_video: Dict[str, Any], comments: List[Dict[str, Any]], max_comments_debug: int = None):
+            """Génère les réponses tout en excluant celles marquées par le mot-clé d'exclusion."""
+            responses = []
+            total_comments = min(
+                len(comments), max_comments_debug) if max_comments_debug else len(comments)
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
+            exclusion_keyword = config['automarket']['exclusion_keyword'].strip(
+            )
 
-        prompt = config['automarket']['response_prompt'].format(
-            url=campaign_video['url'],
-            transcript=campaign_video.get('transcript', '')
-        )
+            prompt = config['automarket']['response_prompt'].format(
+                url=campaign_video['url'],
+                transcript=campaign_video.get('transcript', '')
+            )
 
-        for idx, comment in enumerate(comments[:total_comments]):
-            progress = (idx + 1) / total_comments
-            progress_bar.progress(progress)
-            progress_text.text(
-                t("automarket_progress").format(idx + 1, total_comments))
+            for idx, comment in enumerate(comments[:total_comments]):
+                progress = (idx + 1) / total_comments
+                progress_bar.progress(progress)
+                progress_text.text(
+                    t("automarket_progress").format(idx + 1, total_comments))
 
-            comment_context = f"Comment by {comment['author']} on {comment['video_title']} from {comment['channel_title']}:\n{comment['text']}"
-            try:
-                llm_response = self.ragllm_plugin.process_with_llm(
-                    prompt,
-                    config.get('ragllm', {}).get('llm_sys_prompt', ''),
-                    comment_context
-                )
-                clean_response = llm_response.strip()
-                if clean_response.startswith('"') and clean_response.endswith('"'):
-                    clean_response = clean_response[1:-1]
-                responses.append({
-                    'comment_id': comment['id'],
-                    'response': clean_response,
-                    'target_video_id': comment['video_id'],
-                    'comment_text': comment['text'],
-                    'channel_id': comment['channel_id'],
-                    'channel_title': comment['channel_title'],
-                    'video_title': comment['video_title'],
-                    'view_count': comment.get('view_count', 0),
-                    'like_count': comment.get('like_count', 0),
-                    'comment_count': comment.get('comment_count', 0),
-                    'days_old': comment.get('days_old', 0),
-                    'subscriber_count': comment.get('subscriber_count', 0),
-                    'keyword': comment.get('keyword', 'unknown'),
-                    'criterion': comment.get('criterion', 'unknown')
-                })
-            except Exception as e:
-                responses.append({
-                    'comment_id': comment['id'],
-                    'response': f"Error: {str(e)}",
-                    'target_video_id': comment['video_id'],
-                    'comment_text': comment['text'],
-                    'channel_id': comment['channel_id'],
-                    'channel_title': comment['channel_title'],
-                    'video_title': comment['video_title'],
-                    'view_count': comment.get('view_count', 0),
-                    'like_count': comment.get('like_count', 0),
-                    'comment_count': comment.get('comment_count', 0),
-                    'days_old': comment.get('days_old', 0),
-                    'subscriber_count': comment.get('subscriber_count', 0),
-                    'keyword': comment.get('keyword', 'unknown'),
-                    'criterion': comment.get('criterion', 'unknown')
-                })
+                comment_context = f"Comment by {comment['author']} on {comment['video_title']} from {comment['channel_title']}:\n{comment['text']}"
+                try:
+                    llm_response = self.ragllm_plugin.process_with_llm(
+                        prompt,
+                        config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                        comment_context
+                    )
+                    clean_response = llm_response.strip()
+                    if clean_response.startswith('"') and clean_response.endswith('"'):
+                        clean_response = clean_response[1:-1]
 
-        progress_bar.empty()
-        progress_text.empty()
-        return responses
+                    # Vérification du mot-clé d'exclusion
+                    if clean_response.strip() == exclusion_keyword:
+                        st.session_state.excluded_comments.append({
+                            'text': comment['text'],
+                            'author': comment['author'],
+                            'video_title': comment['video_title'],
+                            'video_id': comment['video_id'],
+                            'published_at': comment['published_at']
+                        })
+                        continue
+
+                    responses.append({
+                        'comment_id': comment['id'],
+                        'response': clean_response,
+                        'target_video_id': comment['video_id'],
+                        'comment_text': comment['text'],
+                        'channel_id': comment['channel_id'],
+                        'channel_title': comment['channel_title'],
+                        'video_title': comment['video_title'],
+                        'view_count': comment.get('view_count', 0),
+                        'like_count': comment.get('like_count', 0),
+                        'comment_count': comment.get('comment_count', 0),
+                        'days_old': comment.get('days_old', 0),
+                        'subscriber_count': comment.get('subscriber_count', 0),
+                        'keyword': comment.get('keyword', 'unknown'),
+                        'criterion': comment.get('criterion', 'unknown')
+                    })
+                except Exception as e:
+                    responses.append({
+                        'comment_id': comment['id'],
+                        'response': f"Error: {str(e)}",
+                        'target_video_id': comment['video_id'],
+                        'comment_text': comment['text'],
+                        'channel_id': comment['channel_id'],
+                        'channel_title': comment['channel_title'],
+                        'video_title': comment['video_title'],
+                        'view_count': comment.get('view_count', 0),
+                        'like_count': comment.get('like_count', 0),
+                        'comment_count': comment.get('comment_count', 0),
+                        'days_old': comment.get('days_old', 0),
+                        'subscriber_count': comment.get('subscriber_count', 0),
+                        'keyword': comment.get('keyword', 'unknown'),
+                        'criterion': comment.get('criterion', 'unknown')
+                    })
+
+            progress_bar.empty()
+            progress_text.empty()
+            return responses
 
     def post_responses(self, selected_responses):
         """Poste les réponses sélectionnées."""
@@ -421,7 +446,7 @@ class AutomarketPlugin(Plugin):
         # Affichage du quota restant
         quota_info = self.youtube_api.get_quota_usage(config)
         st.info(
-            f"Quota : {quota_info['remaining_percentage']:.2f}% ({quota_info['quota_usage']} / {quota_info['quota_limit']})")
+            f"Quota : {quota_info['usage_percentage']:.2f}% ({quota_info['quota_usage']} / {quota_info['quota_limit']})")
 
         # 3. Lancement de la campagne avec barre de progression
         if st.button(t("automarket_start_campaign")):
@@ -521,6 +546,17 @@ class AutomarketPlugin(Plugin):
                     st.write(t("automarket_rejected_reason").format(
                         rejected['reason']))
                     st.write(f"Stats: {rejected['stats']}")
+                    st.write("---")
+
+        # Affichage des commentaires exclus
+        if st.session_state.excluded_comments:
+            with st.expander(t("automarket_excluded_comments")):
+                for excluded in st.session_state.excluded_comments:
+                    st.write(f"Comment: {excluded['text']}")
+                    st.write(f"Author: {excluded['author']}")
+                    st.write(
+                        f"Video: [{excluded['video_title']}](https://www.youtube.com/watch?v={excluded['video_id']})")
+                    st.write(f"Published: {excluded['published_at']}")
                     st.write("---")
 
         if st.session_state.campaign_responses:
