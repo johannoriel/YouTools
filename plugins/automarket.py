@@ -47,6 +47,9 @@ translations["en"].update({
     "automarket_search_keywords": "Search by Keywords",
     "automarket_search_trusted": "Search in Trusted Channels",
     "promoteyoutube_response_to_comment": "Response to:",
+    "automarket_posting": "Posting responses...",
+    "automarket_select_all": "Select All",
+    "automarket_deselect_all": "Deselect All",
 })
 
 translations["fr"].update({
@@ -86,6 +89,9 @@ translations["fr"].update({
     "automarket_search_keywords": "Recherche par Mots-clés",
     "automarket_search_trusted": "Recherche dans les Chaînes de Confiance",
     "promoteyoutube_response_to_comment": "Réponse à:",
+    "automarket_posting": "Post des réponses ...",
+    "automarket_select_all": "Tout sélectionner",
+    "automarket_deselect_all": "Tout désélectionner",
 })
 
 
@@ -437,6 +443,7 @@ class AutomarketPlugin(Plugin):
             value=int(config['automarket']['trusted_channel_videos']),
             key="automarket_trusted_channel_videos"
         )
+        # Cases à cocher pour choisir les sources de recherche
         search_keywords = st.checkbox(
             t("automarket_search_keywords"), value=True, key="automarket_search_keywords")
         search_trusted = st.checkbox(
@@ -454,14 +461,14 @@ class AutomarketPlugin(Plugin):
                 key="automarket_max_comments_debug"
             )
 
-        # Nouvelle option : Combine Keywords
+        # Option : Combine Keywords
         combine_keywords = st.checkbox(
             "Combine Keywords", value=False, key="automarket_combine_keywords")
 
         # Affichage du quota restant
         quota_info = self.youtube_api.get_quota_usage(config)
         st.info(
-            f"Quota : {quota_info['usage_percentage']:.2f}% ({quota_info['quota_usage']} / {quota_info['quota_limit']})")
+            f"Quota restant : {quota_info['remaining_percentage']:.2f}% ({quota_info['quota_limit'] - quota_info['quota_usage']} unités sur {quota_info['quota_limit']})")
 
         # 3. Lancement de la campagne avec barre de progression
         if st.button(t("automarket_start_campaign")):
@@ -471,7 +478,6 @@ class AutomarketPlugin(Plugin):
                 st.session_state.excluded_comments = []
                 target_videos = []
 
-                # Initialisation de la barre de progression
                 progress_bar = st.progress(0)
                 num_keywords = len(campaign_video['keywords'])
                 total_steps = 0
@@ -479,7 +485,7 @@ class AutomarketPlugin(Plugin):
                     total_steps += 1 if combine_keywords else num_keywords
                 if search_trusted:
                     total_steps += num_keywords
-                total_steps += 1  # Pour la génération
+                total_steps += 1
                 current_step = 0
 
                 # Recherche des vidéos
@@ -553,11 +559,14 @@ class AutomarketPlugin(Plugin):
 
                 progress_bar.empty()
 
-                # Affichage du quota consommé à la fin
+                # Sauvegarde des commentaires pour regénération
+                st.session_state.current_comments = comments
+
+                # Affichage du quota consommé
                 quota_used = self.youtube_api.quota_usage - initial_quota
                 st.info(t("automarket_quota_consumed").format(units=quota_used))
 
-        # 4. Affichage des résultats
+        # Affichage des résultats
         if st.session_state.rejected_videos:
             with st.expander(t("automarket_rejected_videos")):
                 for rejected in st.session_state.rejected_videos:
@@ -574,7 +583,6 @@ class AutomarketPlugin(Plugin):
                     st.write(f"Stats: {rejected['stats']}")
                     st.write("---")
 
-        # Affichage des commentaires exclus
         if st.session_state.excluded_comments:
             with st.expander(t("automarket_excluded_comments")):
                 for excluded in st.session_state.excluded_comments:
@@ -594,6 +602,50 @@ class AutomarketPlugin(Plugin):
             with col2:
                 if st.button(t("automarket_collapse_all")):
                     st.session_state.expand_all = False
+
+            # Boîte de texte pour le nouveau prompt, initialisée avec le défaut
+            default_prompt = config['automarket']['response_prompt']
+            new_prompt = st.text_area(
+                "Nouveau prompt pour regénérer les réponses",
+                value=default_prompt,
+                height=150,
+                key="regen_prompt"
+            )
+
+            # Bouton pour regénérer les réponses
+            if st.button("Regénérer les réponses"):
+                if 'current_comments' in st.session_state:
+                    with st.spinner("Regénération des réponses..."):
+                        # Sauvegarde temporaire du prompt original
+                        original_prompt = config['automarket']['response_prompt']
+                        # Mise à jour temporaire du prompt dans la config
+                        config['automarket']['response_prompt'] = new_prompt
+                        # Regénération
+                        st.session_state.campaign_responses = self.generate_responses(
+                            config, campaign_video, st.session_state.current_comments, max_comments_debug if debug_mode else None)
+                        st.session_state.selected_responses = {
+                            i: not debug_mode for i in range(len(st.session_state.campaign_responses))}
+                        # Restauration du prompt original
+                        config['automarket']['response_prompt'] = original_prompt
+                        st.success("Réponses regénérées avec succès !")
+                else:
+                    st.warning(
+                        "Aucune campagne précédente trouvée pour regénération.")
+
+            # Boutons pour tout sélectionner/tout désélectionner
+            col3, col4 = st.columns(2)
+            with col3:
+                if st.button(t("automarket_select_all")):
+                    for i in range(len(st.session_state.campaign_responses)):
+                        # False = incluse
+                        st.session_state.selected_responses[i] = False
+                    st.rerun()  # Forcer un rerun pour mettre à jour l'affichage
+            with col4:
+                if st.button(t("automarket_deselect_all")):
+                    for i in range(len(st.session_state.campaign_responses)):
+                        # True = exclue
+                        st.session_state.selected_responses[i] = True
+                    st.rerun()  # Forcer un rerun pour mettre à jour l'affichage
 
             exclusion_keyword = config['automarket']['exclusion_keyword'].strip(
             )
@@ -629,7 +681,6 @@ class AutomarketPlugin(Plugin):
                     st.write(
                         f"{t('automarket_response')}: {response['response']}")
 
-                    # Gestion correcte de la case à cocher pour chaque réponse
                     current_value = st.session_state.selected_responses.get(
                         i, False)
                     new_value = st.checkbox(
@@ -639,7 +690,6 @@ class AutomarketPlugin(Plugin):
                     )
                     st.session_state.selected_responses[i] = new_value
 
-            # 5. Bouton pour poster les réponses
             if st.button(t("automarket_post_responses")):
                 with st.spinner(t("automarket_posting")):
                     selected_responses = [r for i, r in enumerate(st.session_state.campaign_responses)
