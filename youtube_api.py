@@ -811,3 +811,22 @@ class YoutubeAPI:
             order=order,
             language="fr"  # Peut être configuré plus tard
         )
+
+    def get_transcript(self, video_id, language):
+        from youtube_transcript_api import YouTubeTranscriptApi
+        from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
+        try:
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
+        except NoTranscriptAvailable:
+            try:
+                transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            except TranscriptsDisabled:
+                return t("recent_videos_transcripts_disabled"), "N/A"
+            except NoTranscriptAvailable:
+                return t("recent_videos_no_transcript_available"), "N/A"
+            except Exception as e:
+                return f"{t('recent_videos_transcript_error')}{str(e)}", "N/A"
+
+        full_transcript = " ".join([entry['text'] for entry in transcript])
+
+        return full_transcript, language

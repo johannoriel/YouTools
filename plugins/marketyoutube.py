@@ -72,6 +72,7 @@ translations["en"].update({
     "marketyoutube_url": "URL",
     "marketyoutube_published": "Published",
     "marketyoutube_status": "Status",
+    "marketyoutube_sync_transcripts": "Sync Transcripts",
 })
 
 translations["fr"].update({
@@ -139,6 +140,7 @@ translations["fr"].update({
     "marketyoutube_url": "URL",
     "marketyoutube_published": "Publié",
     "marketyoutube_status": "Statut",
+    "marketyoutube_sync_transcripts": "Synchroniser les transcripts",
 })
 
 
@@ -218,7 +220,7 @@ class MarketyoutubePlugin(Plugin):
         )
         return [kw.strip() for kw in llm_response.split(",")]
 
-    def display_video_database(self, filter_type: str, keyword: str, page: int, keyword_filter: List[str] = None):
+    def display_video_database(self, config, filter_type: str, keyword: str, page: int, keyword_filter: List[str] = None):
         videos = get_videos(filter_type, keyword, page,
                             keyword_filter=keyword_filter)
         total_videos = len(videos)
@@ -234,6 +236,28 @@ class MarketyoutubePlugin(Plugin):
                 col2.markdown(f"[{video['title']}]({video['url']})")
                 col2.write(f"Published: {video['published_at']}")
                 col2.write(f"Status: {video['status']}")
+                transcript = get_video_transcript(video['video_id'])
+                if transcript:
+                    st.text_area("Transcription de la vidéo sélectionnée",
+                                 value=transcript, key=f"video_transcript_{video['video_id']}", height=150, disabled=True)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button(t("Copy"), key=f"video_transcript_copy_{video['video_id']}"):
+                            st.code(transcript)
+                    with col2:
+                        st.download_button(
+                            label=t("Download"),
+                            key=f"video_transcript_download_{video['video_id']}",
+                            data=transcript,
+                            file_name=f"transcript_{video['video_id']}.txt",
+                            mime="text/plain"
+                        )
+                else:
+                    if st.button("Transcript>>>", key=f"get_transcript_{video['video_id']}"):
+                        transcript, lang = self.youtube_api.get_transcript(
+                            video['video_id'], config['common']['language'])
+                        save_transcript(video['video_id'], transcript)
+                        st.success("Transcript saved.")
 
                 current_keywords = ", ".join(
                     video['keywords']) if video['keywords'] else "No keywords"
@@ -388,6 +412,58 @@ class MarketyoutubePlugin(Plugin):
                 insert_stats_snapshot(video['video_id'], timestamp, stats)
             if progress_callback:
                 progress_callback((i + 1) / total_videos)
+
+    def sync_transcripts(self, channel_id: str, youtube_api, config):
+        """Synchronise les transcripts pour toutes les vidéos du canal qui n'en ont pas encore."""
+        videos = get_videos()  # Récupère toutes les vidéos de la base
+        total_videos = len(videos)
+        processed = 0
+        successes = 0
+        errors = []
+
+        with st.spinner(t("marketyoutube_syncing")):
+            # Créer la barre de progression une seule fois avant la boucle
+            progress_bar = st.progress(0)
+
+            for video in videos:
+                # Vérifie si le transcript est vide ou inexistant
+                current_transcript = get_video_transcript(video['video_id'])
+                if not current_transcript:
+                    try:
+                        transcript, lang = youtube_api.get_transcript(
+                            video['video_id'],
+                            config['common']['language']
+                        )
+                        if transcript:
+                            save_transcript(video['video_id'], transcript)
+                            successes += 1
+                        else:
+                            errors.append(
+                                f"{video['title']} ({video['video_id']}): No transcript available")
+                    except Exception as e:
+                        error_msg = f"{video['title']} ({video['video_id']}): {str(e)}"
+                        errors.append(error_msg)
+                        # Optionnel : pour debug, tu peux afficher chaque erreur immédiatement
+                        # st.warning(error_msg)
+
+                processed += 1
+                # Mettre à jour la barre existante
+                progress_bar.progress(processed / total_videos)
+
+            # Nettoyer la barre de progression
+            progress_bar.empty()
+
+            # Afficher un résumé des résultats
+            if total_videos > 0:
+                st.success(t("marketyoutube_sync_complete"))
+                st.write(
+                    f"Transcripts synchronisés avec succès : {successes}/{total_videos}")
+                if errors:
+                    with st.expander("Détails des erreurs"):
+                        for error in errors:
+                            st.write(error)
+            else:
+                st.info("Aucune vidéo à synchroniser.")
 
     def display_channel_manager(self, config):
         youtube_api = YoutubeAPI(self.plugin_manager.config)
@@ -624,20 +700,24 @@ class MarketyoutubePlugin(Plugin):
         # Tab 1: Videos
         with tab1:
             st.header(t("marketyoutube_header_videos"))
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 if st.button(t("marketyoutube_sync")):
                     with st.spinner(t("marketyoutube_syncing")):
-                        sync_videos(config['common']
-                                    ['channel_id'], self.youtube_api)
+                        sync_videos(
+                            config['common']['channel_id'], self.youtube_api)
                         st.success(t("marketyoutube_sync_complete"))
             with col2:
+                if st.button(t("marketyoutube_sync_transcripts")):  # Nouveau bouton
+                    self.sync_transcripts(
+                        config['common']['channel_id'], self.youtube_api, config)
+            with col3:
                 if st.button("Reset Database Structure"):
                     with st.spinner("Resetting database..."):
                         reset_database()
-                        st.success("Database structure reset successfully!")
-
-            with col3:
+                        st.success(
+                            "Database structure reset successfully!")
+            with col4:
                 if st.button("Upgrade Database Structure"):
                     try:
                         auto_upgrade_database()
@@ -671,12 +751,12 @@ class MarketyoutubePlugin(Plugin):
                 value=1,
                 key="page_videos"
             )
-            self.display_video_database(
-                filter_options[filter_type],
-                keyword,
-                page,
-                keyword_filter=selected_keyword_filter if selected_keyword_filter else None
-            )
+            self.display_video_database(config,
+                                        filter_options[filter_type],
+                                        keyword,
+                                        page,
+                                        keyword_filter=selected_keyword_filter if selected_keyword_filter else None
+                                        )
 
         # Tab 2: Stats
         with tab2:

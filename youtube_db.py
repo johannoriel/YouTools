@@ -631,5 +631,33 @@ def get_response_count_by_channel(channel_id: str) -> int:
     return count
 
 
+def get_video_transcript(video_id: str) -> Optional[str]:
+    """Récupère le transcript d'une vidéo depuis la base de données."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT transcript FROM videos WHERE video_id = ?", (video_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result['transcript'] if result and result['transcript'] else None
+
+
+def save_transcript(video_id: str, transcript: str):
+    """Sauvegarde ou met à jour la transcription d'une vidéo dans la base."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE videos SET transcript = ? WHERE video_id = ?
+    """, (transcript, video_id))
+    # Si la vidéo n'existe pas encore, on l'insère (optionnel, selon ton cas)
+    if cursor.rowcount == 0:
+        cursor.execute("""
+            INSERT INTO videos (video_id, transcript) VALUES (?, ?)
+            ON CONFLICT(video_id) DO UPDATE SET transcript = excluded.transcript
+        """, (video_id, transcript))
+    conn.commit()
+    conn.close()
+
+
 if __name__ == "__main__":
     initialize_database()
