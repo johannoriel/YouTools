@@ -406,7 +406,7 @@ class AutomarketPlugin(Plugin):
         for response in selected_responses:
             video_id = response['target_video_id']
             comment_id = response['comment_id']
-            if not check_existing_response(video_id, comment_id):
+            if not check_existing_response(video_id, comment_id) :
                 try:
                     api_response = self.youtube_api.post_comment_reply(
                         comment_id, response['response'])
@@ -414,6 +414,8 @@ class AutomarketPlugin(Plugin):
                         response_id = api_response.get('id')
                         moderation_status = api_response.get(
                             'moderation_status', 'unknown')
+                        st.info(api_response)
+                        st.info(moderation_status)
                         if moderation_status != 'published':  # Si différent de published, on compte comme modéré
                             moderated_count += 1
                         save_response(
@@ -653,6 +655,90 @@ class AutomarketPlugin(Plugin):
         st.markdown(
             f"Quota restant : {quota_info['remaining_percentage']:.2f}% restant ({quota_info['quota_usage']} unités sur {quota_info['quota_limit']}) [Check](https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas?hl=fr&inv=1&invt=AbrUGw&pageState=(%22allQuotasTable%22%253A(%22c%22%253A%5B%22displayDimensions%22%5D)))")
 
+    def fetch_monitor_videos(self, selected_keyword: str, max_videos_per_keyword: int, expiry_days: int, min_subscribers: int, view_threshold: int, search_time: bool, search_relevant: bool, search_trusted: bool) -> List[Dict[str, Any]]:
+        """Récupère les vidéos pour l'onglet Surveiller les tendances avec filtrage de langue."""
+        target_videos = []
+        if search_time:
+            videos = self.youtube_api.search_videos(
+                selected_keyword, max_videos_per_keyword, order="date",
+                language=st.session_state.lang)
+            target_videos.extend([v for v in videos if v['days_old'] <=
+                                 expiry_days and v['language'] == st.session_state.lang])
+
+        if search_relevant:
+            videos = self.youtube_api.search_videos(
+                selected_keyword, max_videos_per_keyword, order="relevance",
+                language=st.session_state.lang)
+            target_videos.extend([v for v in videos if v['days_old'] <=
+                                 expiry_days and v['language'] == st.session_state.lang])
+
+        if search_trusted:
+            trusted_channels = [ch for ch in get_target_channels(
+            ) if selected_keyword in ch['keywords']]
+            for channel in trusted_channels:
+                videos = self.youtube_api.get_channel_recent_videos(
+                    channel['channel_id'], max_results=max_videos_per_keyword)
+                target_videos.extend([v for v in videos if v['days_old'] <=
+                                     expiry_days and v['language'] == st.session_state.lang])
+
+        # Filtrer selon les critères
+        filtered_videos = []
+        for video in target_videos:
+            last_comment = self.youtube_api.get_comments(
+                video['video_id'], max_results=1, order="time")
+            last_comment_days = (datetime.now(pytz.UTC) - datetime.strptime(
+                last_comment[0]['published_at'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)).days if last_comment else expiry_days + 1
+
+            reject_reason = []
+            if video['subscriber_count'] < min_subscribers:
+                reject_reason.append(
+                    f"Subscribers ({video['subscriber_count']} < {min_subscribers})")
+            if last_comment_days > expiry_days:
+                reject_reason.append(
+                    f"Last comment ({last_comment_days} days > {expiry_days})")
+            if video['view_count'] < view_threshold:
+                reject_reason.append(
+                    f"Views ({video['view_count']} < {view_threshold})")
+
+            if not reject_reason:
+                filtered_videos.append(video)
+            else:
+                st.session_state.rejected_videos.append({
+                    'title': video['title'],
+                    'url': video['url'],
+                    'channel_title': video['channel_title'],
+                    'reason': ", ".join(reject_reason),
+                    'stats': {
+                        'subscribers': video['subscriber_count'],
+                        'views': video['view_count'],
+                        'days_old': video['days_old'],
+                        'last_comment_days': last_comment_days
+                    },
+                    'keyword': selected_keyword,
+                    'criterion': 'monitor'
+                })
+        return filtered_videos
+
+    def fetch_monitor_comments(self, videos: List[Dict[str, Any]], comments_per_video: int, selected_keyword: str) -> List[Dict[str, Any]]:
+        """Récupère les commentaires pour les vidéos sélectionnées."""
+        comments = []
+        for video in videos:
+            video_comments = self.youtube_api.get_comments(
+                video['video_id'], max_results=comments_per_video, order="relevance")
+            for comment in video_comments:
+                comment['video_title'] = video['title']
+                comment['channel_title'] = video['channel_title']
+                comment['channel_id'] = video['channel_id']
+                comment['view_count'] = video['view_count']
+                comment['like_count'] = video['like_count']
+                comment['comment_count'] = video['comment_count']
+                comment['days_old'] = video['days_old']
+                comment['subscriber_count'] = video['subscriber_count']
+                comment['keyword'] = selected_keyword
+                comment['criterion'] = 'monitor'
+            comments.extend(video_comments)
+        return comments
+
     def run(self, config):
         tab1, tab2, tab3 = st.tabs(
             ["Lancer une campagne", "Réponses existantes", t("monitor_trends_tab")])
@@ -855,7 +941,9 @@ class AutomarketPlugin(Plugin):
                         "Date": posted_at.strftime("%Y-%m-%d"),  # Sans l'heure
                         "Chaîne": f"https://www.youtube.com/channel/{r['channel_id']}",
                         "Vidéo": f"https://www.youtube.com/watch?v={r['video_id']}&lc={r['comment_id']}",
-                        "Réponse": r['response_text']
+                        "Réponse": r['response_text'],
+                        # Ajout du statut de modération
+                        "Statut": r['moderation_status']
                     })
                 # Ajuster la largeur des colonnes
                 st.dataframe(
@@ -864,16 +952,18 @@ class AutomarketPlugin(Plugin):
                         "Chaîne": st.column_config.LinkColumn(
                             label="Chaîne",
                             width="small",
-                            display_text="Chaîne"  # Texte affiché pour le lien
+                            display_text="Chaîne"
                         ),
                         "Vidéo": st.column_config.LinkColumn(
                             label="Vidéo",
                             width="small",
-                            display_text="Vidéo"  # Texte affiché pour le lien
+                            display_text="Vidéo"
                         ),
                         "Date": st.column_config.TextColumn(width="medium"),
                         "Mot-clé": st.column_config.TextColumn(width="medium"),
-                        "Réponse": st.column_config.TextColumn(width="large")
+                        "Réponse": st.column_config.TextColumn(width="large"),
+                        # Nouvelle colonne
+                        "Statut": st.column_config.TextColumn(width="medium")
                     },
                     use_container_width=True
                 )
@@ -883,7 +973,6 @@ class AutomarketPlugin(Plugin):
         with tab3:
             st.header(t("monitor_trends_header"))
 
-            # Récupérer tous les mots-clés uniques des chaînes de confiance et vidéos
             all_keywords = set()
             for channel in get_target_channels():
                 all_keywords.update(channel['keywords'])
@@ -900,7 +989,6 @@ class AutomarketPlugin(Plugin):
                 key="monitor_keyword"
             )
 
-            # Critères de recherche
             st.subheader(t("monitor_trends_search_criteria"))
             search_time = st.checkbox(
                 t("monitor_trends_time"), value=True, key="monitor_time")
@@ -909,7 +997,6 @@ class AutomarketPlugin(Plugin):
             search_trusted = st.checkbox(
                 t("monitor_trends_trusted"), value=True, key="monitor_trusted")
 
-            # Paramètres existants
             comments_per_video = st.number_input(
                 t("automarket_comments_per_video"),
                 min_value=1,
@@ -943,131 +1030,60 @@ class AutomarketPlugin(Plugin):
 
             self.display_quota()
 
-            if st.button(t("automarket_start_campaign"), key="monitor_start_campaign"):
+            # Ajout des trois boutons
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                fetch_videos_btn = st.button(
+                    "Récupérer les vidéos", key="monitor_fetch_videos")
+            with col2:
+                fetch_comments_btn = st.button(
+                    "Récupérer les commentaires", key="monitor_fetch_comments")
+            with col3:
+                generate_responses_btn = st.button(
+                    "Générer les réponses", key="monitor_generate_responses")
+            with col4:
+                start_campaign_btn = st.button(
+                    t("automarket_start_campaign"), key="monitor_start_campaign")
+
+            campaign_video = next(
+                (v for v in get_videos() if selected_keyword in v['keywords']), None)
+            if not campaign_video:
+                st.error(
+                    f"Aucune vidéo personnelle trouvée pour le mot-clé {selected_keyword}")
+                return
+
+            if fetch_videos_btn or start_campaign_btn:
                 with st.spinner(t("automarket_processing")):
-                    campaign_timestamp = datetime.now(pytz.UTC).isoformat()
+                    st.session_state.campaign_timestamp = datetime.now(
+                        pytz.UTC).isoformat()
                     initial_quota = self.youtube_api.quota_usage
                     st.session_state.rejected_videos = []
                     st.session_state.excluded_comments = []
-                    target_videos = []
-
-                    progress_bar = st.progress(0)
-                    # 2 étapes par critère : fetch + comments
-                    total_steps = (
-                        search_time + search_relevant + search_trusted) * 2
-                    current_step = 0
-
-                    # Trouver une vidéo personnelle correspondante
-                    campaign_video = next(
-                        (v for v in get_videos() if selected_keyword in v['keywords']), None)
-                    if not campaign_video:
-                        st.error(
-                            f"Aucune vidéo personnelle trouvée pour le mot-clé {selected_keyword}")
-                        return
-
-                    # Recherche par time
-                    if search_time:
-                        videos = self.youtube_api.search_videos(
-                            selected_keyword, max_videos_per_keyword, order="date",
-                            language=st.session_state.lang)
-                        target_videos.extend(
-                            [v for v in videos if v['days_old'] <= expiry_days])
-                        current_step += 1
-                        progress_bar.progress(
-                            min(current_step / total_steps, 1.0))
-
-                    # Recherche par relevance
-                    if search_relevant:
-                        videos = self.youtube_api.search_videos(
-                            selected_keyword, max_videos_per_keyword, order="relevance",
-                            language=st.session_state.lang)
-                        target_videos.extend(
-                            [v for v in videos if v['days_old'] <= expiry_days])
-                        current_step += 1
-                        progress_bar.progress(
-                            min(current_step / total_steps, 1.0))
-
-                    # Recherche dans les chaînes de confiance
-                    if search_trusted:
-                        trusted_channels = [ch for ch in get_target_channels(
-                        ) if selected_keyword in ch['keywords']]
-                        for channel in trusted_channels:
-                            videos = self.youtube_api.get_channel_recent_videos(
-                                channel['channel_id'], max_results=max_videos_per_keyword)
-                            target_videos.extend(
-                                [v for v in videos if v['days_old'] <= expiry_days])
-                        current_step += 1
-                        progress_bar.progress(
-                            min(current_step / total_steps, 1.0))
-
-                    # Filtrer les vidéos selon les critères
-                    filtered_videos = []
-                    for video in target_videos:
-                        last_comment = self.youtube_api.get_comments(
-                            video['video_id'], max_results=1, order="time")
-                        last_comment_days = (datetime.now(pytz.UTC) - datetime.strptime(
-                            last_comment[0]['published_at'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)).days if last_comment else expiry_days + 1
-
-                        reject_reason = []
-                        if video['subscriber_count'] < min_subscribers:
-                            reject_reason.append(
-                                f"Subscribers ({video['subscriber_count']} < {min_subscribers})")
-                        if last_comment_days > expiry_days:
-                            reject_reason.append(
-                                f"Last comment ({last_comment_days} days > {expiry_days})")
-                        if video['view_count'] < view_threshold:
-                            reject_reason.append(
-                                f"Views ({video['view_count']} < {view_threshold})")
-
-                        if not reject_reason:
-                            filtered_videos.append(video)
-                        else:
-                            st.session_state.rejected_videos.append({
-                                'title': video['title'],
-                                'url': video['url'],
-                                'channel_title': video['channel_title'],
-                                'reason': ", ".join(reject_reason),
-                                'stats': {
-                                    'subscribers': video['subscriber_count'],
-                                    'views': video['view_count'],
-                                    'days_old': video['days_old'],
-                                    'last_comment_days': last_comment_days
-                                },
-                                'keyword': selected_keyword,
-                                'criterion': 'monitor'
-                            })
-
-                    # Générer les commentaires
-                    comments = []
-                    for video in filtered_videos:
-                        video_comments = self.youtube_api.get_comments(
-                            video['video_id'], max_results=comments_per_video, order="relevance")
-                        for comment in video_comments:
-                            comment['video_title'] = video['title']
-                            comment['channel_title'] = video['channel_title']
-                            comment['channel_id'] = video['channel_id']
-                            comment['view_count'] = video['view_count']
-                            comment['like_count'] = video['like_count']
-                            comment['comment_count'] = video['comment_count']
-                            comment['days_old'] = video['days_old']
-                            comment['subscriber_count'] = video['subscriber_count']
-                            comment['keyword'] = selected_keyword
-                            comment['criterion'] = 'monitor'
-                        comments.extend(video_comments)
-                        current_step += 1
-                        progress_bar.progress(
-                            min(current_step / total_steps, 1.0))
-
+                    st.session_state.target_videos = self.fetch_monitor_videos(
+                        selected_keyword, max_videos_per_keyword, expiry_days, min_subscribers,
+                        view_threshold, search_time, search_relevant, search_trusted)
                     self.log_selected_videos(
-                        "monitor", filtered_videos, selected_keyword)
-                    st.info(t("automarket_generating_responses"))
+                        "monitor", st.session_state.target_videos, selected_keyword)
+                    quota_used = self.youtube_api.quota_usage - initial_quota
+                    st.info(t("automarket_quota_consumed").format(
+                        units=quota_used))
+
+            if (fetch_comments_btn or start_campaign_btn) and 'target_videos' in st.session_state:
+                with st.spinner(t("automarket_processing")):
+                    initial_quota = self.youtube_api.quota_usage
+                    st.session_state.current_comments = self.fetch_monitor_comments(
+                        st.session_state.target_videos, comments_per_video, selected_keyword)
+                    quota_used = self.youtube_api.quota_usage - initial_quota
+                    st.info(t("automarket_quota_consumed").format(
+                        units=quota_used))
+
+            if (generate_responses_btn or start_campaign_btn) and 'current_comments' in st.session_state:
+                with st.spinner(t("automarket_generating_responses")):
+                    initial_quota = self.youtube_api.quota_usage
                     st.session_state.campaign_responses = self.generate_responses(
-                        config, campaign_video, comments)
+                        config, campaign_video, st.session_state.current_comments)
                     st.session_state.selected_responses = {
                         i: True for i in range(len(st.session_state.campaign_responses))}
-                    st.session_state.current_comments = comments
-
-                    progress_bar.empty()
                     quota_used = self.youtube_api.quota_usage - initial_quota
                     st.info(t("automarket_quota_consumed").format(
                         units=quota_used))

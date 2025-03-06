@@ -364,6 +364,7 @@ class YoutubeAPI:
             )
             response = request.execute()
             self.track_quota_usage(50)
+            print(response)
 
             # Récupérer le statut de modération depuis snippet.moderationStatus
             moderation_status = response.get('snippet', {}).get(
