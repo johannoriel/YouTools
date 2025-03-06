@@ -125,6 +125,8 @@ class PromoteblueskyPlugin(Plugin):
             response_text = response['response']
             bluesky_api.create_post(response_text, in_reply_to_post_id=post_id)
 
+
+
     def run(self, config):
         st.header(t("promotebluesky_header"))
 
