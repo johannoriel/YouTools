@@ -88,11 +88,17 @@ class PromoteblueskyPlugin(Plugin):
     def get_tabs(self):
         return [{"name": t("promotebluesky_tab"), "plugin": "promotebluesky"}]
 
-    def search_posts(self, keywords, max_posts):
+    def search_posts(self, keywords, max_posts, search_engine="bluesky_manual"):
         bluesky_api = BlueskyAPI(self.plugin_manager.config)
-        query = " OR ".join(keywords)
-        posts = bluesky_api.search_posts(query, max_posts)
-        return posts
+        if search_engine == "bluesky_manual":
+            return bluesky_api.search_posts_manual(keywords, max_posts)
+        elif search_engine == "bluesky_api":
+            return bluesky_api.search_posts_api(keywords, max_posts)
+        elif search_engine == "google":
+            return bluesky_api.search_posts_google(keywords, max_posts)
+        else:
+            st.error("Moteur de recherche non reconnu.")
+            return []
 
     def generate_responses(self, config, selected_posts, transcript, url):
         ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
@@ -155,25 +161,31 @@ class PromoteblueskyPlugin(Plugin):
             st.warning("Please enter keywords to search for posts.")
             return
 
+        # Ajout de la selectbox pour choisir le moteur de recherche
+        search_engine = st.selectbox(
+            "Moteur de recherche",
+            options=["bluesky_manual", "bluesky_api", "google"],
+            format_func=lambda x: "Bluesky API" if x == "bluesky_api" else "Bluesky Manual" if x == "bluesky_manual" else "Google",
+            key="search_engine_select"
+        )
+
         # Search posts button
         if st.button(t("promotebluesky_search")):
             with st.spinner(t("promotebluesky_searching")):
                 max_posts = config['promotebluesky']['max_posts']
-                st.session_state.posts = self.search_posts(keywords, max_posts)
+                st.session_state.posts = self.search_posts(keywords, max_posts, search_engine)
 
                 # Vérification des mots-clés dans les résultats
                 if st.session_state.posts:
-                    keyword_list = [kw.strip().lower() for kw in keywords.split(" OR ")]  # Séparer les mots-clés
+                    keyword_list = [kw.strip().lower() for kw in keywords.split(" OR ")]
                     matching_posts = 0
                     total_posts = len(st.session_state.posts)
 
                     for post in st.session_state.posts:
                         post_text = post['text'].lower()
-                        # Vérifier si au moins un mot-clé est présent
                         if any(keyword in post_text for keyword in keyword_list):
                             matching_posts += 1
 
-                    # Calculer le pourcentage
                     match_percentage = (matching_posts / total_posts) * 100 if total_posts > 0 else 0
                     st.info(f"Pourcentage de posts contenant au moins un mot-clé : {match_percentage:.2f}% "
                             f"({matching_posts}/{total_posts})")

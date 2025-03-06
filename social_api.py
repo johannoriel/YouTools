@@ -13,7 +13,7 @@ import streamlit as st
 import json
 import pytz
 from langdetect import detect
-
+from googlesearch import search
 
 class TwitterAPI:
     def __init__(self, config):
@@ -226,7 +226,7 @@ class BlueskyAPI:
             st.error(f"Bluesky: {str(e)}")
             raise e
 
-    def search_posts(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
+    def search_posts_manual(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
         """
         BUG COTE BLUEKSY => la recherche ne marche pas encore
         Recherche des posts sur Bluesky en fonction des mots-clés.
@@ -282,10 +282,11 @@ class BlueskyAPI:
         :param language: Langue des posts à rechercher (par défaut "fr")
         :return: Liste des posts trouvés
         """
+        bquery = " OR ".join(query.split())
         try:
             # Création des paramètres de recherche
             params = dict(
-                q=query,  # Requête de recherche
+                q=bquery,  # Requête de recherche
                 # Limite le nombre de résultats (max 100)
                 limit=min(int(max_results), 100),
                 lang=language,  # Filtre par langue
@@ -311,6 +312,59 @@ class BlueskyAPI:
             st.error(f"Bluesky API Search Error: {str(e)}")
             st.error("Full traceback:")
             st.code(traceback.format_exc())
+            return []
+
+    def search_posts_google(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
+        """
+        Recherche de posts Bluesky via Google et récupération du contenu via atproto.
+        """
+        try:
+            # Forcer max_results à être un entier
+            max_results = int(max_results)
+
+            # Construire la requête Google avec restriction au domaine Bluesky
+            google_query = f'site:bsky.app "{query}" lang:{language}'
+            print(f"Query google >>>>>>>>>> {google_query}")
+            posts = []
+            for url in search(google_query, num_results=max_results, lang=language):
+                # Vérifier que l'URL est un post Bluesky valide
+                if "/profile/" in url and "/post/" in url:
+                    handle = url.split("/profile/")[1].split("/post/")[0]
+                    post_id = url.split("/post/")[1]
+
+                    # Construire l'URI ATProtocol pour récupérer le post
+                    # Note : Nous avons besoin du DID de l'auteur, mais pour simplifier, on utilise get_post_thread avec l'URI partiel
+                    try:
+                        # Récupérer le post via l'API atproto
+                        post_uri = f"at://{handle}/app.bsky.feed.post/{post_id}"
+                        post_response = self.client.get_post_thread(uri=post_uri)
+
+                        # Extraire les détails du post principal
+                        post = post_response.thread.post
+                        posts.append({
+                            'id': post_id,
+                            'text': post.record.text,
+                            'handle': handle,
+                            'url': url
+                        })
+                    except Exception as post_error:
+                        st.warning(f"Impossible de récupérer le post {post_id} : {str(post_error)}")
+                        # Ajouter un placeholder si la récupération échoue
+                        posts.append({
+                            'id': post_id,
+                            'text': f"[Erreur lors de la récupération du post] (URL: {url})",
+                            'handle': handle,
+                            'url': url
+                        })
+
+            if not posts:
+                st.warning("Aucun post Bluesky trouvé via Google.")
+            return posts
+        except ValueError as ve:
+            st.error(f"Erreur de conversion dans les paramètres : {str(ve)}")
+            return []
+        except Exception as e:
+            st.error(f"Google Search Error: {str(e)}")
             return []
 
     def create_post(self, text: str, in_reply_to_post_id: Optional[str] = None) -> Optional[Dict[str, Any]]:

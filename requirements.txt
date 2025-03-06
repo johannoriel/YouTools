@@ -31,3 +31,4 @@ accelerate
 whisper
 langdetect
 moviepy
+googlesearch-python
