@@ -406,7 +406,7 @@ class AutomarketPlugin(Plugin):
         for response in selected_responses:
             video_id = response['target_video_id']
             comment_id = response['comment_id']
-            if not check_existing_response(video_id, comment_id) :
+            if not check_existing_response(video_id, comment_id):
                 try:
                     api_response = self.youtube_api.post_comment_reply(
                         comment_id, response['response'])
@@ -414,8 +414,6 @@ class AutomarketPlugin(Plugin):
                         response_id = api_response.get('id')
                         moderation_status = api_response.get(
                             'moderation_status', 'unknown')
-                        st.info(api_response)
-                        st.info(moderation_status)
                         if moderation_status != 'published':  # Si différent de published, on compte comme modéré
                             moderated_count += 1
                         save_response(
@@ -465,29 +463,6 @@ class AutomarketPlugin(Plugin):
         with col2:
             if st.button(t("automarket_collapse_all"), key=f"{prefix}_collapse_all"):
                 st.session_state.expand_all = False
-
-        default_prompt = config['automarket']['response_prompt']
-        new_prompt = st.text_area(
-            "Nouveau prompt pour regénérer les réponses",
-            value=default_prompt,
-            height=150,
-            key=f"{prefix}_regen_prompt"
-        )
-
-        if st.button("Regénérer les réponses", key=f"{prefix}_regen_button"):
-            if 'current_comments' in st.session_state:
-                with st.spinner("Regénération des réponses..."):
-                    original_prompt = config['automarket']['response_prompt']
-                    config['automarket']['response_prompt'] = new_prompt
-                    st.session_state.campaign_responses = self.generate_responses(
-                        config, campaign_video, st.session_state.current_comments)
-                    st.session_state.selected_responses = {
-                        i: True for i in range(len(st.session_state.campaign_responses))}
-                    config['automarket']['response_prompt'] = original_prompt
-                    st.success("Réponses regénérées avec succès !")
-            else:
-                st.warning(
-                    "Aucune campagne précédente trouvée pour regénération.")
 
         col3, col4 = st.columns(2)
         with col3:
@@ -544,6 +519,29 @@ class AutomarketPlugin(Plugin):
                     key=f"{prefix}_exclude_{i}"
                 )
                 st.session_state.selected_responses[i] = new_value
+
+        default_prompt = config['automarket']['response_prompt']
+        new_prompt = st.text_area(
+            "Nouveau prompt pour regénérer les réponses",
+            value=default_prompt,
+            height=150,
+            key=f"{prefix}_regen_prompt"
+        )
+
+        if st.button("Regénérer les réponses", key=f"{prefix}_regen_button"):
+            if 'current_comments' in st.session_state:
+                with st.spinner("Regénération des réponses..."):
+                    original_prompt = config['automarket']['response_prompt']
+                    config['automarket']['response_prompt'] = new_prompt
+                    st.session_state.campaign_responses = self.generate_responses(
+                        config, campaign_video, st.session_state.current_comments)
+                    st.session_state.selected_responses = {
+                        i: True for i in range(len(st.session_state.campaign_responses))}
+                    config['automarket']['response_prompt'] = original_prompt
+                    st.success("Réponses regénérées avec succès !")
+            else:
+                st.warning(
+                    "Aucune campagne précédente trouvée pour regénération.")
 
         if st.button(t("automarket_post_responses"), key=f"{prefix}_post_responses"):
             with st.spinner(t("automarket_posting")):
@@ -1030,7 +1028,6 @@ class AutomarketPlugin(Plugin):
 
             self.display_quota()
 
-            # Ajout des trois boutons
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 fetch_videos_btn = st.button(
@@ -1052,13 +1049,24 @@ class AutomarketPlugin(Plugin):
                     f"Aucune vidéo personnelle trouvée pour le mot-clé {selected_keyword}")
                 return
 
+            # Initialisation des variables de session si elles n'existent pas encore
+            if 'target_videos' not in st.session_state:
+                st.session_state.target_videos = []
+            if 'current_comments' not in st.session_state:
+                st.session_state.current_comments = []
+            if 'campaign_responses' not in st.session_state:
+                st.session_state.campaign_responses = []
+            if 'rejected_videos' not in st.session_state:
+                st.session_state.rejected_videos = []
+            if 'excluded_comments' not in st.session_state:
+                st.session_state.excluded_comments = []
+
             if fetch_videos_btn or start_campaign_btn:
                 with st.spinner(t("automarket_processing")):
                     st.session_state.campaign_timestamp = datetime.now(
                         pytz.UTC).isoformat()
                     initial_quota = self.youtube_api.quota_usage
-                    st.session_state.rejected_videos = []
-                    st.session_state.excluded_comments = []
+                    st.session_state.rejected_videos = []  # Réinitialiser uniquement ici
                     st.session_state.target_videos = self.fetch_monitor_videos(
                         selected_keyword, max_videos_per_keyword, expiry_days, min_subscribers,
                         view_threshold, search_time, search_relevant, search_trusted)
@@ -1068,7 +1076,12 @@ class AutomarketPlugin(Plugin):
                     st.info(t("automarket_quota_consumed").format(
                         units=quota_used))
 
-            if (fetch_comments_btn or start_campaign_btn) and 'target_videos' in st.session_state:
+            # Afficher les vidéos stockées même si on ne vient pas de les récupérer
+            if st.session_state.target_videos:
+                self.log_selected_videos(
+                    "monitor", st.session_state.target_videos, selected_keyword)
+
+            if (fetch_comments_btn or start_campaign_btn) and st.session_state.target_videos:
                 with st.spinner(t("automarket_processing")):
                     initial_quota = self.youtube_api.quota_usage
                     st.session_state.current_comments = self.fetch_monitor_comments(
@@ -1077,7 +1090,7 @@ class AutomarketPlugin(Plugin):
                     st.info(t("automarket_quota_consumed").format(
                         units=quota_used))
 
-            if (generate_responses_btn or start_campaign_btn) and 'current_comments' in st.session_state:
+            if (generate_responses_btn or start_campaign_btn) and st.session_state.current_comments:
                 with st.spinner(t("automarket_generating_responses")):
                     initial_quota = self.youtube_api.quota_usage
                     st.session_state.campaign_responses = self.generate_responses(
