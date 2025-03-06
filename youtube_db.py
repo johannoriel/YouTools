@@ -7,7 +7,7 @@ import json
 
 # Database file
 DB_FILE = "youtube_database.db"
-SCHEMA_VERSION = 3  # Nouvelle version avec le statut
+SCHEMA_VERSION = 5  # Nouvelle version avec le statut
 
 
 def get_db_connection():
@@ -84,6 +84,17 @@ def upgrade_database(current_version: int, target_version: int, cursor):
                     posted_responses INTEGER,
                     recorded_at TEXT
                 )
+            """)
+    if current_version < 5 and target_version >= 5:
+        # Ajout de la colonne moderation_status à posted_responses
+        cursor.execute("""
+                ALTER TABLE posted_responses
+                ADD COLUMN moderation_status TEXT DEFAULT 'unknown'
+            """)
+        # Ajout de la colonne moderated_responses à campaign_stats
+        cursor.execute("""
+                ALTER TABLE campaign_stats
+                ADD COLUMN moderated_responses INTEGER DEFAULT 0
             """)
 
 
@@ -172,19 +183,20 @@ def initialize_database():
             """)
 
     cursor.execute("""
-            CREATE TABLE IF NOT EXISTS posted_responses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                campaign_timestamp TEXT,
-                video_id TEXT,
-                comment_id TEXT,
-                response_id TEXT,
-                channel_id TEXT,
-                keyword TEXT,
-                response_text TEXT,
-                posted_at TEXT,
-                campaign_id TEXT  -- Nouvelle colonne
-            )
-        """)
+        CREATE TABLE IF NOT EXISTS posted_responses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_timestamp TEXT,
+            video_id TEXT,
+            comment_id TEXT,
+            response_id TEXT,
+            channel_id TEXT,
+            keyword TEXT,
+            response_text TEXT,
+            posted_at TEXT,
+            campaign_id TEXT,
+            moderation_status TEXT DEFAULT 'unknown'  -- Nouvelle colonne
+        )
+    """)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS campaign_stats (
@@ -196,6 +208,7 @@ def initialize_database():
             excluded_comments INTEGER,
             refused_responses INTEGER,
             posted_responses INTEGER,
+            moderated_responses INTEGER DEFAULT 0,  -- Nouvelle colonne
             recorded_at TEXT
         )
     """)
@@ -560,28 +573,30 @@ def save_campaign_stats(campaign_id: str, stats: Dict[str, int]):
     cursor.execute("""
         INSERT OR REPLACE INTO campaign_stats (
             campaign_id, total_videos, excluded_videos, total_comments,
-            stop_comments, excluded_comments, refused_responses, posted_responses, recorded_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            stop_comments, excluded_comments, refused_responses, posted_responses,
+            moderated_responses, recorded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         campaign_id, stats['total_videos'], stats['excluded_videos'], stats['total_comments'],
         stats['stop_comments'], stats['excluded_comments'], stats['refused_responses'],
-        stats['posted_responses'], recorded_at
+        stats['posted_responses'], stats.get(
+            'moderated_responses', 0), recorded_at
     ))
     conn.commit()
     conn.close()
 
 
-def save_response(campaign_timestamp: str, video_id: str, comment_id: str, response_id: str, channel_id: str, keyword: str, response_text: str):
-    """Sauvegarde une réponse postée avec campaign_id."""
+def save_response(campaign_timestamp: str, video_id: str, comment_id: str, response_id: str, channel_id: str, keyword: str, response_text: str, moderation_status: str = "unknown"):
+    """Sauvegarde une réponse postée avec statut de modération."""
     conn = get_db_connection()
     cursor = conn.cursor()
     posted_at = datetime.now(pytz.UTC).isoformat()
     cursor.execute("""
         INSERT INTO posted_responses (
             campaign_timestamp, video_id, comment_id, response_id, channel_id,
-            keyword, response_text, posted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (campaign_timestamp, video_id, comment_id, response_id, channel_id, keyword, response_text, posted_at))
+            keyword, response_text, posted_at, moderation_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (campaign_timestamp, video_id, comment_id, response_id, channel_id, keyword, response_text, posted_at, moderation_status))
     conn.commit()
     conn.close()
 
@@ -657,6 +672,19 @@ def save_transcript(video_id: str, transcript: str):
         """, (video_id, transcript))
     conn.commit()
     conn.close()
+
+
+def get_response_moderation_status(video_id: str, comment_id: str) -> str:
+    """Récupère le statut de modération d'une réponse postée pour un commentaire donné."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT moderation_status FROM posted_responses
+        WHERE video_id = ? AND comment_id = ?
+    """, (video_id, comment_id))
+    result = cursor.fetchone()
+    conn.close()
+    return result['moderation_status'] if result else 'unknown'
 
 
 if __name__ == "__main__":

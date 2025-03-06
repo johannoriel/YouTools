@@ -349,7 +349,7 @@ class YoutubeAPI:
 
     def post_comment_reply(self, comment_id: str, text: str) -> Optional[Dict[str, Any]]:
         """
-        Poste une réponse à un commentaire.
+        Poste une réponse à un commentaire et retourne les détails, y compris le statut de modération.
         """
         try:
             print(f"Réponse au commentaire {comment_id} : {text}")
@@ -363,8 +363,15 @@ class YoutubeAPI:
                 }
             )
             response = request.execute()
-            print(response)
             self.track_quota_usage(50)
+
+            # Récupérer le statut de modération depuis snippet.moderationStatus
+            moderation_status = response.get('snippet', {}).get(
+                'moderationStatus', 'unknown')
+            # Ajouter au dictionnaire retourné
+            response['moderation_status'] = moderation_status
+            print(
+                f"Réponse postée avec statut de modération : {moderation_status}")
             return response
         except Exception as e:
             print(f"YouTube API Error (post_comment_reply): {str(e)}")
@@ -816,7 +823,8 @@ class YoutubeAPI:
         from youtube_transcript_api import YouTubeTranscriptApi
         from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
         try:
-            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
+            transcript = YouTubeTranscriptApi.get_transcript(
+                video_id, languages=[language])
         except NoTranscriptAvailable:
             try:
                 transcript = YouTubeTranscriptApi.get_transcript(video_id)
