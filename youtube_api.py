@@ -284,7 +284,7 @@ class YoutubeAPI:
         """
         try:
             request = self.youtube.videos().list(
-                part="statistics",
+                part="statistics,snippet",
                 id=video_id
             )
             response = request.execute()
@@ -296,6 +296,7 @@ class YoutubeAPI:
                     'view_count': int(video_info['statistics'].get('viewCount', 0)),
                     'comment_count': int(video_info['statistics'].get('commentCount', 0)),
                     'like_count': int(video_info['statistics'].get('likeCount', 0)),
+                    'description': video_info['snippet'].get('description', 'N/A')  # Ajout de la description
                 }
             else:
                 return None
@@ -438,11 +439,12 @@ class YoutubeAPI:
             channel_info = self.get_channel_info(video_data.get('channel_id'))
             video_data['subscriber_count'] = channel_info['subscriber_count'] if channel_info else 0
 
-        if 'view_count' not in video_data:
+        if 'view_count' not in video_data or 'description' not in video_data:
             video_details = self.get_video_details(video_id)
             video_data['view_count'] = video_details['view_count'] if video_details else 0
             video_data['comment_count'] = video_details['comment_count'] if video_details else 0
             video_data['like_count'] = video_details['like_count'] if video_details else 0
+            video_data['description'] = video_details['description'] if video_details else ""
 
         if 'published_at' in video_data:
             published_date = datetime.strptime(
@@ -452,6 +454,7 @@ class YoutubeAPI:
         else:
             days_old = 0  # Valeur par défaut si la date de publication est manquante
 
+        video_language = ''
         if 'language' not in video_data:
             title = video_data['title']
             description = video_data['description']
@@ -474,7 +477,8 @@ class YoutubeAPI:
             'days_old': days_old,
             'url': f"https://www.youtube.com/watch?v={video_id}",
             'language': video_data.get('language', video_language),
-            'relevance_score': video_data.get('relevance_score', 0)
+            'relevance_score': video_data.get('relevance_score', 0),
+            'description': video_data.get('description', ""),
         }
 
         return normalized_video
