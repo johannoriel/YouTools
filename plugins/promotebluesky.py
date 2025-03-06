@@ -159,15 +159,32 @@ class PromoteblueskyPlugin(Plugin):
                 max_posts = config['promotebluesky']['max_posts']
                 st.session_state.posts = self.search_posts(keywords, max_posts)
 
+                # Vérification des mots-clés dans les résultats
+                if st.session_state.posts:
+                    keyword_list = [kw.strip().lower() for kw in keywords.split(" OR ")]  # Séparer les mots-clés
+                    matching_posts = 0
+                    total_posts = len(st.session_state.posts)
+
+                    for post in st.session_state.posts:
+                        post_text = post['text'].lower()
+                        # Vérifier si au moins un mot-clé est présent
+                        if any(keyword in post_text for keyword in keyword_list):
+                            matching_posts += 1
+
+                    # Calculer le pourcentage
+                    match_percentage = (matching_posts / total_posts) * 100 if total_posts > 0 else 0
+                    st.info(f"Pourcentage de posts contenant au moins un mot-clé : {match_percentage:.2f}% "
+                            f"({matching_posts}/{total_posts})")
+                else:
+                    st.warning("Aucun post trouvé pour les mots-clés donnés.")
+
         # Display posts
         if st.session_state.posts:
             st.subheader(t("promotebluesky_posts"))
             for i, post in enumerate(st.session_state.posts):
                 st.write(f"**@{post['handle']}**: {post['text']}")
-
-                # Utilisation de l'URL reconstruite si post['url'] est vide
                 post_url = post.get('url', get_post_url(post['handle'], post['id']))
-                st.markdown(f"[Voir le post]({post_url})")  # Ajout du lien vers le post
+                st.markdown(f"[Voir le post]({post_url})")
 
                 selected = st.checkbox(
                     f"Select Post {i+1}",
@@ -196,11 +213,9 @@ class PromoteblueskyPlugin(Plugin):
                 )
                 st.session_state.generated_responses[i]['response'] = edited_response
 
-                # Vérification de la longueur de la réponse
                 if len(edited_response) > 300:
                     st.warning(f"⚠️ Cette réponse dépasse 300 caractères ({len(edited_response)} caractères). Veuillez la raccourcir.")
 
-                # Bouton pour copier la réponse et lien pour répondre au post
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
                     if st.button(f"Copier la réponse {i+1}", key=f"copy_response_{i}"):
