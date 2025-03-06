@@ -468,62 +468,6 @@ class AutomarketPlugin(Plugin):
             if st.button(t("automarket_collapse_all"), key=f"{prefix}_collapse_all"):
                 st.session_state.expand_all = False
 
-        col3, col4 = st.columns(2)
-        with col3:
-            if st.button(t("automarket_select_all"), key=f"{prefix}_select_all"):
-                for i in range(len(st.session_state.campaign_responses)):
-                    st.session_state.selected_responses[i] = False
-                st.rerun()
-        with col4:
-            if st.button(t("automarket_deselect_all"), key=f"{prefix}_deselect_all"):
-                for i in range(len(st.session_state.campaign_responses)):
-                    st.session_state.selected_responses[i] = True
-                st.rerun()
-
-        for i, response in enumerate(responses):
-            title = f"{t('automarket_reponse_to_comment').format(i+1)} : {response['video_title']}"
-            with st.expander(title, expanded=st.session_state.expand_all):
-                st.write(f"{t('automarket_channel')}: {response['channel_title']} "
-                         f"({self.youtube_api.format_count(response['subscriber_count'])} subscribers)")
-                if st.button(t("automarket_add_to_trusted"), key=f"{prefix}_add_trusted_{i}"):
-                    channel_url = f"https://www.youtube.com/channel/{response['channel_id']}"
-                    add_target_channel(
-                        channel_id=response['channel_id'],
-                        channel_title=response['channel_title'],
-                        channel_url=channel_url,
-                        keywords=[response['keyword']],
-                        subscriber_count=response['subscriber_count']
-                    )
-                    st.success(
-                        f"Added {response['channel_title']} to trusted channels!")
-
-                st.write(
-                    f"{t('automarket_video')}: [{response['video_title']}](https://www.youtube.com/watch?v={response['target_video_id']})")
-                st.write(f"Views: {self.youtube_api.format_count(response['view_count'])}, "
-                         f"Likes: {self.youtube_api.format_count(response['like_count'])}, "
-                         f"Comments: {response['comment_count']}, "
-                         f"Age: {response['days_old']} days")
-                st.write(f"{t('automarket_keyword')}: {response['keyword']}")
-                st.write(
-                    f"{t('automarket_criterion')}: {response['criterion']}")
-                st.write(
-                    f"{t('automarket_comment')}: {response['comment_text']}")
-                st.write(f"{t('automarket_response')}: {response['response']}")
-                # Afficher le statut de modération en utilisant la nouvelle fonction
-                moderation_status = get_response_moderation_status(
-                    response['target_video_id'], response['comment_id'])
-                st.write(f"Moderation Status: {moderation_status}")
-                st.write(f"Promoted Video: {campaign_video['title']}")
-
-                current_value = st.session_state.selected_responses.get(
-                    i, False)
-                new_value = st.checkbox(
-                    t("automarket_exclude_response"),
-                    value=current_value,
-                    key=f"{prefix}_exclude_{i}"
-                )
-                st.session_state.selected_responses[i] = new_value
-
         default_prompt = config['automarket']['response_prompt']
         new_prompt = st.text_area(
             "Nouveau prompt pour regénérer les réponses",
@@ -547,12 +491,66 @@ class AutomarketPlugin(Plugin):
                 st.warning(
                     "Aucune campagne précédente trouvée pour regénération.")
 
+        col3, col4 = st.columns(2)
+        with col3:
+            if st.button(t("automarket_select_all"), key=f"{prefix}_select_all"):
+                for i in range(len(st.session_state.campaign_responses)):
+                    st.session_state.selected_responses[i] = False
+                st.rerun()
+        with col4:
+            if st.button(t("automarket_deselect_all"), key=f"{prefix}_deselect_all"):
+                for i in range(len(st.session_state.campaign_responses)):
+                    st.session_state.selected_responses[i] = True
+                st.rerun()
+
+        for i, response in enumerate(responses):
+            title = f"{t('automarket_reponse_to_comment').format(i+1)} : {response['video_title']}"
+            with st.expander(title, expanded=st.session_state.expand_all):
+                st.write(f"{t('automarket_channel')}: {response['channel_title']} "
+                            f"({self.youtube_api.format_count(response['subscriber_count'])} subscribers)")
+                if st.button(t("automarket_add_to_trusted"), key=f"{prefix}_add_trusted_{i}"):
+                    channel_url = f"https://www.youtube.com/channel/{response['channel_id']}"
+                    add_target_channel(
+                        channel_id=response['channel_id'],
+                        channel_title=response['channel_title'],
+                        channel_url=channel_url,
+                        keywords=[response['keyword']],
+                        subscriber_count=response['subscriber_count']
+                    )
+                    st.success(
+                        f"Added {response['channel_title']} to trusted channels!")
+
+                st.write(
+                    f"{t('automarket_video')}: [{response['video_title']}](https://www.youtube.com/watch?v={response['target_video_id']})")
+                st.write(f"Views: {self.youtube_api.format_count(response['view_count'])}, "
+                            f"Likes: {self.youtube_api.format_count(response['like_count'])}, "
+                            f"Comments: {response['comment_count']}, "
+                            f"Age: {response['days_old']} days")
+                st.write(f"{t('automarket_keyword')}: {response['keyword']}")
+                st.write(
+                    f"{t('automarket_criterion')}: {response['criterion']}")
+                st.write(
+                    f"{t('automarket_comment')}: {response['comment_text']}")
+                st.write(f"{t('automarket_response')}: {response['response']}")
+                moderation_status = get_response_moderation_status(
+                    response['target_video_id'], response['comment_id'])
+                st.write(f"Moderation Status: {moderation_status}")
+                st.write(f"Promoted Video: {campaign_video['title']}")
+
+                current_value = st.session_state.selected_responses.get(
+                    i, False)
+                new_value = st.checkbox(
+                    t("automarket_exclude_response"),
+                    value=current_value,
+                    key=f"{prefix}_exclude_{i}"
+                )
+                st.session_state.selected_responses[i] = new_value
+
         if st.button(t("automarket_post_responses"), key=f"{prefix}_post_responses"):
             with st.spinner(t("automarket_posting")):
                 selected_responses = [r for i, r in enumerate(responses)
-                                      if not st.session_state.selected_responses.get(i, False)]
-                self.post_responses(
-                    config, selected_responses, campaign_timestamp)
+                                        if not st.session_state.selected_responses.get(i, False)]
+                self.post_responses(config, selected_responses, campaign_timestamp)
 
                 # Calcul des statistiques
                 total_videos = len(set(
@@ -567,6 +565,7 @@ class AutomarketPlugin(Plugin):
                 posted_responses = len(selected_responses)
                 moderated_responses = sum(1 for r in selected_responses if self.youtube_api.post_comment_reply(
                     r['comment_id'], r['response']) and self.youtube_api.post_comment_reply(r['comment_id'], r['response']).get('moderation_status', 'unknown') != 'published')
+                published_responses = posted_responses - moderated_responses  # Calcul des réponses publiées
 
                 save_campaign_stats(campaign_timestamp, {
                     'total_videos': total_videos,
@@ -591,6 +590,8 @@ class AutomarketPlugin(Plugin):
                     st.write(f"Responses posted: {posted_responses}")
                     st.write(
                         f"{t('automarket_moderated_responses')}: {moderated_responses}")
+                    st.write(f"**Responses published: {published_responses}**")  # Ajout en gras
+
 
     def log_selected_videos(self, prefix: str, videos: List[Dict[str, Any]], keyword: str = "N/A"):
         """Affiche un log des vidéos retenues avec leurs statistiques."""
@@ -798,6 +799,18 @@ class AutomarketPlugin(Plugin):
             comments.extend(video_comments)
         return comments
 
+    def state_initialize(self):
+        if 'campaign_target_videos' not in st.session_state:
+            st.session_state.campaign_target_videos = []
+        if 'campaign_current_comments' not in st.session_state:
+            st.session_state.campaign_current_comments = []
+        if 'campaign_responses' not in st.session_state:
+            st.session_state.campaign_responses = []
+        if 'campaign_rejected_videos' not in st.session_state:
+            st.session_state.campaign_rejected_videos = []
+        if 'campaign_excluded_comments' not in st.session_state:
+            st.session_state.campaign_excluded_comments = []
+
     def run(self, config):
         tab1, tab2, tab3 = st.tabs(
             ["Lancer une campagne", "Réponses existantes", t("monitor_trends_tab")])
@@ -896,17 +909,7 @@ class AutomarketPlugin(Plugin):
                 start_campaign_btn = st.button(
                     t("automarket_start_campaign"), key="campaign_start_campaign")
 
-            # Initialisation des variables de session si elles n'existent pas encore
-            if 'campaign_target_videos' not in st.session_state:
-                st.session_state.campaign_target_videos = []
-            if 'campaign_current_comments' not in st.session_state:
-                st.session_state.campaign_current_comments = []
-            if 'campaign_responses' not in st.session_state:
-                st.session_state.campaign_responses = []
-            if 'campaign_rejected_videos' not in st.session_state:
-                st.session_state.campaign_rejected_videos = []
-            if 'campaign_excluded_comments' not in st.session_state:
-                st.session_state.campaign_excluded_comments = []
+            self.state_initialize()
 
             if fetch_videos_btn or start_campaign_btn:
                 with st.spinner(t("automarket_processing")):
@@ -1086,17 +1089,7 @@ class AutomarketPlugin(Plugin):
                     f"Aucune vidéo personnelle trouvée pour le mot-clé {selected_keyword}")
                 return
 
-            # Initialisation des variables de session si elles n'existent pas encore
-            if 'target_videos' not in st.session_state:
-                st.session_state.target_videos = []
-            if 'current_comments' not in st.session_state:
-                st.session_state.current_comments = []
-            if 'campaign_responses' not in st.session_state:
-                st.session_state.campaign_responses = []
-            if 'rejected_videos' not in st.session_state:
-                st.session_state.rejected_videos = []
-            if 'excluded_comments' not in st.session_state:
-                st.session_state.excluded_comments = []
+            self.state_initialize()
 
             if fetch_videos_btn or start_campaign_btn:
                 with st.spinner(t("automarket_processing")):
