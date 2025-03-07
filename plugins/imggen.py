@@ -179,6 +179,10 @@ class ImggenPlugin(Plugin):
             t("number_of_images"), min_value=1, value=st.session_state.imggen_num_images, key="imggen_num_images"
         )
 
+        manual_seeds_input = st.text_input(
+            "Manual Seeds (comma-separated, e.g., 123, 456, 789)", "", key="imggen_manual_seeds"
+        )
+
         st.subheader(t("prompt_history"))
         selected_history_prompt = st.selectbox("", [""] + self.prompt_history)
         if selected_history_prompt:
@@ -196,50 +200,69 @@ class ImggenPlugin(Plugin):
                                for p in prompt.split('\n') if p.strip()]
                 background_prompt = ', ' + \
                     config['imggen']['background_prompt']
+
+                # Traitement des graines manuelles si fournies
+                manual_seeds = None
+                if manual_seeds_input:
+                    try:
+                        manual_seeds = [int(s.strip())
+                                        for s in manual_seeds_input.split(',')]
+                    except ValueError:
+                        st.error(
+                            "Invalid seed list format. Please use comma-separated integers (e.g., 123, 456, 789)")
+                        return
+
                 self.generate_images(background_prompt,
                                      sub_prompts, aspect_ratio, remove_background, background_removal_method,
                                      None if use_random_seed or num_images > 1 else seed, use_face, steps, input_image,
-                                     config['imggen']['face_prompt'], style, config['imggen']['output_dir'], num_images
+                                     config['imggen']['face_prompt'], style, config['imggen']['output_dir'],
+                                     num_images, manual_seeds  # Ajout de manual_seeds
                                      )
 
     def generate_images(self, background_prompt, prompts, aspect_ratio, remove_background, background_removal_method,
-                        seed, use_face, steps, input_image, face_prompt, style, output_dir, num_images):
+                        seed, use_face, steps, input_image, face_prompt, style, output_dir, num_images, manual_seeds=None):
         num_columns = 3  # Nombre de colonnes dans la galerie
         cols = st.columns(num_columns)
 
         progress_placeholder = st.empty()
         progress_bar = progress_placeholder.progress(0)
 
-        # Si le nombre d'images est supérieur à 1, la graine doit être aléatoire
-        if num_images > 1:
-            seed = None
+        # Si une liste de graines manuelles est fournie, on l'utilise, sinon on génère des graines aléatoires
+        if manual_seeds:
+            seeds = manual_seeds
+        else:
+            seeds = [seed if seed is not None else random.randint(
+                0, 2**32 - 1) for _ in range(num_images)]
 
         # Génération et affichage progressif des images
-        for i in range(num_images):
+        for i, current_seed in enumerate(seeds):
             for j, sub_prompt in enumerate(prompts):
                 full_prompt = sub_prompt
                 if style:
                     full_prompt += f", style: {style}"
 
+                # Utiliser la même graine pour tous les sous-prompts à cette itération
+                used_seed = current_seed
+                generator = torch.Generator().manual_seed(used_seed)
+
                 # Génère l'image
-                image, used_seed = self.generate_image(background_prompt,
-                                                       full_prompt, aspect_ratio, remove_background, background_removal_method,
-                                                       seed, use_face, steps, input_image, face_prompt
-                                                       )
+                image, _ = self.generate_image(background_prompt,
+                                               full_prompt, aspect_ratio, remove_background, background_removal_method,
+                                               used_seed, use_face, steps, input_image, face_prompt
+                                               )
 
                 # Choisir la colonne dans laquelle afficher l'image
                 col_idx = (i * len(prompts) + j) % num_columns
                 with cols[col_idx]:  # Mise à jour dans la colonne correspondante
-                    # Affichage de l'image directement
                     st.image(
-                        image, caption=f"Image {i+1}/{num_images} \nSeed: {used_seed}\nPrompt: {full_prompt}", use_container_width=True)
+                        image, caption=f"Image {i+1}/{len(seeds)} \nSeed: {used_seed}\nPrompt: {full_prompt}", use_container_width=True)
 
-                # Sauvegarder l'image
+                # Sauvegarder l'image avec la seed
                 self.save_image(image, output_dir, sub_prompt, used_seed)
 
                 # Mettre à jour la barre de progression
                 progress_bar.progress(
-                    ((i * len(prompts)) + j + 1) / (num_images * len(prompts)))
+                    ((i * len(prompts)) + j + 1) / (len(seeds) * len(prompts)))
 
         # Lorsque tout est terminé, remplacez la barre de progression par un message
         progress_placeholder.empty()  # Efface la barre de progression
