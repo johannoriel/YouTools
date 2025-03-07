@@ -235,7 +235,7 @@ class ImggenPlugin(Plugin):
                         image, caption=f"Image {i+1}/{num_images} \nSeed: {used_seed}\nPrompt: {full_prompt}", use_container_width=True)
 
                 # Sauvegarder l'image
-                self.save_image(image, output_dir, sub_prompt)
+                self.save_image(image, output_dir, sub_prompt, used_seed)
 
                 # Mettre à jour la barre de progression
                 progress_bar.progress(
@@ -351,10 +351,12 @@ class ImggenPlugin(Plugin):
         return result
 
     @staticmethod
-    def save_image(image, output_dir, prompt):
+    def save_image(image, output_dir, prompt, seed):  # Ajout du paramètre seed
         os.makedirs(output_dir, exist_ok=True)
-        filename = "_".join(prompt.split()[:5])
-        filename = f"{filename}.png"
+        # Prendre les 5 premiers mots du prompt et ajouter la seed
+        filename_base = "_".join(prompt.split()[:5])
+        # Inclusion de la seed dans le nom
+        filename = f"{filename_base}_{seed}.png"
         filepath = os.path.join(output_dir, filename)
         image.save(filepath)
         print(f"Image saved to: {filepath}")
