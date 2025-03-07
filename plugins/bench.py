@@ -118,7 +118,6 @@ class BenchPlugin(Plugin):
     def config_tab(self, config):
         st.header(t("servers_list"))
 
-        # Initialize session state from config
         plugin_config = config.get(self.name, {})
         if 'servers' not in st.session_state:
             st.session_state.servers = plugin_config.get(
@@ -130,16 +129,10 @@ class BenchPlugin(Plugin):
                 prompts = self.get_config_fields()["bench_prompts"]["default"]
             st.session_state.prompts = prompts
 
-        # Servers configuration
         for i, server in enumerate(st.session_state.servers):
             url = server.get("url", "")
             model = server.get("model", "")
-            if "localhost:11434" in url:
-                server_name = f"Ollama - {model}" if model else "Ollama"
-            elif "192.168.1.5:1234" in url:
-                server_name = f"LM Studio - {model}" if model else "LM Studio"
-            else:
-                server_name = f"API - {model}" if model else "API"
+            server_name = self.get_server_display_name(url, model)
 
             with st.expander(server_name):
                 if not isinstance(server, dict):
@@ -175,7 +168,6 @@ class BenchPlugin(Plugin):
                 st.session_state.servers[i] = {
                     "url": url, "api_key": api_key, "model": model}
 
-        # Add server buttons
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Add Ollama"):
@@ -193,16 +185,18 @@ class BenchPlugin(Plugin):
                     {"url": "", "api_key": "", "model": ""})
                 st.rerun()
 
-        # Prompts configuration
         st.header(t("prompts_list"))
-        for i, prompt in enumerate(st.session_state.prompts):
-            updated_prompt = st.text_area(
-                t("prompt_label"), value=prompt, key=f"prompt_{i}")
-            if st.button("Remove", key=f"remove_prompt_{i}"):
-                del st.session_state.prompts[i]
-                st.rerun()
-                continue
-            st.session_state.prompts[i] = updated_prompt
+        if not st.session_state.prompts:
+            st.write("No prompts defined yet.")
+        else:
+            for i, prompt in enumerate(st.session_state.prompts):
+                updated_prompt = st.text_area(
+                    t("prompt_label"), value=prompt, key=f"prompt_{i}")
+                if st.button("Remove", key=f"remove_prompt_{i}"):
+                    del st.session_state.prompts[i]
+                    st.rerun()
+                    continue
+                st.session_state.prompts[i] = updated_prompt
 
         if st.button(t("add_prompt")):
             st.session_state.prompts.append("")
@@ -307,19 +301,26 @@ class BenchPlugin(Plugin):
         prompts = st.session_state.get("prompts", config.get(
             self.name, {}).get("bench_prompts", []))
 
+        model_options = [self.get_server_display_name(
+            s["url"], s["model"]) for s in servers if s.get("model")]
+
         selected_models = st.multiselect(
             t("select_models"),
-            [f"{s['model']} ({s['url']})" for s in servers if s['model']]
+            model_options
         )
 
         if st.button(t("run_bench")) and selected_models:
             with st.spinner(t("running_bench")):
-                # Reset CUDA context before benchmark
                 self.reset_cuda_context()
 
+                # Calculate total tasks (models × prompts)
+                total_tasks = len(selected_models) * len(prompts)
+                progress_bar = st.progress(0.0)
+                tasks_completed = 0
+
                 for model_id in selected_models:
-                    server = next(
-                        s for s in servers if f"{s['model']} ({s['url']})" == model_id)
+                    server = next(s for s in servers if self.get_server_display_name(
+                        s["url"], s["model"]) == model_id)
                     with st.expander(f"Results for {model_id}"):
                         results = []
                         for prompt in prompts:
@@ -336,7 +337,16 @@ class BenchPlugin(Plugin):
                                     {"prompt": prompt, "response": response})
                             except Exception as e:
                                 st.error(f"Error: {str(e)}")
+
+                            # Update progress
+                            tasks_completed += 1
+                            progress_bar.progress(
+                                tasks_completed / total_tasks)
+
                         st.session_state.bench_results[model_id] = results
+
+                # Ensure progress reaches 100% at the end
+                progress_bar.progress(1.0)
 
     def compare_tab(self, config):
         st.header(t("compare_models"))
@@ -365,7 +375,6 @@ class BenchPlugin(Plugin):
                     st.write(f"Prompt: {r2['prompt']}")
                     st.write(f"Response: {r2['response']}")
 
-                # Add divider between prompt/response pairs, except after the last one
                 if i < len(results1) - 1:
                     st.divider()
 
