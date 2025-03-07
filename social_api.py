@@ -435,6 +435,26 @@ class TelegramAPI:
         finally:
             loop.close()
 
+    def search_channels(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        Recherche des canaux Telegram via Google (placeholder, car l'API ne permet pas une recherche native).
+        """
+        try:
+            google_query = f'site:t.me "{query}" -inurl:(/s/)'
+            channels = []
+            for url in search(google_query, num_results=max_results):
+                if "t.me/" in url and "/s/" not in url:
+                    channel_id = url.split("t.me/")[1].split("/")[0]
+                    channels.append({
+                        'id': channel_id,
+                        'text': f"Channel: @{channel_id}",
+                        'url': url
+                    })
+            return channels
+        except Exception as e:
+            st.error(f"Telegram Channel Search Error: {str(e)}")
+            return []
+
 
 class GhostAPI:
     def __init__(self, config):

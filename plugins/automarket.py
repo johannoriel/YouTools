@@ -133,6 +133,14 @@ class AutomarketPlugin(Plugin):
             st.session_state.expand_all = True
         if 'excluded_comments' not in st.session_state:
             st.session_state.excluded_comments = []
+        if 'campaign_target_videos' not in st.session_state:
+            st.session_state.campaign_target_videos = []
+        if 'campaign_current_comments' not in st.session_state:
+            st.session_state.campaign_current_comments = []
+        if 'campaign_responses' not in st.session_state:
+            st.session_state.campaign_responses = []
+        if 'campaign_excluded_comments' not in st.session_state:
+            st.session_state.campaign_excluded_comments = []
 
     def get_config_fields(self):
         return {
@@ -191,6 +199,8 @@ class AutomarketPlugin(Plugin):
         for order in ["relevance", "date"]:
             search_results = self.youtube_api.search_videos(
                 keyword, max_videos * 2, order=order, language=st.session_state.lang, combine_keywords=combine_keywords)
+            st.info(f"Nombre de vidéos trouvées par l'API pour '{keyword}' (ordre: {order}) : {len(search_results)}")
+            rejected = 0
 
             for video in search_results:
                 # Compléter les informations de la vidéo avec get_video_infos
@@ -231,6 +241,7 @@ class AutomarketPlugin(Plugin):
                 if not reject_reason:
                     videos.append(normalized_video)
                 else:
+                    rejected += 1
                     st.session_state.rejected_videos.append({
                         'title': normalized_video['title'],
                         'url': normalized_video['url'],
@@ -251,6 +262,7 @@ class AutomarketPlugin(Plugin):
                     break
             if len(videos) >= max_videos:
                 break
+            st.info(f"Number of rejected videos : {rejected}")
         return videos[:max_videos]
 
     def fetch_videos_from_trusted_channels(self, keyword: str, max_videos: int, min_subscribers: int, expiry_days: int, view_threshold: int) -> List[Dict[str, Any]]:
@@ -799,22 +811,10 @@ class AutomarketPlugin(Plugin):
             comments.extend(video_comments)
         return comments
 
-    def state_initialize(self):
-        if 'campaign_target_videos' not in st.session_state:
-            st.session_state.campaign_target_videos = []
-        if 'campaign_current_comments' not in st.session_state:
-            st.session_state.campaign_current_comments = []
-        if 'campaign_responses' not in st.session_state:
-            st.session_state.campaign_responses = []
-        if 'campaign_rejected_videos' not in st.session_state:
-            st.session_state.campaign_rejected_videos = []
-        if 'campaign_excluded_comments' not in st.session_state:
-            st.session_state.campaign_excluded_comments = []
-
     def run(self, config):
         tab1, tab2, tab3 = st.tabs(
             ["Lancer une campagne", "Réponses existantes", t("monitor_trends_tab")])
-
+        self._initialize_session_state()
         if 'campaign_timestamp' not in st.session_state:
             st.session_state.campaign_timestamp = datetime.now(
                 pytz.UTC).isoformat()
@@ -909,14 +909,12 @@ class AutomarketPlugin(Plugin):
                 start_campaign_btn = st.button(
                     t("automarket_start_campaign"), key="campaign_start_campaign")
 
-            self.state_initialize()
-
             if fetch_videos_btn or start_campaign_btn:
                 with st.spinner(t("automarket_processing")):
                     st.session_state.campaign_timestamp = datetime.now(
                         pytz.UTC).isoformat()
                     initial_quota = self.youtube_api.quota_usage
-                    st.session_state.campaign_rejected_videos = []  # Réinitialiser uniquement ici
+                    st.session_state.rejected_videos = []  # Réinitialiser uniquement ici
                     st.session_state.campaign_target_videos = self.fetch_campaign_videos(
                         campaign_video, max_videos_per_keyword, min_subscribers, expiry_days,
                         view_threshold, combine_keywords, search_keywords, search_trusted,
@@ -952,7 +950,7 @@ class AutomarketPlugin(Plugin):
                         units=quota_used))
 
             self.log_rejected_videos(
-                "campaign", st.session_state.campaign_rejected_videos)
+                "campaign", st.session_state.rejected_videos)
             self.log_rejected_comments("campaign")
 
             if st.session_state.campaign_responses:
@@ -1088,8 +1086,6 @@ class AutomarketPlugin(Plugin):
                 st.error(
                     f"Aucune vidéo personnelle trouvée pour le mot-clé {selected_keyword}")
                 return
-
-            self.state_initialize()
 
             if fetch_videos_btn or start_campaign_btn:
                 with st.spinner(t("automarket_processing")):

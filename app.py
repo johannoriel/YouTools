@@ -172,6 +172,9 @@ class PluginManager:
         config['starred_plugins'] = list(self.starred_plugins)
         save_config(config)
 
+    def save_config(self, config: Dict[str, Any]):
+        save_config(config)
+
     def run_plugin(self, plugin_name: str, config: Dict[str, Any]):
         """Run a plugin, loading it if necessary."""
         plugin = self.get_plugin(plugin_name)
