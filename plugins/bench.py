@@ -30,6 +30,7 @@ translations["en"].update({
     "compare_models": "Compare Models",
     "model1_label": "Model 1",
     "model2_label": "Model 2",
+    "expected_response_label": "Expected Response",
 })
 
 translations["fr"].update({
@@ -51,6 +52,7 @@ translations["fr"].update({
     "compare_models": "Comparer Modèles",
     "model1_label": "Modèle 1",
     "model2_label": "Modèle 2",
+    "expected_response_label": "Réponse Attendue",
 })
 
 
@@ -77,7 +79,12 @@ class BenchPlugin(Plugin):
             "bench_prompts": {
                 "type": "json",
                 "label": t("prompts_list"),
-                "default": ["Hello, how are you?", "Explain quantum physics simply"]
+                "default": [
+                    {"prompt": "Hello, how are you?",
+                        "expected": "I'm doing great, thanks!"},
+                    {"prompt": "Explain quantum physics simply",
+                        "expected": "Quantum physics is about tiny particles behaving strangely."}
+                ]
             }
         }
 
@@ -97,10 +104,6 @@ class BenchPlugin(Plugin):
         if st.button("Reset Session State"):
             st.session_state.clear()
             plugin_config = config.get(self.name, {})
-            st.session_state.servers = plugin_config.get(
-                "bench_servers", self.get_config_fields()["bench_servers"]["default"])
-            st.session_state.prompts = plugin_config.get(
-                "bench_prompts", self.get_config_fields()["bench_prompts"]["default"])
             st.rerun()
 
         # Config tab
@@ -122,12 +125,32 @@ class BenchPlugin(Plugin):
         if 'servers' not in st.session_state:
             st.session_state.servers = plugin_config.get(
                 "bench_servers", self.get_config_fields()["bench_servers"]["default"])
+            # Handle prompts with backward compatibility
         if 'prompts' not in st.session_state or len(st.session_state.prompts) == 0:
-            # Ensure we get prompts from config, falling back to default if not present
             prompts = plugin_config.get("bench_prompts")
             if not prompts or not isinstance(prompts, list):
-                prompts = self.get_config_fields()["bench_prompts"]["default"]
-            st.session_state.prompts = prompts
+                prompts = self.get_config_fields(
+                )["bench_prompts"]["default"]
+
+            # Convert old format (strings) to new format (dictionaries) if needed
+            converted_prompts = []
+            for item in prompts:
+                if isinstance(item, str):
+                    # Old format: convert string to new dictionary format
+                    converted_prompts.append(
+                        {"prompt": item, "expected": ""})
+                    st.info("convert")
+                elif isinstance(item, dict) and "prompt" in item:
+                    # New format: ensure expected field exists
+                    converted_prompts.append({
+                        "prompt": item.get("prompt", ""),
+                        "expected": item.get("expected", "")
+                    })
+                else:
+                    # Fallback for invalid entries
+                    converted_prompts.append(
+                        {"prompt": "", "expected": ""})
+            st.session_state.prompts = converted_prompts
 
         for i, server in enumerate(st.session_state.servers):
             url = server.get("url", "")
@@ -189,17 +212,31 @@ class BenchPlugin(Plugin):
         if not st.session_state.prompts:
             st.write("No prompts defined yet.")
         else:
-            for i, prompt in enumerate(st.session_state.prompts):
-                updated_prompt = st.text_area(
-                    t("prompt_label"), value=prompt, key=f"prompt_{i}")
+            for i, prompt_data in enumerate(st.session_state.prompts):
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    prompt = st.text_area(
+                        t("prompt_label"),
+                        value=prompt_data.get("prompt", ""),
+                        key=f"prompt_{i}"
+                    )
+                with col2:
+                    expected = st.text_area(
+                        t("expected_response_label"),
+                        value=prompt_data.get("expected", ""),
+                        key=f"expected_{i}"
+                    )
+
                 if st.button("Remove", key=f"remove_prompt_{i}"):
                     del st.session_state.prompts[i]
                     st.rerun()
                     continue
-                st.session_state.prompts[i] = updated_prompt
+
+                st.session_state.prompts[i] = {
+                    "prompt": prompt, "expected": expected}
 
         if st.button(t("add_prompt")):
-            st.session_state.prompts.append("")
+            st.session_state.prompts.append({"prompt": "", "expected": ""})
             st.rerun()
 
         if st.button("Save Configuration"):
@@ -304,16 +341,11 @@ class BenchPlugin(Plugin):
         model_options = [self.get_server_display_name(
             s["url"], s["model"]) for s in servers if s.get("model")]
 
-        selected_models = st.multiselect(
-            t("select_models"),
-            model_options
-        )
+        selected_models = st.multiselect(t("select_models"), model_options)
 
         if st.button(t("run_bench")) and selected_models:
             with st.spinner(t("running_bench")):
                 self.reset_cuda_context()
-
-                # Calculate total tasks (models × prompts)
                 total_tasks = len(selected_models) * len(prompts)
                 progress_bar = st.progress(0.0)
                 tasks_completed = 0
@@ -323,7 +355,9 @@ class BenchPlugin(Plugin):
                         s["url"], s["model"]) == model_id)
                     with st.expander(f"Results for {model_id}"):
                         results = []
-                        for prompt in prompts:
+                        for prompt_data in prompts:
+                            prompt = prompt_data["prompt"]
+                            expected = prompt_data["expected"]
                             try:
                                 response = self.call_llm(
                                     url=server["url"],
@@ -331,22 +365,26 @@ class BenchPlugin(Plugin):
                                     model=server["model"],
                                     prompt=prompt
                                 )
-                                st.write(f"Prompt: {prompt}")
-                                st.write(f"Response: {response}")
-                                results.append(
-                                    {"prompt": prompt, "response": response})
+                                col1, col2 = st.columns([2, 1])
+                                with col1:
+                                    st.write(f"Prompt: {prompt}")
+                                    st.write(f"Response: {response}")
+                                with col2:
+                                    st.write(f"Expected: {expected}")
+                                results.append({
+                                    "prompt": prompt,
+                                    "expected": expected,
+                                    "response": response
+                                })
                             except Exception as e:
                                 st.error(f"Error: {str(e)}")
 
-                            # Update progress
                             tasks_completed += 1
                             progress_bar.progress(
                                 tasks_completed / total_tasks)
 
                         st.session_state.bench_results[model_id] = results
-
-                # Ensure progress reaches 100% at the end
-                progress_bar.progress(1.0)
+                    progress_bar.progress(1.0)
 
     def compare_tab(self, config):
         st.header(t("compare_models"))
@@ -367,7 +405,9 @@ class BenchPlugin(Plugin):
             results2 = st.session_state.bench_results.get(model2, [])
 
             for i, (r1, r2) in enumerate(zip(results1, results2)):
-                col1, col2 = st.columns(2)
+                col0, col1, col2 = st.columns([1, 3, 3])
+                with col0:
+                    st.write(f"Expected: {r1['expected']}")
                 with col1:
                     st.write(f"Prompt: {r1['prompt']}")
                     st.write(f"Response: {r1['response']}")
