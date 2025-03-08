@@ -133,7 +133,7 @@ class BatchsilencesPlugin(Plugin):
                             v[1] for v in video_files if v[0] == video_name)
 
                         # Remove silence
-                        result, reduction = self.trimsilences_plugin.remove_silence(
+                        result, reduction, _, _ = self.trimsilences_plugin.remove_silence(
                             video_path,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],
@@ -165,7 +165,7 @@ class BatchsilencesPlugin(Plugin):
                             v[1] for v in video_files if v[0] == video_name)
 
                         # Remove silence
-                        result, reduction = self.trimsilences_plugin.remove_silence(
+                        result, reduction, _, _ = self.trimsilences_plugin.remove_silence(
                             video_path,
                             config['trimsilences']['silence_threshold'],
                             config['trimsilences']['silence_duration'],

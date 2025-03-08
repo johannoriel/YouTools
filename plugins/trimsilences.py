@@ -193,7 +193,7 @@ class TrimsilencesPlugin(Plugin):
 
     def remove_silence(self, input_file: str, threshold: float, duration: float,
                        keep_duration: float, videos_dir: str,
-                       progress_callback=None) -> str:
+                       progress_callback=None) -> tuple[str, str, float, float]:
         """
         Supprime les silences d'une vidéo en conservant une durée minimale.
 
@@ -204,6 +204,9 @@ class TrimsilencesPlugin(Plugin):
             keep_duration: Durée à conserver pour chaque silence
             videos_dir: Répertoire de sortie
             progress_callback: Fonction de callback pour la progression
+
+        Returns:
+            Tuple contenant (output_file, reduction_str, original_duration, final_duration)
         """
         try:
             if progress_callback:
@@ -244,7 +247,7 @@ class TrimsilencesPlugin(Plugin):
             clips = []
             for i, (start, end, silence_middle) in enumerate(segments):
                 # Ajouter le segment non-silencieux
-                clip = video.subclipped(start_time=start, end_time=end)
+                clip = video.subclip(start, end)
                 clips.append(clip)
 
                 if progress_callback:
@@ -283,7 +286,7 @@ class TrimsilencesPlugin(Plugin):
                     clip.close()
                 if os.path.exists(output_file):
                     os.remove(output_file)  # Supprimer le fichier invalide
-                return error_msg, "0%"
+                return error_msg, "0%", original_duration, 0.0
 
             reduction_percentage = ((original_duration - final_duration) /
                                     original_duration * 100)
@@ -298,10 +301,10 @@ class TrimsilencesPlugin(Plugin):
             if progress_callback:
                 progress_callback(100)
 
-            return output_file, reduction_str
+            return output_file, reduction_str, original_duration, final_duration
 
         except Exception as e:
-            return t("trim_silences_error").format(error=str(e)), "0%"
+            return t("trim_silences_error").format(error=str(e)), "0%", 0.0, 0.0
 
     def run(self, config):
         st.header(t("trim_silences_header"))

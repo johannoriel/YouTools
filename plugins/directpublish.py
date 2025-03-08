@@ -207,7 +207,7 @@ class DirectpublishPlugin(Plugin):
                 # 1. Retirer les silences si demandé
                 if remove_silences:
                     st.text(t("directpublish_silence_trim"))
-                    result, reduction = self.trimsilences_plugin.remove_silence(
+                    result, reduction, original_duration, final_duration = self.trimsilences_plugin.remove_silence(
                         video_to_process,
                         config['trimsilences']['silence_threshold'],
                         config['trimsilences']['silence_duration'],
@@ -218,7 +218,9 @@ class DirectpublishPlugin(Plugin):
                         st.error(result)
                         return
                     else:
-                        st.info(f"Reduction : {reduction}")
+                        # Afficher le pourcentage de réduction, durée initiale et finale
+                        st.info(
+                            f"Reduction: {reduction} | Initial duration: {original_duration:.1f}s | Final duration: {final_duration:.1f}s")
                     video_to_process = result
                     st.text(video_to_process)
 
