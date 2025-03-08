@@ -267,11 +267,16 @@ class RagllmPlugin(Plugin):
         except Exception as e:
             return f"{t('rag_error_calling_llm')}{str(e)}"
 
-    def free_llm(self):
+    def free_llm(self, model=None):
         try:
-            llm_model = st.session_state.ragllm_llm_model
+            if model is not None:
+                llm_model = "ollama/"+model
+            else:
+                llm_model = st.session_state.ragllm_llm_model
+            print("freeing :"+llm_model)
             if llm_model.startswith("ollama/"):
                 ollama_model = llm_model.split("/")[1]
+                st.info("Freeing ollama memory "+ollama_model)
                 response = requests.post(
                     "http://localhost:11434/api/generate",
                     json={
@@ -280,9 +285,13 @@ class RagllmPlugin(Plugin):
                         "keep_alive": 0
                     }
                 )
-                return response.json()['response']
+                # return response.json()['response'] # not used
+            else:
+                st.warning("Memory not freed")
+
         except Exception as e:
-            return f"{t('rag_error_calling_llm')}{str(e)}"
+            raise e
+            # return f"{t('rag_error_calling_llm')}{str(e)}"
 
     def process_with_llm(self, prompt: str, sysprompt: str, context: str, repeat_on_failure: bool = True, number_repeat: int = 8) -> str:
         attempt = 0

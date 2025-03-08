@@ -259,15 +259,6 @@ class BenchPlugin(Plugin):
             name = url  # Keep full URL for custom APIs
         return f"{model} ({name})" if model else name
 
-    def reset_cuda_context(self):
-        """Clean up CUDA context"""
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-        if torch.cuda.is_available():
-            torch.cuda.set_device(torch.cuda.current_device())
-            torch.cuda.synchronize()
-
     def call_llm(self, url: str, api_key: str, model: str, prompt: str, sysprompt: str = "You are a helpful AI assistant") -> str:
         """Custom LLM call for benchmarking different endpoints"""
         try:
@@ -343,19 +334,22 @@ class BenchPlugin(Plugin):
                     key=lambda model_id: 0 if "Ollama" in model_id else 1
                 )
 
-                previous_is_ollama = None
+                previous_is_ollama = True
+                server = ""
                 for i, model_id in enumerate(sorted_models):
+                    prev_server = server
                     server = next(s for s in servers if self.get_server_display_name(
                         s["url"], s["model"]) == model_id)
+                    # st.info(server)
                     current_is_ollama = "localhost:11434" in server["url"]
 
                     # Check for transition from Ollama to non-Ollama
-                    if i > 0 and previous_is_ollama and not current_is_ollama:
+                    if not current_is_ollama:
                         st.write(
-                            "Transitioning from Ollama to another server type. Resetting CUDA context...")
-                        # self.ragllm_plugin.free_llm()
+                            f"Transitioning from Ollama ({prev_server['model']}) to another server type. Resetting CUDA context...")
+                        self.ragllm_plugin.free_llm(model=prev_server['model'])
 
-                    with st.expander(f"Results for {model_id}"):
+                    with st.expander(f"Results for {model_id}", expanded=True):
                         results = []
                         for prompt_data in active_prompts:
                             prompt = prompt_data["prompt"]
@@ -393,8 +387,6 @@ class BenchPlugin(Plugin):
 
     def compare_tab(self, config):
         st.header(t("compare_models"))
-
-        st.info(st.session_state.bench_results)
 
         available_models = list(st.session_state.bench_results.keys())
         if not available_models:
