@@ -9,6 +9,7 @@ import requests
 import torch
 import gc
 import json
+import ast
 
 # Translations
 translations["en"].update({
@@ -100,12 +101,6 @@ class BenchPlugin(Plugin):
         tab1, tab2, tab3 = st.tabs(
             [t("config_tab"), t("bench_tab"), t("compare_tab")])
 
-        # Reset button available in all tabs
-        if st.button("Reset Session State"):
-            st.session_state.clear()
-            plugin_config = config.get(self.name, {})
-            st.rerun()
-
         # Config tab
         with tab1:
             self.config_tab(config)
@@ -123,34 +118,15 @@ class BenchPlugin(Plugin):
 
         plugin_config = config.get(self.name, {})
         if 'servers' not in st.session_state:
-            st.session_state.servers = plugin_config.get(
-                "bench_servers", self.get_config_fields()["bench_servers"]["default"])
-            # Handle prompts with backward compatibility
+            bench_servers = plugin_config.get("bench_servers")
+            if isinstance(bench_servers, str):
+                bench_servers = ast.literal_eval(bench_servers)
+            st.session_state.servers = bench_servers
         if 'prompts' not in st.session_state or len(st.session_state.prompts) == 0:
-            prompts = plugin_config.get("bench_prompts")
-            if not prompts or not isinstance(prompts, list):
-                prompts = self.get_config_fields(
-                )["bench_prompts"]["default"]
-
-            # Convert old format (strings) to new format (dictionaries) if needed
-            converted_prompts = []
-            for item in prompts:
-                if isinstance(item, str):
-                    # Old format: convert string to new dictionary format
-                    converted_prompts.append(
-                        {"prompt": item, "expected": ""})
-                    st.info("convert")
-                elif isinstance(item, dict) and "prompt" in item:
-                    # New format: ensure expected field exists
-                    converted_prompts.append({
-                        "prompt": item.get("prompt", ""),
-                        "expected": item.get("expected", "")
-                    })
-                else:
-                    # Fallback for invalid entries
-                    converted_prompts.append(
-                        {"prompt": "", "expected": ""})
-            st.session_state.prompts = converted_prompts
+            bench_prompts = plugin_config.get("bench_prompts")
+            if isinstance(bench_prompts, str):
+                bench_prompts = ast.literal_eval(bench_prompts)
+            st.session_state.prompts = bench_prompts
 
         for i, server in enumerate(st.session_state.servers):
             url = server.get("url", "")
@@ -180,8 +156,8 @@ class BenchPlugin(Plugin):
                 else:
                     model = st.selectbox(t("model_label"), options=models,
                                          index=models.index(server.get("model", "")) if server.get(
-                                             "model", "") in models else 0,
-                                         key=f"model_{i}")
+                        "model", "") in models else 0,
+                        key=f"model_{i}")
 
                 if st.button("Remove", key=f"remove_{i}"):
                     del st.session_state.servers[i]
