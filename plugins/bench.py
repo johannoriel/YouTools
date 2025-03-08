@@ -366,7 +366,6 @@ class BenchPlugin(Plugin):
                         self.ragllm_plugin.free_llm(model=prev_server['model'])
                         previous_is_ollama = False
 
-
                     with st.expander(f"Results for {model_id}", expanded=True):
                         results = []
                         # Début de la mesure du temps pour ce modèle
@@ -455,10 +454,10 @@ class BenchPlugin(Plugin):
                     st.write(f"Expected: {r1['expected']}")
                 with col1:
                     st.write(f"Prompt: {r1['prompt']}")
-                    st.write(f"Response: {r1['response']}")
+                    st.markdown(r1['response'])
                 with col2:
                     st.write(f"Prompt: {r2['prompt']}")
-                    st.write(f"Response: {r2['response']}")
+                    st.markdown(r2['response'])
 
                 if i < len(results1) - 1:
                     st.divider()
