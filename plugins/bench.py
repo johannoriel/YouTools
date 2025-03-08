@@ -10,6 +10,7 @@ import torch
 import gc
 import json
 import ast
+import time
 
 # Translations
 translations["en"].update({
@@ -295,8 +296,30 @@ class BenchPlugin(Plugin):
             raise e
             return f"Error calling LLM at {url}: {str(e)}"
 
+    def get_cuda_memory_stats(self, device_index=0):
+        """Retourne les stats de mémoire CUDA en Mo"""
+        if not torch.cuda.is_available():
+            return {"allocated": 0, "max_allocated": 0, "reserved": 0}
+
+        torch.cuda.set_device(device_index)
+        allocated = torch.cuda.memory_allocated(device_index) / 1024 / 1024
+        max_allocated = torch.cuda.max_memory_allocated(
+            device_index) / 1024 / 1024
+        reserved = torch.cuda.memory_reserved(device_index) / 1024 / 1024
+
+        return {
+            "allocated": allocated,
+            "max_allocated": max_allocated,
+            "reserved": reserved
+        }
+
     def bench_tab(self, config):
         st.header(t("bench_header"))
+
+        if torch.cuda.is_available():
+            mem_before = self.get_cuda_memory_stats()
+            st.write(
+                f"Avant exécution - Mémoire allouée: {mem_before['reserved']:.2f} Mo")
 
         servers = st.session_state.get("servers", config.get(
             self.name, {}).get("bench_servers", []))
@@ -311,24 +334,19 @@ class BenchPlugin(Plugin):
             model_options
         )
 
-        # Add Debug checkbox
         debug_mode = st.checkbox(
             "Debug (use only first 3 prompts)", value=False)
 
         if st.button(t("run_bench")) and selected_models:
             with st.spinner(t("running_bench")):
-                # Reset previous results
                 st.session_state.bench_results = {}
-                # Use first 3 prompts in debug mode, otherwise all prompts
                 active_prompts = prompts[:3] if debug_mode and len(
                     prompts) > 3 else prompts
 
-                # Calculate total tasks (models × prompts)
                 total_tasks = len(selected_models) * len(active_prompts)
                 progress_bar = st.progress(0.0)
                 tasks_completed = 0
 
-                # Sort selected_models: Ollama first, then others
                 sorted_models = sorted(
                     selected_models,
                     key=lambda model_id: 0 if "Ollama" in model_id else 1
@@ -340,10 +358,8 @@ class BenchPlugin(Plugin):
                     prev_server = server
                     server = next(s for s in servers if self.get_server_display_name(
                         s["url"], s["model"]) == model_id)
-                    # st.info(server)
                     current_is_ollama = "localhost:11434" in server["url"]
 
-                    # Check for transition from Ollama to non-Ollama
                     if not current_is_ollama:
                         st.write(
                             f"Transitioning from Ollama ({prev_server['model']}) to another server type. Resetting CUDA context...")
@@ -351,6 +367,9 @@ class BenchPlugin(Plugin):
 
                     with st.expander(f"Results for {model_id}", expanded=True):
                         results = []
+                        # Début de la mesure du temps pour ce modèle
+                        start_time = time.time()
+
                         for prompt_data in active_prompts:
                             prompt = prompt_data["prompt"]
                             expected = prompt_data["expected"]
@@ -375,14 +394,24 @@ class BenchPlugin(Plugin):
                             except Exception as e:
                                 st.error(f"Error: {str(e)}")
 
-                            # Update progress
                             tasks_completed += 1
                             progress_bar.progress(
                                 tasks_completed / total_tasks)
 
-                        st.session_state.bench_results[model_id] = results
+                        # Fin de la mesure du temps et calcul
+                        end_time = time.time()
+                        elapsed_time = end_time - start_time
 
-                # Ensure progress reaches 100% at the end
+                        # Affichage du temps dans bench_tab
+                        st.write(
+                            f"Total time for {len(active_prompts)} prompts: {elapsed_time:.2f} seconds")
+
+                        # Stockage des résultats avec le temps
+                        st.session_state.bench_results[model_id] = {
+                            "results": results,
+                            "total_time": elapsed_time
+                        }
+
                 progress_bar.progress(1.0)
 
     def compare_tab(self, config):
@@ -400,9 +429,24 @@ class BenchPlugin(Plugin):
             model2 = st.selectbox(t("model2_label"), available_models)
 
         if model1 and model2:
-            results1 = st.session_state.bench_results.get(model1, [])
-            results2 = st.session_state.bench_results.get(model2, [])
+            # Récupération des résultats et temps
+            results1 = st.session_state.bench_results.get(
+                model1, {}).get("results", [])
+            time1 = st.session_state.bench_results.get(
+                model1, {}).get("total_time", 0)
+            results2 = st.session_state.bench_results.get(
+                model2, {}).get("results", [])
+            time2 = st.session_state.bench_results.get(
+                model2, {}).get("total_time", 0)
 
+            # Affichage des temps totaux
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"{model1} - Total time: {time1:.2f} seconds")
+            with col2:
+                st.write(f"{model2} - Total time: {time2:.2f} seconds")
+
+            # Affichage des résultats comme avant
             for i, (r1, r2) in enumerate(zip(results1, results2)):
                 col0, col1, col2 = st.columns([1, 3, 3])
                 with col0:
