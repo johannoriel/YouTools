@@ -360,10 +360,12 @@ class BenchPlugin(Plugin):
                         s["url"], s["model"]) == model_id)
                     current_is_ollama = "localhost:11434" in server["url"]
 
-                    if not current_is_ollama:
+                    if not current_is_ollama and previous_is_ollama:
                         st.write(
                             f"Transitioning from Ollama ({prev_server['model']}) to another server type. Resetting CUDA context...")
                         self.ragllm_plugin.free_llm(model=prev_server['model'])
+                        previous_is_ollama = False
+
 
                     with st.expander(f"Results for {model_id}", expanded=True):
                         results = []
