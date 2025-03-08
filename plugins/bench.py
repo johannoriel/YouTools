@@ -309,9 +309,7 @@ class BenchPlugin(Plugin):
                 "max_tokens": 1000
             }
 
-            # Ollama uses /api/chat, LM Studio uses /v1/chat/completions
             endpoint = "/v1/chat/completions"
-
             response = requests.post(
                 f"{url}{endpoint}", headers=headers, data=json.dumps(payload))
             response.raise_for_status()
@@ -341,21 +339,49 @@ class BenchPlugin(Plugin):
         model_options = [self.get_server_display_name(
             s["url"], s["model"]) for s in servers if s.get("model")]
 
-        selected_models = st.multiselect(t("select_models"), model_options)
+        selected_models = st.multiselect(
+            t("select_models"),
+            model_options
+        )
+
+        # Add Debug checkbox
+        debug_mode = st.checkbox(
+            "Debug (use only first 3 prompts)", value=False)
 
         if st.button(t("run_bench")) and selected_models:
             with st.spinner(t("running_bench")):
-                self.reset_cuda_context()
-                total_tasks = len(selected_models) * len(prompts)
+                # Reset previous results
+                st.session_state.bench_results = {}
+                # Use first 3 prompts in debug mode, otherwise all prompts
+                active_prompts = prompts[:3] if debug_mode and len(
+                    prompts) > 3 else prompts
+
+                # Calculate total tasks (models × prompts)
+                total_tasks = len(selected_models) * len(active_prompts)
                 progress_bar = st.progress(0.0)
                 tasks_completed = 0
 
-                for model_id in selected_models:
+                # Sort selected_models: Ollama first, then others
+                sorted_models = sorted(
+                    selected_models,
+                    key=lambda model_id: 0 if "Ollama" in model_id else 1
+                )
+
+                previous_is_ollama = None
+                for i, model_id in enumerate(sorted_models):
                     server = next(s for s in servers if self.get_server_display_name(
                         s["url"], s["model"]) == model_id)
+                    current_is_ollama = "localhost:11434" in server["url"]
+
+                    # Check for transition from Ollama to non-Ollama
+                    if i > 0 and previous_is_ollama and not current_is_ollama:
+                        st.write(
+                            "Transitioning from Ollama to another server type. Resetting CUDA context...")
+                        # self.ragllm_plugin.free_llm()
+
                     with st.expander(f"Results for {model_id}"):
                         results = []
-                        for prompt_data in prompts:
+                        for prompt_data in active_prompts:
                             prompt = prompt_data["prompt"]
                             expected = prompt_data["expected"]
                             try:
@@ -379,15 +405,20 @@ class BenchPlugin(Plugin):
                             except Exception as e:
                                 st.error(f"Error: {str(e)}")
 
+                            # Update progress
                             tasks_completed += 1
                             progress_bar.progress(
                                 tasks_completed / total_tasks)
 
                         st.session_state.bench_results[model_id] = results
-                    progress_bar.progress(1.0)
+
+                # Ensure progress reaches 100% at the end
+                progress_bar.progress(1.0)
 
     def compare_tab(self, config):
         st.header(t("compare_models"))
+
+        st.info(st.session_state.bench_results)
 
         available_models = list(st.session_state.bench_results.keys())
         if not available_models:
