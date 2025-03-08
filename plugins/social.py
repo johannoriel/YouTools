@@ -330,24 +330,6 @@ Chaque tweet doit faire maximum 280 caractères."""
         prompt = st.text_area(t("social_prompt"),
                               value=config['social']['default_prompt'])
 
-        # Checkbox for generating meme with posts
-        generate_meme_with_posts = st.checkbox(
-            t("auto_generate_meme_with_posts"), key="generate_meme_with_posts")
-
-        # Meme selection (pre-filled if generated)
-        st.subheader(t("select_meme_for_first_post"))
-        image_files = self._get_image_files(work_dir)
-        meme_options = ["None"] + image_files
-        default_index = meme_options.index(
-            st.session_state.selected_meme) if st.session_state.selected_meme in meme_options else 0
-        selected_meme = st.selectbox(
-            "Choose an image file", options=meme_options, index=default_index)
-        if selected_meme != st.session_state.selected_meme:
-            st.session_state.selected_meme = selected_meme if selected_meme != "None" else None
-        if st.session_state.selected_meme and selected_meme != "None":
-            st.image(os.path.join(
-                work_dir, st.session_state.selected_meme), caption="Selected Meme")
-
         # Manual start post
         st.subheader(t("social_manual_start"))
         manual_post_start = st.text_area(
@@ -358,6 +340,11 @@ Chaque tweet doit faire maximum 280 caractères."""
             st.session_state.generated_posts = [manual_post_start]
             st.session_state.selected_platforms = {0: start_platforms}
 
+        # Checkbox for generating meme with posts
+        generate_meme_with_posts = st.checkbox(
+            t("auto_generate_meme_with_posts"), key="generate_meme_with_posts")
+
+        # Use LLM to generate response
         if st.button(t("social_generate")) and transcript:
             st.session_state.has_generated = True
             with st.spinner(t("social_generating")):
@@ -393,6 +380,20 @@ Chaque tweet doit faire maximum 280 caractères."""
                         st.session_state.auto_meme_suggestion = meme_suggestion
                     elif error:
                         st.error(f"Failed to generate meme: {error}")
+
+        # Meme selection (pre-filled if generated)
+        st.subheader(t("select_meme_for_first_post"))
+        image_files = self._get_image_files(work_dir)
+        meme_options = ["None"] + image_files
+        default_index = meme_options.index(
+            st.session_state.selected_meme) if st.session_state.selected_meme in meme_options else 0
+        selected_meme = st.selectbox(
+            "Choose an image file", options=meme_options, index=default_index)
+        if selected_meme != st.session_state.selected_meme:
+            st.session_state.selected_meme = selected_meme if selected_meme != "None" else None
+        if st.session_state.selected_meme and selected_meme != "None":
+            st.image(os.path.join(
+                work_dir, st.session_state.selected_meme), caption="Selected Meme")
 
         # Meme preview (before selection)
         if st.session_state.auto_meme_suggestion and generate_meme_with_posts:
