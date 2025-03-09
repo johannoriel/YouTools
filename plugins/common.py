@@ -310,7 +310,7 @@ def list_video_files(directory):
     chroma_videos = []
     short_videos = []
     for file in os.listdir(directory):
-        if file.lower().endswith(('.mkv', '.mp4')):
+        if file.lower().endswith(('.mkv', '.mp4', '.mov', '.ogg')):
             # Check if the file name contains spaces
             if ' ' in file:
                 # Create a new file name by replacing spaces with underscores
