@@ -379,7 +379,7 @@ class TrimsilencesPlugin(Plugin):
 
                     with st.spinner(t("trim_silences_processing").format(file=file)):
                         # Utiliser les paramètres temporaires au lieu des paramètres de configuration
-                        result, reduction = self.remove_silence(
+                        result, reduction, _, _ = self.remove_silence(
                             full_path,
                             st.session_state.temp_silence_params["silence_threshold"],
                             st.session_state.temp_silence_params["silence_duration"],
