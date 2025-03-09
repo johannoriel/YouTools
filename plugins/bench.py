@@ -2,15 +2,13 @@
 from global_vars import translations, t
 from app import Plugin
 import streamlit as st
-from plugins.common import remove_quotes
-from plugins.ragllm import RagllmPlugin
-import os
 import requests
 import torch
-import gc
 import json
 import ast
 import time
+import random
+import re
 
 try:
     from pylatexenc.latex2text import LatexNodes2Text
@@ -213,61 +211,89 @@ class BenchPlugin(Plugin):
         return f"{model} ({name})" if model else name
 
     def call_llm(self, url: str, api_key: str, model: str, prompt: str, sysprompt: str = "You are a helpful AI assistant") -> str:
-        """Custom LLM call for benchmarking different endpoints"""
-        try:
-            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-            headers["Content-Type"] = "application/json"
+        """Custom LLM call with load balancing across multiple API keys and retry mechanism"""
+        # Get all servers with the same model from st.session_state.servers
+        available_servers = [s for s in st.session_state.servers if s.get(
+            "model") == model and s.get("url") == url]
+        if not available_servers:
+            return f"Error: No servers found for model {model} at {url}"
 
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": sysprompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 1000
-            }
+        # Shuffle servers for random selection
+        servers = available_servers.copy()
+        random.shuffle(servers)
+        # Limit retries to the number of available keys
+        max_retries = len(servers)
+        attempts = 0
 
-            endpoint = "/v1/chat/completions"
-            response = requests.post(
-                f"{url}{endpoint}", headers=headers, data=json.dumps(payload))
-            response.raise_for_status()
+        while attempts < max_retries:
+            # Select the current server (with its API key)
+            current_server = servers[attempts]
+            current_url = current_server.get("url", url)
+            current_api_key = current_server.get("api_key", api_key)
+            attempts += 1
 
-            data = response.json()
+            try:
+                headers = {
+                    "Authorization": f"Bearer {current_api_key}"} if current_api_key else {}
+                headers["Content-Type"] = "application/json"
 
-            # Handle different response formats
-            if "choices" in data:  # OpenAI-compatible (LM Studio)
-                raw_response = data["choices"][0]["message"]["content"]
-            elif "response" in data:  # Ollama
-                raw_response = data["response"]
-            else:
-                raw_response = "Error: Unexpected response format"
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": sysprompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1000
+                }
 
-            # Log raw response length
-            st.write(
-                f"API raw response length for {model} at {url}: {len(raw_response)} characters")
+                endpoint = "/v1/chat/completions"
+                response = requests.post(
+                    f"{current_url}{endpoint}", headers=headers, data=json.dumps(payload))
+                response.raise_for_status()
 
-            # Convert LaTeX to readable text
-            converted_response = self.convert_latex_to_text(raw_response)
-            st.write(
-                f"Length after LaTeX conversion: {len(converted_response)} characters")
+                data = response.json()
 
-            # Get nstart and nend from config
-            config = self.plugin_manager.config.get(self.name, {})
-            nstart = int(config.get("nstart", 100))
-            nend = int(config.get("nend", 150))
+                # Handle different response formats
+                if "choices" in data:  # OpenAI-compatible (LM Studio)
+                    raw_response = data["choices"][0]["message"]["content"]
+                elif "response" in data:  # Ollama
+                    raw_response = data["response"]
+                else:
+                    raw_response = "Error: Unexpected response format"
 
-            # Shorten the response
-            shortened_response = self.shorten_response(
-                converted_response, nstart, nend)
-            st.write(
-                f"Shortened response length: {len(shortened_response)} characters")
+                # Log raw response length
+                st.write(
+                    f"API raw response length for {model} at {current_url} (key attempt {attempts}): {len(raw_response)} characters")
 
-            return shortened_response
+                # Convert LaTeX to readable text
+                converted_response = self.convert_latex_to_text(raw_response)
+                st.write(
+                    f"Length after LaTeX conversion: {len(converted_response)} characters")
 
-        except Exception as e:
-            st.error(f"Error calling LLM at {url}: {str(e)}")
-            return f"Error: {str(e)}"
+                # Get nstart and nend from config
+                config = self.plugin_manager.config.get(self.name, {})
+                nstart = int(config.get("nstart", 200))
+                nend = int(config.get("nend", 200))
+
+                # Shorten the response
+                shortened_response = self.shorten_response(
+                    converted_response, nstart, nend)
+                st.write(
+                    f"Shortened response length: {len(shortened_response)} characters")
+
+                return shortened_response
+
+            except requests.exceptions.RequestException as e:
+                error_msg = f"Error calling LLM at {current_url} (attempt {attempts}/{max_retries}): {str(e)}"
+                st.warning(error_msg)
+                if attempts == max_retries:
+                    st.error(
+                        f"All {max_retries} API keys exhausted for {model} at {url}")
+                    return f"Error: {error_msg}"
+                # Retry with the next key
+
+        return f"Error: No successful response after {max_retries} attempts"
 
     def get_cuda_memory_stats(self, device_index=0):
         """Retourne les stats de mémoire CUDA en Mo"""
@@ -321,29 +347,35 @@ class BenchPlugin(Plugin):
 
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    new_url = st.text_input(t("url_label"), value=server.get("url", ""), key=f"url_{i}")
+                    new_url = st.text_input(
+                        t("url_label"), value=server.get("url", ""), key=f"url_{i}")
                 with col2:
                     refresh_key = f"refresh_{i}"
                     if st.button("Refresh Models", key=refresh_key):
-                        st.session_state.available_models_cache[new_url] = self.get_available_models(new_url, server.get("api_key", ""))
+                        st.session_state.available_models_cache[new_url] = self.get_available_models(
+                            new_url, server.get("api_key", ""))
                         st.session_state.servers[i]["url"] = new_url
 
-                api_key = st.text_input(t("api_key_label"), value=server.get("api_key", ""), key=f"key_{i}")
+                api_key = st.text_input(t("api_key_label"), value=server.get(
+                    "api_key", ""), key=f"key_{i}")
 
                 cache_key = f"{new_url}_{api_key}"
                 if (cache_key not in st.session_state.available_models_cache or
                     new_url != url or
-                    api_key != server.get("api_key", "")):
-                    st.session_state.available_models_cache[cache_key] = self.get_available_models(new_url, api_key)
+                        api_key != server.get("api_key", "")):
+                    st.session_state.available_models_cache[cache_key] = self.get_available_models(
+                        new_url, api_key)
 
-                models = st.session_state.available_models_cache.get(cache_key, [""])
+                models = st.session_state.available_models_cache.get(cache_key, [
+                                                                     ""])
 
                 if len(models) == 1 and models[0] == "":
                     model = st.text_input(t("model_label"), value=server.get("model", ""),
                                           placeholder="Enter model name manually", key=f"model_{i}")
                 else:
                     model = st.selectbox(t("model_label"), options=models,
-                                         index=models.index(server.get("model", "")) if server.get("model", "") in models else 0,
+                                         index=models.index(server.get("model", "")) if server.get(
+                                             "model", "") in models else 0,
                                          key=f"model_{i}")
 
                 if st.button("Remove", key=f"remove_{i}"):
@@ -351,20 +383,25 @@ class BenchPlugin(Plugin):
                     st.rerun()
                     continue
 
-                st.session_state.servers[i] = {"url": new_url, "api_key": api_key, "model": model}
+                st.session_state.servers[i] = {
+                    "url": new_url, "api_key": api_key, "model": model}
 
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Add Ollama"):
-                new_server = {"url": "http://localhost:11434", "api_key": "", "model": ""}
+                new_server = {"url": "http://localhost:11434",
+                              "api_key": "", "model": ""}
                 st.session_state.servers.append(new_server)
-                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(new_server["url"], new_server["api_key"])
+                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(
+                    new_server["url"], new_server["api_key"])
                 st.rerun()
         with col2:
             if st.button("Add LM Studio"):
-                new_server = {"url": "http://192.168.1.5:1234", "api_key": "", "model": ""}
+                new_server = {"url": "http://192.168.1.5:1234",
+                              "api_key": "", "model": ""}
                 st.session_state.servers.append(new_server)
-                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(new_server["url"], new_server["api_key"])
+                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(
+                    new_server["url"], new_server["api_key"])
                 st.rerun()
         with col3:
             if st.button("Add API"):
@@ -381,28 +418,35 @@ class BenchPlugin(Plugin):
                 if "excluded" not in prompt_data:
                     prompt_data["excluded"] = False
 
-                col1, col2, col3 = st.columns([2, 1, 1])  # Added col3 for exclude checkbox
+                # Added col3 for exclude checkbox
+                col1, col2, col3 = st.columns([2, 1, 1])
                 with col1:
-                    prompt = st.text_area(t("prompt_label"), value=prompt_data.get("prompt", ""), key=f"prompt_{i}")
+                    prompt = st.text_area(t("prompt_label"), value=prompt_data.get(
+                        "prompt", ""), key=f"prompt_{i}")
                 with col2:
-                    expected = st.text_area(t("expected_response_label"), value=prompt_data.get("expected", ""), key=f"expected_{i}")
+                    expected = st.text_area(t("expected_response_label"), value=prompt_data.get(
+                        "expected", ""), key=f"expected_{i}")
                 with col3:
-                    excluded = st.checkbox("Exclude from benchmark", value=prompt_data.get("excluded", False), key=f"exclude_{i}")
+                    excluded = st.checkbox("Exclude from benchmark", value=prompt_data.get(
+                        "excluded", False), key=f"exclude_{i}")
 
                 if st.button("Remove", key=f"remove_prompt_{i}"):
                     del st.session_state.prompts[i]
                     st.rerun()
                     continue
 
-                st.session_state.prompts[i] = {"prompt": prompt, "expected": expected, "excluded": excluded}
+                st.session_state.prompts[i] = {
+                    "prompt": prompt, "expected": expected, "excluded": excluded}
 
         if st.button(t("add_prompt")):
-            st.session_state.prompts.append({"prompt": "", "expected": "", "excluded": False})
+            st.session_state.prompts.append(
+                {"prompt": "", "expected": "", "excluded": False})
             st.rerun()
 
         if st.button("Save Configuration"):
             # When saving, exclude the 'excluded' field from the config to respect get_config_fields
-            config_prompts = [{"prompt": p["prompt"], "expected": p["expected"]} for p in st.session_state.prompts]
+            config_prompts = [{"prompt": p["prompt"], "expected": p["expected"]}
+                              for p in st.session_state.prompts]
             config[self.name] = {
                 "bench_servers": st.session_state.servers,
                 "bench_prompts": config_prompts
@@ -415,22 +459,28 @@ class BenchPlugin(Plugin):
 
         if torch.cuda.is_available():
             mem_before = self.get_cuda_memory_stats()
-            st.write(f"Avant exécution - Mémoire allouée: {mem_before['reserved']:.2f} Mo")
+            st.write(
+                f"Avant exécution - Mémoire allouée: {mem_before['reserved']:.2f} Mo")
 
-        servers = st.session_state.get("servers", config.get(self.name, {}).get("bench_servers", []))
-        prompts = st.session_state.get("prompts", config.get(self.name, {}).get("bench_prompts", []))
+        servers = st.session_state.get("servers", config.get(
+            self.name, {}).get("bench_servers", []))
+        prompts = st.session_state.get("prompts", config.get(
+            self.name, {}).get("bench_prompts", []))
 
-        model_options = [self.get_server_display_name(s["url"], s["model"]) for s in servers if s.get("model")]
+        model_options = [self.get_server_display_name(
+            s["url"], s["model"]) for s in servers if s.get("model")]
 
         selected_models = st.multiselect(t("select_models"), model_options)
 
-        debug_mode = st.checkbox("Debug (use only first 3 prompts)", value=False)
+        debug_mode = st.checkbox(
+            "Debug (use only first 3 prompts)", value=False)
 
         if st.button(t("run_bench")) and selected_models:
             with st.spinner(t("running_bench")):
                 st.session_state.bench_results = {}
                 # Filter out excluded prompts
-                active_prompts = [p for p in prompts if not p.get("excluded", False)]
+                active_prompts = [
+                    p for p in prompts if not p.get("excluded", False)]
                 if debug_mode and len(active_prompts) > 3:
                     active_prompts = active_prompts[:3]
 
@@ -438,18 +488,21 @@ class BenchPlugin(Plugin):
                 progress_bar = st.progress(0.0)
                 tasks_completed = 0
 
-                sorted_models = sorted(selected_models, key=lambda model_id: 0 if "Ollama" in model_id else 1)
+                sorted_models = sorted(
+                    selected_models, key=lambda model_id: 0 if "Ollama" in model_id else 1)
 
                 server = ""
                 for i, model_id in enumerate(sorted_models):
                     prev_server = server
-                    server = next(s for s in servers if self.get_server_display_name(s["url"], s["model"]) == model_id)
+                    server = next(s for s in servers if self.get_server_display_name(
+                        s["url"], s["model"]) == model_id)
                     current_is_ollama = "localhost:11434" in server["url"]
                     if i == 0:
                         previous_is_ollama = current_is_ollama
 
                     if not current_is_ollama and previous_is_ollama:
-                        st.write(f"Transitioning from Ollama ({prev_server['model']}) to another server type. Resetting CUDA context...")
+                        st.write(
+                            f"Transitioning from Ollama ({prev_server['model']}) to another server type. Resetting CUDA context...")
                         self.ragllm_plugin.free_llm(model=prev_server['model'])
                         previous_is_ollama = False
 
@@ -467,12 +520,14 @@ class BenchPlugin(Plugin):
                                     model=server["model"],
                                     prompt=prompt
                                 )
-                                st.write(f"Length before storage in bench_results: {len(response)} characters")
+                                st.write(
+                                    f"Length before storage in bench_results: {len(response)} characters")
 
                                 col1, col2 = st.columns([2, 1])
                                 with col1:
                                     st.write(f"Prompt: {prompt}")
-                                    st.write(f"Length before display: {len(response)} characters")
+                                    st.write(
+                                        f"Length before display: {len(response)} characters")
                                     st.write(f"Response: {response}")
                                 with col2:
                                     st.write(f"Expected: {expected}")
@@ -485,11 +540,13 @@ class BenchPlugin(Plugin):
                                 st.error(f"Error: {str(e)}")
 
                             tasks_completed += 1
-                            progress_bar.progress(tasks_completed / total_tasks)
+                            progress_bar.progress(
+                                tasks_completed / total_tasks)
 
                         end_time = time.time()
                         elapsed_time = end_time - start_time
-                        st.write(f"Total time for {len(active_prompts)} prompts: {elapsed_time:.2f} seconds")
+                        st.write(
+                            f"Total time for {len(active_prompts)} prompts: {elapsed_time:.2f} seconds")
 
                         st.session_state.bench_results[model_id] = {
                             "results": results,
