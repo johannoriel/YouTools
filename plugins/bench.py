@@ -299,6 +299,10 @@ class BenchPlugin(Plugin):
             bench_prompts = plugin_config.get("bench_prompts")
             if isinstance(bench_prompts, str):
                 bench_prompts = ast.literal_eval(bench_prompts)
+            # Initialize excluded field if not present
+            for prompt in bench_prompts:
+                if "excluded" not in prompt:
+                    prompt["excluded"] = False
             st.session_state.prompts = bench_prompts
 
         # Initialize a cache for available models if not already present
@@ -317,73 +321,55 @@ class BenchPlugin(Plugin):
 
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    new_url = st.text_input(
-                        t("url_label"), value=server.get("url", ""), key=f"url_{i}")
+                    new_url = st.text_input(t("url_label"), value=server.get("url", ""), key=f"url_{i}")
                 with col2:
                     refresh_key = f"refresh_{i}"
                     if st.button("Refresh Models", key=refresh_key):
-                        # Fetch models only on refresh
-                        st.session_state.available_models_cache[new_url] = self.get_available_models(
-                            new_url, server.get("api_key", ""))
+                        st.session_state.available_models_cache[new_url] = self.get_available_models(new_url, server.get("api_key", ""))
                         st.session_state.servers[i]["url"] = new_url
 
-                api_key = st.text_input(t("api_key_label"), value=server.get(
-                    "api_key", ""), key=f"key_{i}")
+                api_key = st.text_input(t("api_key_label"), value=server.get("api_key", ""), key=f"key_{i}")
 
-                # Check if we need to fetch models (new server, URL/API key changed, or refresh triggered)
                 cache_key = f"{new_url}_{api_key}"
                 if (cache_key not in st.session_state.available_models_cache or
                     new_url != url or
-                        api_key != server.get("api_key", "")):
-                    st.session_state.available_models_cache[cache_key] = self.get_available_models(
-                        new_url, api_key)
+                    api_key != server.get("api_key", "")):
+                    st.session_state.available_models_cache[cache_key] = self.get_available_models(new_url, api_key)
 
-                # Get cached models, default to [""] if not available
-                models = st.session_state.available_models_cache.get(cache_key, [
-                                                                     ""])
+                models = st.session_state.available_models_cache.get(cache_key, [""])
 
-                # Handle model selection
                 if len(models) == 1 and models[0] == "":
                     model = st.text_input(t("model_label"), value=server.get("model", ""),
                                           placeholder="Enter model name manually", key=f"model_{i}")
                 else:
                     model = st.selectbox(t("model_label"), options=models,
-                                         index=models.index(server.get("model", "")) if server.get(
-                                             "model", "") in models else 0,
+                                         index=models.index(server.get("model", "")) if server.get("model", "") in models else 0,
                                          key=f"model_{i}")
 
                 if st.button("Remove", key=f"remove_{i}"):
                     del st.session_state.servers[i]
-                    # Optionally remove from cache if no other server uses this URL/API key combo
                     st.rerun()
                     continue
 
-                st.session_state.servers[i] = {
-                    "url": new_url, "api_key": api_key, "model": model}
+                st.session_state.servers[i] = {"url": new_url, "api_key": api_key, "model": model}
 
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Add Ollama"):
-                new_server = {"url": "http://localhost:11434",
-                              "api_key": "", "model": ""}
+                new_server = {"url": "http://localhost:11434", "api_key": "", "model": ""}
                 st.session_state.servers.append(new_server)
-                # Pre-fetch models for new server
-                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(
-                    new_server["url"], new_server["api_key"])
+                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(new_server["url"], new_server["api_key"])
                 st.rerun()
         with col2:
             if st.button("Add LM Studio"):
-                new_server = {"url": "http://192.168.1.5:1234",
-                              "api_key": "", "model": ""}
+                new_server = {"url": "http://192.168.1.5:1234", "api_key": "", "model": ""}
                 st.session_state.servers.append(new_server)
-                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(
-                    new_server["url"], new_server["api_key"])
+                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(new_server["url"], new_server["api_key"])
                 st.rerun()
         with col3:
             if st.button("Add API"):
                 new_server = {"url": "", "api_key": "", "model": ""}
                 st.session_state.servers.append(new_server)
-                # No pre-fetch here since URL is empty; user must fill it first
                 st.rerun()
 
         st.header(t("prompts_list"))
@@ -391,30 +377,35 @@ class BenchPlugin(Plugin):
             st.write("No prompts defined yet.")
         else:
             for i, prompt_data in enumerate(st.session_state.prompts):
-                col1, col2 = st.columns([2, 1])
+                # Ensure excluded field exists
+                if "excluded" not in prompt_data:
+                    prompt_data["excluded"] = False
+
+                col1, col2, col3 = st.columns([2, 1, 1])  # Added col3 for exclude checkbox
                 with col1:
-                    prompt = st.text_area(t("prompt_label"), value=prompt_data.get(
-                        "prompt", ""), key=f"prompt_{i}")
+                    prompt = st.text_area(t("prompt_label"), value=prompt_data.get("prompt", ""), key=f"prompt_{i}")
                 with col2:
-                    expected = st.text_area(t("expected_response_label"), value=prompt_data.get(
-                        "expected", ""), key=f"expected_{i}")
+                    expected = st.text_area(t("expected_response_label"), value=prompt_data.get("expected", ""), key=f"expected_{i}")
+                with col3:
+                    excluded = st.checkbox("Exclude from benchmark", value=prompt_data.get("excluded", False), key=f"exclude_{i}")
 
                 if st.button("Remove", key=f"remove_prompt_{i}"):
                     del st.session_state.prompts[i]
                     st.rerun()
                     continue
 
-                st.session_state.prompts[i] = {
-                    "prompt": prompt, "expected": expected}
+                st.session_state.prompts[i] = {"prompt": prompt, "expected": expected, "excluded": excluded}
 
         if st.button(t("add_prompt")):
-            st.session_state.prompts.append({"prompt": "", "expected": ""})
+            st.session_state.prompts.append({"prompt": "", "expected": "", "excluded": False})
             st.rerun()
 
         if st.button("Save Configuration"):
+            # When saving, exclude the 'excluded' field from the config to respect get_config_fields
+            config_prompts = [{"prompt": p["prompt"], "expected": p["expected"]} for p in st.session_state.prompts]
             config[self.name] = {
                 "bench_servers": st.session_state.servers,
-                "bench_prompts": st.session_state.prompts
+                "bench_prompts": config_prompts
             }
             self.plugin_manager.save_config(config)
             st.success("Configuration saved successfully!")
@@ -424,58 +415,46 @@ class BenchPlugin(Plugin):
 
         if torch.cuda.is_available():
             mem_before = self.get_cuda_memory_stats()
-            st.write(
-                f"Avant exécution - Mémoire allouée: {mem_before['reserved']:.2f} Mo")
+            st.write(f"Avant exécution - Mémoire allouée: {mem_before['reserved']:.2f} Mo")
 
-        servers = st.session_state.get("servers", config.get(
-            self.name, {}).get("bench_servers", []))
-        prompts = st.session_state.get("prompts", config.get(
-            self.name, {}).get("bench_prompts", []))
+        servers = st.session_state.get("servers", config.get(self.name, {}).get("bench_servers", []))
+        prompts = st.session_state.get("prompts", config.get(self.name, {}).get("bench_prompts", []))
 
-        model_options = [self.get_server_display_name(
-            s["url"], s["model"]) for s in servers if s.get("model")]
+        model_options = [self.get_server_display_name(s["url"], s["model"]) for s in servers if s.get("model")]
 
-        selected_models = st.multiselect(
-            t("select_models"),
-            model_options
-        )
+        selected_models = st.multiselect(t("select_models"), model_options)
 
-        debug_mode = st.checkbox(
-            "Debug (use only first 3 prompts)", value=False)
+        debug_mode = st.checkbox("Debug (use only first 3 prompts)", value=False)
 
         if st.button(t("run_bench")) and selected_models:
             with st.spinner(t("running_bench")):
                 st.session_state.bench_results = {}
-                active_prompts = prompts[:3] if debug_mode and len(
-                    prompts) > 3 else prompts
+                # Filter out excluded prompts
+                active_prompts = [p for p in prompts if not p.get("excluded", False)]
+                if debug_mode and len(active_prompts) > 3:
+                    active_prompts = active_prompts[:3]
 
                 total_tasks = len(selected_models) * len(active_prompts)
                 progress_bar = st.progress(0.0)
                 tasks_completed = 0
 
-                sorted_models = sorted(
-                    selected_models,
-                    key=lambda model_id: 0 if "Ollama" in model_id else 1
-                )
+                sorted_models = sorted(selected_models, key=lambda model_id: 0 if "Ollama" in model_id else 1)
 
                 server = ""
                 for i, model_id in enumerate(sorted_models):
                     prev_server = server
-                    server = next(s for s in servers if self.get_server_display_name(
-                        s["url"], s["model"]) == model_id)
+                    server = next(s for s in servers if self.get_server_display_name(s["url"], s["model"]) == model_id)
                     current_is_ollama = "localhost:11434" in server["url"]
                     if i == 0:
                         previous_is_ollama = current_is_ollama
 
                     if not current_is_ollama and previous_is_ollama:
-                        st.write(
-                            f"Transitioning from Ollama ({prev_server['model']}) to another server type. Resetting CUDA context...")
+                        st.write(f"Transitioning from Ollama ({prev_server['model']}) to another server type. Resetting CUDA context...")
                         self.ragllm_plugin.free_llm(model=prev_server['model'])
                         previous_is_ollama = False
 
                     with st.expander(f"Results for {model_id}", expanded=True):
                         results = []
-                        # Début de la mesure du temps pour ce modèle
                         start_time = time.time()
 
                         for prompt_data in active_prompts:
@@ -488,9 +467,12 @@ class BenchPlugin(Plugin):
                                     model=server["model"],
                                     prompt=prompt
                                 )
+                                st.write(f"Length before storage in bench_results: {len(response)} characters")
+
                                 col1, col2 = st.columns([2, 1])
                                 with col1:
                                     st.write(f"Prompt: {prompt}")
+                                    st.write(f"Length before display: {len(response)} characters")
                                     st.write(f"Response: {response}")
                                 with col2:
                                     st.write(f"Expected: {expected}")
@@ -503,18 +485,12 @@ class BenchPlugin(Plugin):
                                 st.error(f"Error: {str(e)}")
 
                             tasks_completed += 1
-                            progress_bar.progress(
-                                tasks_completed / total_tasks)
+                            progress_bar.progress(tasks_completed / total_tasks)
 
-                        # Fin de la mesure du temps et calcul
                         end_time = time.time()
                         elapsed_time = end_time - start_time
+                        st.write(f"Total time for {len(active_prompts)} prompts: {elapsed_time:.2f} seconds")
 
-                        # Affichage du temps dans bench_tab
-                        st.write(
-                            f"Total time for {len(active_prompts)} prompts: {elapsed_time:.2f} seconds")
-
-                        # Stockage des résultats avec le temps
                         st.session_state.bench_results[model_id] = {
                             "results": results,
                             "total_time": elapsed_time
