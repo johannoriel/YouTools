@@ -472,19 +472,42 @@ class BenchPlugin(Plugin):
 
         selected_models = st.multiselect(t("select_models"), model_options)
 
+        # Supprimer les résultats des modèles qui ne sont plus sélectionnés
+        if 'bench_results' in st.session_state:
+            current_models = set(selected_models)
+            existing_models = set(st.session_state.bench_results.keys())
+            models_to_remove = existing_models - current_models
+            for model in models_to_remove:
+                del st.session_state.bench_results[model]
+
         debug_mode = st.checkbox(
             "Debug (use only first 3 prompts)", value=False)
 
         if st.button(t("run_bench")) and selected_models:
             with st.spinner(t("running_bench")):
-                st.session_state.bench_results = {}
+                # S'assurer que bench_results existe
+                if 'bench_results' not in st.session_state:
+                    st.session_state.bench_results = {}
+
                 # Filter out excluded prompts
                 active_prompts = [
                     p for p in prompts if not p.get("excluded", False)]
                 if debug_mode and len(active_prompts) > 3:
                     active_prompts = active_prompts[:3]
 
-                total_tasks = len(selected_models) * len(active_prompts)
+                total_tasks = 0
+                # Calculer le nombre total de tâches uniquement pour les nouveaux tests ou tests invalides
+                for model_id in selected_models:
+                    if model_id not in st.session_state.bench_results:
+                        total_tasks += len(active_prompts)
+                    else:
+                        # Vérifier les prompts existants, en excluant les réponses vides ou contenant "Error"
+                        existing_prompts = set(
+                            r["prompt"] for r in st.session_state.bench_results[model_id]["results"]
+                            if r["response"] and "Error" not in r["response"])
+                        new_prompts = set(p["prompt"] for p in active_prompts)
+                        total_tasks += len(new_prompts - existing_prompts)
+
                 progress_bar = st.progress(0.0)
                 tasks_completed = 0
 
@@ -507,10 +530,25 @@ class BenchPlugin(Plugin):
                         previous_is_ollama = False
 
                     with st.expander(f"Results for {model_id}", expanded=True):
-                        results = []
+                        # Si le modèle existe déjà, récupérer ses résultats existants
+                        if model_id in st.session_state.bench_results:
+                            results = st.session_state.bench_results[model_id]["results"]
+                            total_time = st.session_state.bench_results[model_id]["total_time"]
+                        else:
+                            results = []
+                            total_time = 0.0
+
                         start_time = time.time()
 
-                        for prompt_data in active_prompts:
+                        # Identifier les prompts existants valides (non vides et sans "Error")
+                        existing_prompts = set(
+                            r["prompt"] for r in results
+                            if r["response"] and "Error" not in r["response"])
+                        prompts_to_run = [
+                            p for p in active_prompts if p["prompt"] not in existing_prompts]
+
+                        # Régénérer les réponses pour les prompts à refaire
+                        for prompt_data in prompts_to_run:
                             prompt = prompt_data["prompt"]
                             expected = prompt_data["expected"]
                             try:
@@ -523,6 +561,23 @@ class BenchPlugin(Plugin):
                                 st.write(
                                     f"Length before storage in bench_results: {len(response)} characters")
 
+                                # Si le prompt existe déjà dans results (cas d'erreur ou vide précédent), le mettre à jour
+                                for i, result in enumerate(results):
+                                    if result["prompt"] == prompt:
+                                        results[i] = {
+                                            "prompt": prompt,
+                                            "expected": expected,
+                                            "response": response
+                                        }
+                                        break
+                                else:
+                                    # Sinon, ajouter le nouveau résultat
+                                    results.append({
+                                        "prompt": prompt,
+                                        "expected": expected,
+                                        "response": response
+                                    })
+
                                 col1, col2 = st.columns([2, 1])
                                 with col1:
                                     st.write(f"Prompt: {prompt}")
@@ -531,29 +586,43 @@ class BenchPlugin(Plugin):
                                     st.write(f"Response: {response}")
                                 with col2:
                                     st.write(f"Expected: {expected}")
-                                results.append({
-                                    "prompt": prompt,
-                                    "expected": expected,
-                                    "response": response
-                                })
+
                             except Exception as e:
                                 st.error(f"Error: {str(e)}")
 
                             tasks_completed += 1
-                            progress_bar.progress(
-                                tasks_completed / total_tasks)
+                            if total_tasks > 0:
+                                progress_bar.progress(
+                                    tasks_completed / total_tasks)
+
+                        # Afficher les résultats existants qui correspondent aux prompts actifs
+                        for result in [r for r in results if r["prompt"] in set(p["prompt"] for p in active_prompts)]:
+                            if result["prompt"] not in [p["prompt"] for p in prompts_to_run]:
+                                col1, col2 = st.columns([2, 1])
+                                with col1:
+                                    st.write(f"Prompt: {result['prompt']}")
+                                    st.write(f"Response: {result['response']}")
+                                with col2:
+                                    st.write(f"Expected: {result['expected']}")
 
                         end_time = time.time()
                         elapsed_time = end_time - start_time
+                        total_time += elapsed_time
+
                         st.write(
-                            f"Total time for {len(active_prompts)} prompts: {elapsed_time:.2f} seconds")
+                            f"Total time for {len(active_prompts)} prompts: {total_time:.2f} seconds")
 
                         st.session_state.bench_results[model_id] = {
                             "results": results,
-                            "total_time": elapsed_time
+                            "total_time": total_time
                         }
 
-                progress_bar.progress(1.0)
+                if total_tasks > 0:
+                    progress_bar.progress(1.0)
+                else:
+                    progress_bar.progress(1.0)
+                    st.write(
+                        "All selected tests were already completed with valid responses.")
 
     def compare_tab(self, config):
         st.header(t("compare_models"))
