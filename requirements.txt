@@ -32,3 +32,4 @@ whisper
 langdetect
 moviepy
 googlesearch-python
+pylatexenc

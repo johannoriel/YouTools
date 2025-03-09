@@ -12,6 +12,12 @@ import json
 import ast
 import time
 
+try:
+    from pylatexenc.latex2text import LatexNodes2Text
+    LATEX_AVAILABLE = True
+except ImportError:
+    LATEX_AVAILABLE = False
+
 # Translations
 translations["en"].update({
     "bench_tab": "LLM Benchmark",
@@ -87,7 +93,17 @@ class BenchPlugin(Plugin):
                     {"prompt": "Explain quantum physics simply",
                         "expected": "Quantum physics is about tiny particles behaving strangely."}
                 ]
-            }
+            },
+            "nstart": {
+                "type": "int",
+                "label": "Characters to keep at start",
+                "default": 200
+            },
+            "nend": {
+                "type": "int",
+                "label": "Characters to keep at end",
+                "default": 200
+            },
         }
 
     def get_tabs(self):
@@ -96,6 +112,50 @@ class BenchPlugin(Plugin):
             {"name": t("bench_tab"), "plugin": "benchplugin"},
             {"name": t("compare_tab"), "plugin": "benchplugin"}
         ]
+
+    def shorten_response(self, response: str, nstart: int = 100, nend: int = 50) -> str:
+        """Raccourcit une réponse en conservant nstart premiers et nend derniers caractères"""
+        if len(response) <= nstart + nend:
+            return response
+
+        return f"{response[:nstart]}\n\n[...]\n\n{response[-nend:]}"
+
+    def convert_latex_to_text(self, text: str) -> str:
+        """Convert LaTeX markup in text to readable plain text."""
+        if not text:
+            return text
+
+        # If pylatexenc is available, use it
+        if LATEX_AVAILABLE:
+            try:
+                converter = LatexNodes2Text()
+                return converter.latex_to_text(text)
+            except Exception as e:
+                st.warning(
+                    f"Failed to convert LaTeX with pylatexenc: {str(e)}. Falling back to basic cleanup.")
+
+        # Fallback: Basic regex cleanup for common LaTeX commands
+        # Remove \[ \] or \( \) delimiters
+        text = re.sub(r'\\\[(.*?)\\\]', r'\1', text)
+        text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
+        # Replace common commands
+        replacements = {
+            r'\\boxed{(.*?)}': r'\1',           # Remove \boxed, keep content
+            r'\\times': '×',                   # Multiplication symbol
+            r'\\div': '÷',                     # Division symbol
+            r'\\frac{(.*?)}{(.*?)}': r'\1/\2',  # Fraction to slash
+            # Remove \, (thousands separator)
+            r'(\d+)\\,!(\d+)': r'\1\2',
+            r'(\d+)\^{(\d+)}': r'\1^\2',       # Keep exponent as-is
+        }
+        for pattern, replacement in replacements.items():
+            text = re.sub(pattern, replacement, text)
+
+        # Clean up extra spaces or braces
+        text = re.sub(r'\s+', ' ', text)
+        text = text.replace('{', '').replace('}', '').strip()
+
+        return text
 
     def run(self, config):
         # Define the tabs
@@ -114,6 +174,118 @@ class BenchPlugin(Plugin):
         with tab3:
             self.compare_tab(config)
 
+    def get_available_models(self, url, api_key):
+        """Try to get models from both Ollama and LM Studio endpoints with better empty response handling"""
+        models = [""]
+        try:
+            if not url:  # Early return if URL is empty
+                return models
+
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+            # Try Ollama endpoint
+            response = requests.get(f"{url}/api/tags", headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                if data and "models" in data and data["models"]:
+                    return [model["name"] for model in data["models"]]
+
+            # Try LM Studio endpoint
+            response = requests.get(f"{url}/v1/models", headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict) and "data" in data and data["data"]:
+                    return [model["id"] for model in data["data"] if model.get("object") == "model"]
+
+            return models
+        except Exception as e:
+            st.warning(f"Could not fetch models from {url}: {str(e)}")
+            return models  # Always return a list
+
+    def get_server_display_name(self, url: str, model: str = "") -> str:
+        """Decode server URL into a friendly display name with optional model"""
+        if "localhost:11434" in url:
+            name = "Ollama"
+        elif "192.168.1.5:1234" in url:
+            name = "LM Studio"
+        else:
+            name = url  # Keep full URL for custom APIs
+        return f"{model} ({name})" if model else name
+
+    def call_llm(self, url: str, api_key: str, model: str, prompt: str, sysprompt: str = "You are a helpful AI assistant") -> str:
+        """Custom LLM call for benchmarking different endpoints"""
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            headers["Content-Type"] = "application/json"
+
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": sysprompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 1000
+            }
+
+            endpoint = "/v1/chat/completions"
+            response = requests.post(
+                f"{url}{endpoint}", headers=headers, data=json.dumps(payload))
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Handle different response formats
+            if "choices" in data:  # OpenAI-compatible (LM Studio)
+                raw_response = data["choices"][0]["message"]["content"]
+            elif "response" in data:  # Ollama
+                raw_response = data["response"]
+            else:
+                raw_response = "Error: Unexpected response format"
+
+            # Log raw response length
+            st.write(
+                f"API raw response length for {model} at {url}: {len(raw_response)} characters")
+
+            # Convert LaTeX to readable text
+            converted_response = self.convert_latex_to_text(raw_response)
+            st.write(
+                f"Length after LaTeX conversion: {len(converted_response)} characters")
+
+            # Get nstart and nend from config
+            config = self.plugin_manager.config.get(self.name, {})
+            nstart = int(config.get("nstart", 100))
+            nend = int(config.get("nend", 150))
+
+            # Shorten the response
+            shortened_response = self.shorten_response(
+                converted_response, nstart, nend)
+            st.write(
+                f"Shortened response length: {len(shortened_response)} characters")
+
+            return shortened_response
+
+        except Exception as e:
+            st.error(f"Error calling LLM at {url}: {str(e)}")
+            return f"Error: {str(e)}"
+
+    def get_cuda_memory_stats(self, device_index=0):
+        """Retourne les stats de mémoire CUDA en Mo"""
+        if not torch.cuda.is_available():
+            return {"allocated": 0, "max_allocated": 0, "reserved": 0}
+
+        torch.cuda.set_device(device_index)
+        allocated = torch.cuda.memory_allocated(device_index) / 1024 / 1024
+        max_allocated = torch.cuda.max_memory_allocated(
+            device_index) / 1024 / 1024
+        reserved = torch.cuda.memory_reserved(device_index) / 1024 / 1024
+
+        return {
+            "allocated": allocated,
+            "max_allocated": max_allocated,
+            "reserved": reserved
+        }
+
     def config_tab(self, config):
         st.header(t("servers_list"))
 
@@ -129,6 +301,10 @@ class BenchPlugin(Plugin):
                 bench_prompts = ast.literal_eval(bench_prompts)
             st.session_state.prompts = bench_prompts
 
+        # Initialize a cache for available models if not already present
+        if 'available_models_cache' not in st.session_state:
+            st.session_state.available_models_cache = {}
+
         for i, server in enumerate(st.session_state.servers):
             url = server.get("url", "")
             model = server.get("model", "")
@@ -141,48 +317,73 @@ class BenchPlugin(Plugin):
 
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    url = st.text_input(t("url_label"), value=server.get(
-                        "url", ""), key=f"url_{i}")
+                    new_url = st.text_input(
+                        t("url_label"), value=server.get("url", ""), key=f"url_{i}")
                 with col2:
-                    if st.button("Refresh Models", key=f"refresh_{i}"):
-                        st.session_state.servers[i]["url"] = url
+                    refresh_key = f"refresh_{i}"
+                    if st.button("Refresh Models", key=refresh_key):
+                        # Fetch models only on refresh
+                        st.session_state.available_models_cache[new_url] = self.get_available_models(
+                            new_url, server.get("api_key", ""))
+                        st.session_state.servers[i]["url"] = new_url
 
                 api_key = st.text_input(t("api_key_label"), value=server.get(
                     "api_key", ""), key=f"key_{i}")
-                models = self.get_available_models(url, api_key)
 
+                # Check if we need to fetch models (new server, URL/API key changed, or refresh triggered)
+                cache_key = f"{new_url}_{api_key}"
+                if (cache_key not in st.session_state.available_models_cache or
+                    new_url != url or
+                        api_key != server.get("api_key", "")):
+                    st.session_state.available_models_cache[cache_key] = self.get_available_models(
+                        new_url, api_key)
+
+                # Get cached models, default to [""] if not available
+                models = st.session_state.available_models_cache.get(cache_key, [
+                                                                     ""])
+
+                # Handle model selection
                 if len(models) == 1 and models[0] == "":
                     model = st.text_input(t("model_label"), value=server.get("model", ""),
                                           placeholder="Enter model name manually", key=f"model_{i}")
                 else:
                     model = st.selectbox(t("model_label"), options=models,
                                          index=models.index(server.get("model", "")) if server.get(
-                        "model", "") in models else 0,
-                        key=f"model_{i}")
+                                             "model", "") in models else 0,
+                                         key=f"model_{i}")
 
                 if st.button("Remove", key=f"remove_{i}"):
                     del st.session_state.servers[i]
+                    # Optionally remove from cache if no other server uses this URL/API key combo
                     st.rerun()
                     continue
 
                 st.session_state.servers[i] = {
-                    "url": url, "api_key": api_key, "model": model}
+                    "url": new_url, "api_key": api_key, "model": model}
 
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Add Ollama"):
-                st.session_state.servers.append(
-                    {"url": "http://localhost:11434", "api_key": "", "model": ""})
+                new_server = {"url": "http://localhost:11434",
+                              "api_key": "", "model": ""}
+                st.session_state.servers.append(new_server)
+                # Pre-fetch models for new server
+                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(
+                    new_server["url"], new_server["api_key"])
                 st.rerun()
         with col2:
             if st.button("Add LM Studio"):
-                st.session_state.servers.append(
-                    {"url": "http://192.168.1.5:1234", "api_key": "", "model": ""})
+                new_server = {"url": "http://192.168.1.5:1234",
+                              "api_key": "", "model": ""}
+                st.session_state.servers.append(new_server)
+                st.session_state.available_models_cache[f"{new_server['url']}_{new_server['api_key']}"] = self.get_available_models(
+                    new_server["url"], new_server["api_key"])
                 st.rerun()
         with col3:
             if st.button("Add API"):
-                st.session_state.servers.append(
-                    {"url": "", "api_key": "", "model": ""})
+                new_server = {"url": "", "api_key": "", "model": ""}
+                st.session_state.servers.append(new_server)
+                # No pre-fetch here since URL is empty; user must fill it first
                 st.rerun()
 
         st.header(t("prompts_list"))
@@ -192,17 +393,11 @@ class BenchPlugin(Plugin):
             for i, prompt_data in enumerate(st.session_state.prompts):
                 col1, col2 = st.columns([2, 1])
                 with col1:
-                    prompt = st.text_area(
-                        t("prompt_label"),
-                        value=prompt_data.get("prompt", ""),
-                        key=f"prompt_{i}"
-                    )
+                    prompt = st.text_area(t("prompt_label"), value=prompt_data.get(
+                        "prompt", ""), key=f"prompt_{i}")
                 with col2:
-                    expected = st.text_area(
-                        t("expected_response_label"),
-                        value=prompt_data.get("expected", ""),
-                        key=f"expected_{i}"
-                    )
+                    expected = st.text_area(t("expected_response_label"), value=prompt_data.get(
+                        "expected", ""), key=f"expected_{i}")
 
                 if st.button("Remove", key=f"remove_prompt_{i}"):
                     del st.session_state.prompts[i]
@@ -223,95 +418,6 @@ class BenchPlugin(Plugin):
             }
             self.plugin_manager.save_config(config)
             st.success("Configuration saved successfully!")
-
-    def get_available_models(self, url, api_key):
-        """Try to get models from both Ollama and LM Studio endpoints with better empty response handling"""
-        models = [""]
-        try:
-            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-
-            # Try Ollama endpoint
-            response = requests.get(f"{url}/api/tags", headers=headers)
-            if response.status_code == 200:
-                data = response.json()
-                # Check if response has actual models
-                if data and "models" in data and data["models"]:
-                    return [model["name"] for model in data["models"]]
-
-            # Try LM Studio endpoint
-            response = requests.get(f"{url}/v1/models", headers=headers)
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, dict) and "data" in data and data["data"]:
-                    return [model["id"] for model in data["data"] if model.get("object") == "model"]
-
-            return models
-        except Exception as e:
-            st.warning(f"Could not fetch models from {url}: {str(e)}")
-            return models
-
-    def get_server_display_name(self, url: str, model: str = "") -> str:
-        """Decode server URL into a friendly display name with optional model"""
-        if "localhost:11434" in url:
-            name = "Ollama"
-        elif "192.168.1.5:1234" in url:
-            name = "LM Studio"
-        else:
-            name = url  # Keep full URL for custom APIs
-        return f"{model} ({name})" if model else name
-
-    def call_llm(self, url: str, api_key: str, model: str, prompt: str, sysprompt: str = "You are a helpful AI assistant") -> str:
-        """Custom LLM call for benchmarking different endpoints"""
-        try:
-            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-            headers["Content-Type"] = "application/json"
-
-            # Standard OpenAI-compatible payload
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": sysprompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 1000
-            }
-
-            endpoint = "/v1/chat/completions"
-            response = requests.post(
-                f"{url}{endpoint}", headers=headers, data=json.dumps(payload))
-            response.raise_for_status()
-
-            data = response.json()
-
-            # Handle different response formats
-            if "choices" in data:  # OpenAI-compatible (LM Studio)
-                return data["choices"][0]["message"]["content"]
-            elif "response" in data:  # Ollama
-                return data["response"]
-            else:
-                return "Error: Unexpected response format"
-
-        except Exception as e:
-            raise e
-            return f"Error calling LLM at {url}: {str(e)}"
-
-    def get_cuda_memory_stats(self, device_index=0):
-        """Retourne les stats de mémoire CUDA en Mo"""
-        if not torch.cuda.is_available():
-            return {"allocated": 0, "max_allocated": 0, "reserved": 0}
-
-        torch.cuda.set_device(device_index)
-        allocated = torch.cuda.memory_allocated(device_index) / 1024 / 1024
-        max_allocated = torch.cuda.max_memory_allocated(
-            device_index) / 1024 / 1024
-        reserved = torch.cuda.memory_reserved(device_index) / 1024 / 1024
-
-        return {
-            "allocated": allocated,
-            "max_allocated": max_allocated,
-            "reserved": reserved
-        }
 
     def bench_tab(self, config):
         st.header(t("bench_header"))
@@ -352,13 +458,14 @@ class BenchPlugin(Plugin):
                     key=lambda model_id: 0 if "Ollama" in model_id else 1
                 )
 
-                previous_is_ollama = True
                 server = ""
                 for i, model_id in enumerate(sorted_models):
                     prev_server = server
                     server = next(s for s in servers if self.get_server_display_name(
                         s["url"], s["model"]) == model_id)
                     current_is_ollama = "localhost:11434" in server["url"]
+                    if i == 0:
+                        previous_is_ollama = current_is_ollama
 
                     if not current_is_ollama and previous_is_ollama:
                         st.write(
