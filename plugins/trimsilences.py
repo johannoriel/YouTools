@@ -243,11 +243,12 @@ class TrimsilencesPlugin(Plugin):
             if progress_callback:
                 progress_callback(33)
 
+            print("Découpage des segments silencieux")
             # Découper la vidéo selon les segments
             clips = []
             for i, (start, end, silence_middle) in enumerate(segments):
                 # Ajouter le segment non-silencieux
-                clip = video.subclip(start, end)
+                clip = video.subclipped(start_time=start, end_time=end)
                 clips.append(clip)
 
                 if progress_callback:
@@ -255,6 +256,7 @@ class TrimsilencesPlugin(Plugin):
                     progress_callback(int(progress))
 
             # Concaténer les segments
+            print("Concaténation des segments")
             final_video = concatenate_videoclips(clips)
 
             if progress_callback:
@@ -265,6 +267,7 @@ class TrimsilencesPlugin(Plugin):
             output_file = os.path.join(videos_dir, output_filename)
 
             # Écrire le fichier final
+            print("Écriture du fichier final")
             final_video.write_videofile(output_file,
                                         codec='libx264',
                                         audio_codec='aac',
@@ -304,6 +307,7 @@ class TrimsilencesPlugin(Plugin):
             return output_file, reduction_str, original_duration, final_duration
 
         except Exception as e:
+            raise e
             return t("trim_silences_error").format(error=str(e)), "0%", 0.0, 0.0
 
     def run(self, config):
