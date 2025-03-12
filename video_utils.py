@@ -101,16 +101,36 @@ def convert_to_mp4(video_path):
         st.error(f"Conversion failed: {str(e)}")
     return output_path
 
-def rename_video(video_path, new_name):
-    directory, old_name = os.path.split(video_path)
-    extension = os.path.splitext(old_name)[1]
-    new_path = os.path.join(directory, new_name + extension)
-    os.rename(video_path, new_path)
-    old_vtt = os.path.splitext(video_path)[0] + ".vtt"
-    if os.path.exists(old_vtt):
-        new_vtt = os.path.splitext(new_path)[0] + ".vtt"
-        os.rename(old_vtt, new_vtt)
-    return new_path
+def rename_video(old_path, new_name):
+    """
+    Renomme un fichier vidéo et tous les fichiers associés (même nom de base, différentes extensions)
+
+    Args:
+        old_path (str): Chemin complet du fichier original
+        new_name (str): Nouveau nom de fichier (sans extension)
+    """
+    import os
+    import glob
+
+    # Récupérer le répertoire et l'ancien nom de base
+    directory = os.path.dirname(old_path)
+    old_base = os.path.splitext(os.path.basename(old_path))[0]
+
+    # Trouver tous les fichiers avec le même nom de base
+    pattern = os.path.join(directory, f"{old_base}.*")
+    matching_files = glob.glob(pattern)
+
+    # Renommer chaque fichier trouvé
+    for file_path in matching_files:
+        # Garder la même extension
+        ext = os.path.splitext(file_path)[1]
+        new_path = os.path.join(directory, f"{new_name}{ext}")
+
+        # Renommer le fichier
+        try:
+            os.rename(file_path, new_path)
+        except Exception as e:
+            raise Exception(f"Failed to rename {file_path} to {new_path}: {str(e)}")
 
 def merge_videos(video_paths, output_dir):
     output_path = os.path.join(output_dir, "merge.mp4")
