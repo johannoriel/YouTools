@@ -123,7 +123,7 @@ def merge_videos(video_paths, output_dir):
         st.error(f"Merge failed: {str(e)}")
     return output_path
 
-def split_video(video_path, split_time_ms, output_dir):
+def split_video_fast(video_path, split_time_ms, output_dir):
     """Découpe une vidéo en deux parties à un point donné en millisecondes."""
     split1_path = os.path.join(output_dir, "split1.mp4")
     split2_path = os.path.join(output_dir, "split2.mp4")
@@ -134,6 +134,42 @@ def split_video(video_path, split_time_ms, output_dir):
         ffmpeg.run(stream1)
         stream2 = ffmpeg.input(video_path, ss=split_time).output(split2_path, vcodec="copy", acodec="copy")
         ffmpeg.run(stream2)
+        st.success(f"Video split into {split1_path} and {split2_path}!")
+    except Exception as e:
+        st.error(f"Split failed: {str(e)}")
+    return split1_path, split2_path
+
+def split_video(video_path, split_time_ms, output_dir):
+    """Découpe une vidéo en deux parties à un point donné en millisecondes avec ré-encodage."""
+    split1_path = os.path.join(output_dir, "split1.mp4")
+    split2_path = os.path.join(output_dir, "split2.mp4")
+    try:
+        # Convertir millisecondes en secondes avec précision
+        split_time = split_time_ms / 1000.0
+
+        # Première partie : de 0 à split_time
+        stream1 = ffmpeg.input(video_path, ss=0).output(
+            split1_path,
+            t=split_time,
+            vcodec="h264",  # Ré-encoder en H.264
+            acodec="aac",   # Ré-encoder en AAC
+            strict="experimental",
+            map_metadata="-1",  # Supprimer les métadonnées héritées
+            reset_timestamps=1  # Réinitialiser les timestamps
+        )
+        ffmpeg.run(stream1)
+
+        # Deuxième partie : de split_time à la fin
+        stream2 = ffmpeg.input(video_path, ss=split_time).output(
+            split2_path,
+            vcodec="h264",
+            acodec="aac",
+            strict="experimental",
+            map_metadata="-1",
+            reset_timestamps=1
+        )
+        ffmpeg.run(stream2)
+
         st.success(f"Video split into {split1_path} and {split2_path}!")
     except Exception as e:
         st.error(f"Split failed: {str(e)}")
