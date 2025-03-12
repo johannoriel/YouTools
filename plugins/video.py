@@ -107,20 +107,23 @@ class VideoPlugin(Plugin):
         st.header(t("video_header"))
 
     def setup_controls(self):
-        col_model, col_thumb, col_refresh, col_ext, col_mute = st.columns([2, 1, 1, 2, 1])
-        with col_model:
-            model_options = ["base", "medium", "turbo", "large-v3", "large-v3-turbo"]
-            selected_model = st.selectbox(t("video_model_label"), model_options, index=0)
-        with col_thumb:
-            generate_thumbnails = st.checkbox(t("video_generate_thumbnails"))
-        with col_refresh:
-            refresh_thumbnails = st.button(t("video_refresh_thumbnails"))
-        with col_ext:
-            extension_options = [".mp4", ".mkv", ".ogg"]
-            selected_extensions = st.multiselect(t("video_extensions_label"), extension_options, default=extension_options)
-        with col_mute:
-            mute_videos = st.checkbox(t("video_mute_label"), value=False)
-        return selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos
+        with st.expander("Options"):  # Ajout d'un expander
+            col_model, col_thumb, col_refresh, col_ext, col_mute, col_debug = st.columns([2, 1, 1, 2, 1, 1])
+            with col_model:
+                model_options = ["base", "medium", "turbo", "large-v3", "large-v3-turbo"]
+                selected_model = st.selectbox(t("video_model_label"), model_options, index=0)
+            with col_thumb:
+                generate_thumbnails = st.checkbox(t("video_generate_thumbnails"))
+            with col_refresh:
+                refresh_thumbnails = st.button(t("video_refresh_thumbnails"))
+            with col_ext:
+                extension_options = [".mp4", ".mkv", ".ogg"]
+                selected_extensions = st.multiselect(t("video_extensions_label"), extension_options, default=extension_options)
+            with col_mute:
+                mute_videos = st.checkbox(t("video_mute_label"), value=False)
+            with col_debug:
+                show_end_columns = st.checkbox("Show End Columns", value=False, key="show_end_columns")  # Option pour afficher "End"
+            return selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos, show_end_columns
 
     def display_videos(self, video_df):
         col1, col2 = st.columns([2, 3])
@@ -226,7 +229,7 @@ class VideoPlugin(Plugin):
                                 except Exception as e:
                                     st.error(t("video_error").format(error=str(e)))
 
-    def handle_chapters(self, col1, selected_videos, video_df):
+    def handle_chapters(self, col1, selected_videos, video_df, show_end_columns):
         with col1:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
@@ -236,11 +239,13 @@ class VideoPlugin(Plugin):
                     subtitles_df, chapters_df = load_subtitles_and_chapters(vtt_path)
                     if not chapters_df.empty:
                         st.write(t("video_chapters_label"))
+                        column_order = ["Start", "End", "Title"] if show_end_columns else ["Start", "Title"]
                         selected_chapters = st.dataframe(
                             chapters_df,
                             selection_mode="multi-row",
                             on_select="rerun",
                             key="chapter_selector",
+                            column_order=column_order,
                             hide_index=True
                         )
                         col1, col2 = st.columns(2)
@@ -270,7 +275,7 @@ class VideoPlugin(Plugin):
                             save_vtt(vtt_path, subtitles_df, chapters_df)
                             st.rerun()
 
-    def handle_subtitles(self, col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails, mute_videos):
+    def handle_subtitles(self, col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails, mute_videos, show_end_columns):
         with col2:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
@@ -292,7 +297,6 @@ class VideoPlugin(Plugin):
                         for i, thumbnail in st.session_state["thumbnails"].get(vtt_path, {}).items():
                             subtitles_df.at[i, "Thumbnail"] = thumbnail
 
-                    # Ajouter la colonne "Chapitre" après "End"
                     subtitles_df["Chapitre"] = ""
                     for i, sub in subtitles_df.iterrows():
                         for _, chap in chapters_df.iterrows():
@@ -310,6 +314,10 @@ class VideoPlugin(Plugin):
                         filtered_subtitles_df = subtitles_df
 
                     st.write(t("video_subtitles_label").format(video=selected_video["Video"]))
+                    column_order = ["Start", "End", "Chapitre", "Text", "Thumbnail"] if (show_end_columns and generate_thumbnails) else \
+                                  ["Start", "Chapitre", "Text", "Thumbnail"] if generate_thumbnails else \
+                                  ["Start", "End", "Chapitre", "Text"] if show_end_columns else \
+                                  ["Start", "Chapitre", "Text"]
                     selected_subtitles = st.dataframe(
                         filtered_subtitles_df,
                         selection_mode="multi-row",
@@ -317,9 +325,9 @@ class VideoPlugin(Plugin):
                         key="subtitle_selector",
                         column_config={
                             "Thumbnail": st.column_config.ImageColumn("Thumbnail", width="small") if generate_thumbnails else None,
-                            "Chapitre": st.column_config.TextColumn("Chapitre", width="medium")  # Réduit la largeur de la colonne "Chapitre"
+                            "Chapitre": st.column_config.TextColumn("Chapitre", width="medium")
                         },
-                        column_order=["Start", "End", "Chapitre", "Text", "Thumbnail"] if generate_thumbnails else ["Start", "End", "Chapitre", "Text"],
+                        column_order=column_order,
                         hide_index=True
                     )
 
@@ -390,7 +398,7 @@ class VideoPlugin(Plugin):
         self.working_dir = config.get(self.name, {}).get("video_workdir", t("video_config_workdir_default"))
 
         self.setup_header()
-        selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos = self.setup_controls()
+        selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos, show_end_columns = self.setup_controls()
 
         video_df = scan_videos(self.working_dir, selected_extensions)
         if video_df.empty:
@@ -399,8 +407,8 @@ class VideoPlugin(Plugin):
 
         col1, col2, selected_videos = self.display_videos(video_df)
         self.handle_video_actions(col1, selected_videos, video_df, selected_model, config)
-        self.handle_chapters(col1, selected_videos, video_df)
-        self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails, mute_videos)
+        self.handle_chapters(col1, selected_videos, video_df, show_end_columns)  # Passer show_end_columns
+        self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails, mute_videos, show_end_columns)  # Passer show_end_columns
 
 if __name__ == "__main__":
     st.write("Video Plugin standalone test")
