@@ -42,6 +42,7 @@ translations["en"].update({
     "video_split": "Split Video",
     "video_extensions_label": "Filter by Extensions",
     "video_delete": "Delete Videos",
+    "video_mute_label": "Mute videos",
 })
 
 translations["fr"].update({
@@ -75,6 +76,7 @@ translations["fr"].update({
     "video_split": "Découper la vidéo",
     "video_extensions_label": "Filtrer par extensions",
     "video_delete": "Supprimer les vidéos",
+    "video_mute_label": "Vidéos muettes",
 })
 
 class VideoPlugin(Plugin):
@@ -98,7 +100,7 @@ class VideoPlugin(Plugin):
         st.header(t("video_header"))
 
     def setup_controls(self):
-        col_model, col_thumb, col_refresh, col_ext = st.columns([2, 1, 1, 2])
+        col_model, col_thumb, col_refresh, col_ext, col_mute = st.columns([2, 1, 1, 2, 1])
         with col_model:
             model_options = ["base", "medium", "turbo", "large-v3", "large-v3-turbo"]
             selected_model = st.selectbox(t("video_model_label"), model_options, index=0)
@@ -109,7 +111,9 @@ class VideoPlugin(Plugin):
         with col_ext:
             extension_options = [".mp4", ".mkv", ".ogg"]
             selected_extensions = st.multiselect(t("video_extensions_label"), extension_options, default=extension_options)
-        return selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions
+        with col_mute:
+            mute_videos = st.checkbox(t("video_mute_label"), value=False)
+        return selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos
 
     def display_videos(self, video_df):
         col1, col2 = st.columns([2, 3])
@@ -139,34 +143,42 @@ class VideoPlugin(Plugin):
                                 try:
                                     for idx in selected_videos["selection"]["rows"]:
                                         video_path = video_df.iloc[idx]["Full Path"]
-                                        generate_subtitles(video_path, selected_model)
+                                        with st.spinner(f"Generating subtitles for {os.path.basename(video_path)}..."):
+                                            generate_subtitles(video_path, selected_model)
                                         st.success(t("video_success").format(video=os.path.basename(video_path)))
                                     st.rerun()
                                 except Exception as e:
                                     st.error(t("video_error").format(error=str(e)))
                     with col_conv:
                         if st.button(t("video_convert_to_mp4")) and selected_videos["selection"]["rows"]:
-                            for idx in selected_videos["selection"]["rows"]:
-                                video_path = video_df.iloc[idx]["Full Path"]
-                                if not video_path.endswith(".mp4"):
-                                    convert_to_mp4(video_path)
+                            with st.spinner("Converting videos..."):
+                                for idx in selected_videos["selection"]["rows"]:
+                                    video_path = video_df.iloc[idx]["Full Path"]
+                                    if not video_path.endswith(".mp4"):
+                                        convert_to_mp4(video_path)
                             st.rerun()
 
-                    new_name = st.text_input("New Video Name", os.path.splitext(selected_video["Video"])[0])
-                    if st.button(t("video_rename")) and new_name:
-                        rename_video(selected_video["Full Path"], new_name)
-                        st.rerun()
+                    col_rename = st.columns([3, 1])
+                    with col_rename[0]:
+                        new_name = st.text_input("New Video Name", os.path.splitext(selected_video["Video"])[0])
+                    with col_rename[1]:
+                        if st.button(t("video_rename")) and new_name:
+                            with st.spinner("Renaming video..."):
+                                rename_video(selected_video["Full Path"], new_name)
+                            st.rerun()
 
                     col_merge, col_delete = st.columns(2)
                     with col_merge:
                         if st.button(t("video_merge")) and selected_videos["selection"]["rows"]:
-                            video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
-                            merge_videos(video_paths, self.working_dir)
+                            with st.spinner("Merging videos..."):
+                                video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
+                                merge_videos(video_paths, self.working_dir)
                             st.rerun()
                     with col_delete:
                         if st.button(t("video_delete")) and selected_videos["selection"]["rows"]:
-                            video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
-                            delete_videos(video_paths)
+                            with st.spinner("Deleting videos..."):
+                                video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
+                                delete_videos(video_paths)
                             st.rerun()
 
     def handle_chapters(self, col1, selected_videos, video_df):
@@ -186,20 +198,21 @@ class VideoPlugin(Plugin):
                             key="chapter_selector",
                             hide_index=True
                         )
+                        col1, col2 = st.columns(2)
                         if selected_chapters["selection"]["rows"]:
                             chapter_idx = selected_chapters["selection"]["rows"][0]
                             new_title = st.text_input(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"])
-                            if st.button(t("video_edit_chapter")) and new_title:
+                            if col1.button(t("video_edit_chapter")) and new_title:
                                 chapters_df.at[chapter_idx, "Title"] = new_title
                                 save_vtt(vtt_path, subtitles_df, chapters_df)
                                 st.rerun()
-                        if st.button(t("video_delete_chapter")) and selected_chapters["selection"]["rows"]:
+                        if col2.button(t("video_delete_chapter")) and selected_chapters["selection"]["rows"]:
                             chapter_idx = selected_chapters["selection"]["rows"][0]
                             chapters_df = chapters_df.drop(chapter_idx).reset_index(drop=True)
                             save_vtt(vtt_path, subtitles_df, chapters_df)
                             st.rerun()
 
-    def handle_subtitles(self, col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails):
+    def handle_subtitles(self, col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails, mute_videos):
         with col2:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
@@ -280,8 +293,7 @@ class VideoPlugin(Plugin):
                                 st.rerun()
 
                 if selected_video["Full Path"].endswith(".mp4"):
-                    # Utiliser des colonnes pour réduire la largeur de la vidéo
-                    col_left, col_video, col_right = st.columns([1, 2, 1])  # La vidéo prend 2/4 de la largeur
+                    col_left, col_video, col_right = st.columns([1, 2, 1])
                     with col_video:
                         if selected_video["Has Subtitles"] and selected_subtitles["selection"]["rows"]:
                             selected_subtitle_idx = selected_subtitles["selection"]["rows"][0]
@@ -290,12 +302,14 @@ class VideoPlugin(Plugin):
                                 selected_video["Full Path"],
                                 start_time=selected_subtitle["Start"],
                                 end_time=selected_subtitle["End"],
-                                autoplay=True
+                                autoplay=True,
+                                muted=mute_videos
                             )
                         else:
                             st.video(
                                 selected_video["Full Path"],
-                                autoplay=True
+                                autoplay=True,
+                                muted=mute_videos
                             )
                 else:
                     st.write("Video preview only available for .mp4 files.")
@@ -306,7 +320,7 @@ class VideoPlugin(Plugin):
         self.working_dir = config.get(self.name, {}).get("video_workdir", t("video_config_workdir_default"))
 
         self.setup_header()
-        selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions = self.setup_controls()
+        selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos = self.setup_controls()
 
         video_df = scan_videos(self.working_dir, selected_extensions)
         if video_df.empty:
@@ -316,7 +330,7 @@ class VideoPlugin(Plugin):
         col1, col2, selected_videos = self.display_videos(video_df)
         self.handle_video_actions(col1, selected_videos, video_df, selected_model)
         self.handle_chapters(col1, selected_videos, video_df)
-        self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails)
+        self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails, mute_videos)
 
 if __name__ == "__main__":
     st.write("Video Plugin standalone test")
