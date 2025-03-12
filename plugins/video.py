@@ -50,6 +50,8 @@ translations["en"].update({
     "video_split_by_chapters": "Split by Chapters",
     "video_move_up": "Move Up",
     "video_move_down": "Move Down",
+    "video_delete_chapter_continuous": "Delete Chapter",
+    "video_delete_chapter_discontinuous": "Discontinuous Delete",
 })
 
 translations["fr"].update({
@@ -88,8 +90,10 @@ translations["fr"].update({
     "video_shift_chapter_down": "Déplacer le chapitre vers le bas",
     "video_shift_n": "Déplacer le chapitre de n positions",
     "video_split_by_chapters": "Découper la vidéo par chapitres",
-    "video_move_up": "Déplacer vers le haut",
-    "video_move_down": "Déplacer vers le bas",
+    "video_move_up": "Remonter",
+    "video_move_down": "Descendre",
+    "video_delete_chapter_continuous": "Supprimer le chapitre",
+    "video_delete_chapter_discontinuous": "Supprimer discontinue",
 })
 
 class VideoPlugin(Plugin):
@@ -283,7 +287,7 @@ class VideoPlugin(Plugin):
         with col1:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
-                selected_video = video_df.iloc[selected_idx]
+                selected_video = video_df.iloc[st.session_state["video_order"][selected_idx]]
                 vtt_path = os.path.splitext(selected_video["Full Path"])[0] + ".vtt"
                 if selected_video["Has Subtitles"]:
                     subtitles_df, chapters_df = load_subtitles_and_chapters(vtt_path)
@@ -298,20 +302,19 @@ class VideoPlugin(Plugin):
                             column_order=column_order,
                             hide_index=True
                         )
-                        col1, col2 = st.columns(2)
                         if selected_chapters["selection"]["rows"]:
                             chapter_idx = selected_chapters["selection"]["rows"][0]
-                            # Zone de saisie au-dessus des boutons
+                            # Zone de saisie
                             col_start, col_end, col_title = st.columns([1, 1, 2])
                             with col_start:
                                 new_start = st.text_input(t("video_chapter_start"), chapters_df.iloc[chapter_idx]["Start"])
                             with col_end:
                                 new_end = st.text_input(t("video_chapter_end"), chapters_df.iloc[chapter_idx]["End"])
                             with col_title:
-                                new_title = st.text_area(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"], height=100)  # Multiligne avec text_area
+                                new_title = st.text_area(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"], height=100)
 
-                            # Boutons en dessous
-                            col_edit, col_delete = st.columns(2)
+                            # Boutons sur une même ligne : Modifier, Supprimer, Suppression discontinue
+                            col_edit, col_delete_cont, col_delete_discont = st.columns(3)
                             with col_edit:
                                 if st.button(t("video_edit_chapter")) and new_title and new_start and new_end:
                                     if chapter_idx > 0 and new_start != chapters_df.iloc[chapter_idx]["Start"]:
@@ -320,11 +323,21 @@ class VideoPlugin(Plugin):
                                         chapters_df.at[chapter_idx + 1, "Start"] = new_end
                                     chapters_df.at[chapter_idx, "Start"] = new_start
                                     chapters_df.at[chapter_idx, "End"] = new_end
-                                    chapters_df.at[chapter_idx, "Title"] = new_title  # Accepte le texte multiligne
+                                    chapters_df.at[chapter_idx, "Title"] = new_title
                                     save_vtt(vtt_path, subtitles_df, chapters_df)
                                     st.rerun()
-                            with col_delete:
-                                if st.button(t("video_delete_chapter")):
+                            with col_delete_cont:
+                                if st.button(t("video_delete_chapter_continuous")):
+                                    if chapter_idx > 0:
+                                        # Étendre le chapitre précédent jusqu’à la fin du chapitre supprimé
+                                        chapters_df.at[chapter_idx - 1, "End"] = chapters_df.iloc[chapter_idx]["End"]
+                                    # Supprimer le chapitre
+                                    chapters_df = chapters_df.drop(chapter_idx).reset_index(drop=True)
+                                    save_vtt(vtt_path, subtitles_df, chapters_df)
+                                    st.rerun()
+                            with col_delete_discont:
+                                if st.button(t("video_delete_chapter_discontinuous")):
+                                    # Supprimer le chapitre sans ajuster les autres (laisser un vide)
                                     chapters_df = chapters_df.drop(chapter_idx).reset_index(drop=True)
                                     save_vtt(vtt_path, subtitles_df, chapters_df)
                                     st.rerun()
