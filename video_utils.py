@@ -90,14 +90,15 @@ def generate_subtitles(video_path, model_name):
 
 def convert_to_mp4(video_path):
     output_path = os.path.splitext(video_path)[0] + ".mp4"
-    if not os.path.exists(output_path):
-        try:
-            stream = ffmpeg.input(video_path)
-            stream = ffmpeg.output(stream, output_path, vcodec="copy", acodec="copy")
-            ffmpeg.run(stream)
-            st.success(f"Converted {os.path.basename(video_path)} to MP4!")
-        except Exception as e:
-            st.error(f"Conversion failed: {str(e)}")
+    if os.path.exists(output_path):
+        os.remove(output_path)  # Écraser le fichier existant
+    try:
+        stream = ffmpeg.input(video_path)
+        stream = ffmpeg.output(stream, output_path, vcodec="h264", acodec="aac", strict="experimental")
+        ffmpeg.run(stream)
+        st.success(f"Converted {os.path.basename(video_path)} to MP4!")
+    except Exception as e:
+        st.error(f"Conversion failed: {str(e)}")
     return output_path
 
 def rename_video(video_path, new_name):
