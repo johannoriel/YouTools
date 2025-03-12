@@ -257,54 +257,58 @@ class VideoPlugin(Plugin):
                         col1, col2 = st.columns(2)
                         if selected_chapters["selection"]["rows"]:
                             chapter_idx = selected_chapters["selection"]["rows"][0]
+                            # Zone de saisie au-dessus des boutons
                             col_start, col_end, col_title = st.columns([1, 1, 2])
                             with col_start:
                                 new_start = st.text_input(t("video_chapter_start"), chapters_df.iloc[chapter_idx]["Start"])
                             with col_end:
                                 new_end = st.text_input(t("video_chapter_end"), chapters_df.iloc[chapter_idx]["End"])
                             with col_title:
-                                new_title = st.text_input(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"])
-                            if col1.button(t("video_edit_chapter")) and new_title and new_start and new_end:
-                                if chapter_idx > 0 and new_start != chapters_df.iloc[chapter_idx]["Start"]:
-                                    chapters_df.at[chapter_idx - 1, "End"] = new_start
-                                if chapter_idx < len(chapters_df) - 1 and new_end != chapters_df.iloc[chapter_idx]["End"]:
-                                    chapters_df.at[chapter_idx + 1, "Start"] = new_end
-                                chapters_df.at[chapter_idx, "Start"] = new_start
-                                chapters_df.at[chapter_idx, "End"] = new_end
-                                chapters_df.at[chapter_idx, "Title"] = new_title
-                                save_vtt(vtt_path, subtitles_df, chapters_df)
-                                st.rerun()
+                                new_title = st.text_area(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"], height=100)  # Multiligne avec text_area
 
-                            # Boutons de décalage corrigés
+                            # Boutons en dessous
+                            col_edit, col_delete = st.columns(2)
+                            with col_edit:
+                                if st.button(t("video_edit_chapter")) and new_title and new_start and new_end:
+                                    if chapter_idx > 0 and new_start != chapters_df.iloc[chapter_idx]["Start"]:
+                                        chapters_df.at[chapter_idx - 1, "End"] = new_start
+                                    if chapter_idx < len(chapters_df) - 1 and new_end != chapters_df.iloc[chapter_idx]["End"]:
+                                        chapters_df.at[chapter_idx + 1, "Start"] = new_end
+                                    chapters_df.at[chapter_idx, "Start"] = new_start
+                                    chapters_df.at[chapter_idx, "End"] = new_end
+                                    chapters_df.at[chapter_idx, "Title"] = new_title  # Accepte le texte multiligne
+                                    save_vtt(vtt_path, subtitles_df, chapters_df)
+                                    st.rerun()
+                            with col_delete:
+                                if st.button(t("video_delete_chapter")):
+                                    chapters_df = chapters_df.drop(chapter_idx).reset_index(drop=True)
+                                    save_vtt(vtt_path, subtitles_df, chapters_df)
+                                    st.rerun()
+
+                            # Boutons de décalage (inchangés)
                             col_shift_up, col_shift_down, col_shift_n = st.columns([1, 1, 1])
                             with col_shift_n:
                                 shift_n = st.number_input(t("video_shift_n"), min_value=1, value=1, step=1)
                             with col_shift_up:
                                 if st.button(t("video_shift_chapter_up")):
                                     subtitle_idx = subtitles_df[subtitles_df["Start"] == chapters_df.iloc[chapter_idx]["Start"]].index[0]
-                                    new_idx = max(0, subtitle_idx - shift_n)  # Ne pas dépasser le début
+                                    new_idx = max(0, subtitle_idx - shift_n)
                                     new_start = subtitles_df.iloc[new_idx]["Start"]
                                     if chapter_idx > 0:
-                                        chapters_df.at[chapter_idx - 1, "End"] = new_start  # Ajuster la fin du précédent
-                                    chapters_df.at[chapter_idx, "Start"] = new_start  # Nouveau début, End inchangé
+                                        chapters_df.at[chapter_idx - 1, "End"] = new_start
+                                    chapters_df.at[chapter_idx, "Start"] = new_start
                                     save_vtt(vtt_path, subtitles_df, chapters_df)
                                     st.rerun()
                             with col_shift_down:
                                 if st.button(t("video_shift_chapter_down")):
                                     subtitle_idx = subtitles_df[subtitles_df["Start"] == chapters_df.iloc[chapter_idx]["Start"]].index[0]
-                                    new_idx = min(len(subtitles_df) - 1, subtitle_idx + shift_n)  # Ne pas dépasser la fin
+                                    new_idx = min(len(subtitles_df) - 1, subtitle_idx + shift_n)
                                     new_start = subtitles_df.iloc[new_idx]["Start"]
                                     if chapter_idx > 0:
-                                        chapters_df.at[chapter_idx - 1, "End"] = new_start  # Ajuster la fin du précédent
-                                    chapters_df.at[chapter_idx, "Start"] = new_start  # Nouveau début, End inchangé
+                                        chapters_df.at[chapter_idx - 1, "End"] = new_start
+                                    chapters_df.at[chapter_idx, "Start"] = new_start
                                     save_vtt(vtt_path, subtitles_df, chapters_df)
                                     st.rerun()
-
-                        if col2.button(t("video_delete_chapter")) and selected_chapters["selection"]["rows"]:
-                            chapter_idx = selected_chapters["selection"]["rows"][0]
-                            chapters_df = chapters_df.drop(chapter_idx).reset_index(drop=True)
-                            save_vtt(vtt_path, subtitles_df, chapters_df)
-                            st.rerun()
 
     def handle_subtitles(self, col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails, mute_videos, show_end_columns):
         with col2:
@@ -328,11 +332,13 @@ class VideoPlugin(Plugin):
                         for i, thumbnail in st.session_state["thumbnails"].get(vtt_path, {}).items():
                             subtitles_df.at[i, "Thumbnail"] = thumbnail
 
+                    # Remplir la colonne "Chapitre" avec la première ligne seulement
                     subtitles_df["Chapitre"] = ""
                     for i, sub in subtitles_df.iterrows():
                         for _, chap in chapters_df.iterrows():
                             if sub["Start"] >= chap["Start"] and sub["End"] <= chap["End"]:
-                                subtitles_df.at[i, "Chapitre"] = chap["Title"]
+                                # Prendre uniquement la première ligne du titre multiligne
+                                subtitles_df.at[i, "Chapitre"] = chap["Title"].split("\n")[0]
                                 break
 
                     if "chapter_selector" in st.session_state and st.session_state["chapter_selector"]["selection"]["rows"]:

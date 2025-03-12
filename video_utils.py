@@ -33,31 +33,49 @@ def load_subtitles_and_chapters(vtt_path):
     subtitles = []
     chapters = []
     if not os.path.exists(vtt_path):
-        return pd.DataFrame(columns=["Start", "End", "Text", "Thumbnail"]), []
+        return pd.DataFrame(columns=["Start", "End", "Text", "Thumbnail"]), pd.DataFrame(columns=["Start", "End", "Title", "Duration"])
+
     with open(vtt_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
         chapter_section = False
-        for i in range(len(lines)):
+        i = 0
+        while i < len(lines):
             line = lines[i].strip()
             if line == "CHAPTERS":
                 chapter_section = True
+                i += 1
                 continue
-            if not chapter_section and "-->" in line and i + 1 < len(lines) and not lines[i].isdigit():
+
+            # Gestion des sous-titres ou chapitres
+            if "-->" in line:
                 start, end = line.split(" --> ")
-                text = lines[i + 1].strip()
-                subtitles.append({"Start": start, "End": end, "Text": text, "Thumbnail": None})
-            elif chapter_section and "-->" in line and i + 1 < len(lines):
-                start, end = line.split(" --> ")
-                title = lines[i + 1].strip()
-                start_sec = sum(float(x) * 60 ** i for i, x in enumerate(reversed(start.split(":")[:-1]))) + float(start.split(":")[-1])
-                end_sec = sum(float(x) * 60 ** i for i, x in enumerate(reversed(end.split(":")[:-1]))) + float(end.split(":")[-1])
-                duration = end_sec - start_sec
-                chapters.append({
-                    "Start": start,
-                    "End": end,
-                    "Title": title,
-                    "Duration": f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}"
-                })
+                i += 1  # Passer à la ligne suivante (début du texte/titre)
+
+                # Lire toutes les lignes de texte jusqu'à une ligne vide ou un nouveau timecode
+                text_lines = []
+                while i < len(lines) and lines[i].strip() and "-->" not in lines[i]:
+                    text_lines.append(lines[i].strip())
+                    i += 1
+
+                text = "\n".join(text_lines)  # Joindre les lignes avec des retours à la ligne
+
+                if not chapter_section:
+                    # C'est un sous-titre
+                    subtitles.append({"Start": start, "End": end, "Text": text, "Thumbnail": None})
+                else:
+                    # C'est un chapitre
+                    start_sec = sum(float(x) * 60 ** j for j, x in enumerate(reversed(start.split(":")[:-1]))) + float(start.split(":")[-1])
+                    end_sec = sum(float(x) * 60 ** j for j, x in enumerate(reversed(end.split(":")[:-1]))) + float(end.split(":")[-1])
+                    duration = end_sec - start_sec
+                    chapters.append({
+                        "Start": start,
+                        "End": end,
+                        "Title": text,  # Texte multiligne
+                        "Duration": f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}"
+                    })
+            else:
+                i += 1  # Passer les lignes inutiles (WEBVTT, numéros, etc.)
+
     return pd.DataFrame(subtitles), pd.DataFrame(chapters)
 
 def save_vtt(vtt_path, subtitles_df, chapters_df):
