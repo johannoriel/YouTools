@@ -31,7 +31,12 @@ translations["en"].update({
     "video_chapters_label": "Chapters",
     "video_generate_thumbnails": "Generate Thumbnails",
     "video_refresh_thumbnails": "Refresh Thumbnails",
-        "video_convert_to_mp4": "Convert to MP4",
+    "video_convert_to_mp4": "Convert to MP4",
+    "video_convert_to_mp4": "Convert to MP4",
+    "video_rename": "Rename",
+    "video_merge": "Merge Videos",
+    "video_split": "Split Video",
+    "video_extensions_label": "Filter by Extensions",
 })
 
 translations["fr"].update({
@@ -53,7 +58,12 @@ translations["fr"].update({
     "video_chapters_label": "Chapitres",
     "video_generate_thumbnails": "Générer les vignettes",
     "video_refresh_thumbnails": "Rafraîchir les vignettes",
-        "video_convert_to_mp4": "Convertir en MP4",
+    "video_convert_to_mp4": "Convertir en MP4",
+    "video_convert_to_mp4": "Convertir en MP4",
+    "video_rename": "Renommer",
+    "video_merge": "Fusionner les vidéos",
+    "video_split": "Découper la vidéo",
+    "video_extensions_label": "Filtrer par extensions",
 })
 
 class VideoPlugin(Plugin):
@@ -73,12 +83,11 @@ class VideoPlugin(Plugin):
     def get_tabs(self):
         return [{"name": t("video_tab"), "plugin": "videoplugin"}]
 
-    def scan_videos(self, directory):
-        video_extensions = (".mp4", ".mkv", ".avi", ".mov")
+    def scan_videos(self, directory, extensions):
         video_data = []
         for root, _, files in os.walk(directory):
             for file in files:
-                if file.lower().endswith(video_extensions):
+                if any(file.lower().endswith(ext) for ext in extensions):
                     video_path = os.path.join(root, file)
                     vtt_path = os.path.splitext(video_path)[0] + ".vtt"
                     has_subtitles = os.path.exists(vtt_path)
@@ -156,7 +165,6 @@ class VideoPlugin(Plugin):
 
     def convert_to_mp4(self, video_path):
         output_path = os.path.splitext(video_path)[0] + ".mp4"
-        st.write(f"Converting {os.path.basename(video_path)} to MP4...")
         if not os.path.exists(output_path):
             try:
                 stream = ffmpeg.input(video_path)
@@ -166,6 +174,44 @@ class VideoPlugin(Plugin):
             except Exception as e:
                 st.error(f"Conversion failed: {str(e)}")
         return output_path
+
+    def rename_video(self, video_path, new_name):
+        directory, old_name = os.path.split(video_path)
+        extension = os.path.splitext(old_name)[1]
+        new_path = os.path.join(directory, new_name + extension)
+        os.rename(video_path, new_path)
+        # Renommer le fichier .vtt associé s'il existe
+        old_vtt = os.path.splitext(video_path)[0] + ".vtt"
+        if os.path.exists(old_vtt):
+            new_vtt = os.path.splitext(new_path)[0] + ".vtt"
+            os.rename(old_vtt, new_vtt)
+        return new_path
+
+    def merge_videos(self, video_paths, output_dir):
+        output_path = os.path.join(output_dir, "merge.mp4")
+        inputs = [ffmpeg.input(path) for path in video_paths]
+        try:
+            stream = ffmpeg.concat(*inputs, v=1, a=1).output(output_path)
+            ffmpeg.run(stream)
+            st.success("Videos merged into merge.mp4!")
+        except Exception as e:
+            st.error(f"Merge failed: {str(e)}")
+        return output_path
+
+    def split_video(self, video_path, split_time, output_dir):
+        split1_path = os.path.join(output_dir, "split1.mp4")
+        split2_path = os.path.join(output_dir, "split2.mp4")
+        try:
+            # Première partie : du début jusqu'au point de coupe
+            stream1 = ffmpeg.input(video_path).output(split1_path, t=split_time, vcodec="copy", acodec="copy")
+            ffmpeg.run(stream1)
+            # Deuxième partie : du point de coupe jusqu'à la fin
+            stream2 = ffmpeg.input(video_path, ss=split_time).output(split2_path, vcodec="copy", acodec="copy")
+            ffmpeg.run(stream2)
+            st.success(f"Video split into {split1_path} and {split2_path}!")
+        except Exception as e:
+            st.error(f"Split failed: {str(e)}")
+        return split1_path, split2_path
 
     def generate_thumbnail(self, video_path, timestamp):
         cap = cv2.VideoCapture(video_path)
@@ -194,12 +240,8 @@ class VideoPlugin(Plugin):
         st.header(t("video_header"))
         self.working_dir = config.get(self.name, {}).get("video_workdir", t("video_config_workdir_default"))
 
-        video_df = self.scan_videos(self.working_dir)
-        if video_df.empty:
-            st.write("No videos found in the working directory.")
-            return
-
-        col_model, col_thumb, col_refresh = st.columns([2, 1, 1])
+        # 1. Première ligne avec sélecteur d'extensions
+        col_model, col_thumb, col_refresh, col_ext = st.columns([2, 1, 1, 2])
         with col_model:
             model_options = ["base", "medium", "turbo", "large-v3", "large-v3-turbo"]
             selected_model = st.selectbox(t("video_model_label"), model_options, index=0)
@@ -207,6 +249,14 @@ class VideoPlugin(Plugin):
             generate_thumbnails = st.checkbox(t("video_generate_thumbnails"))
         with col_refresh:
             refresh_thumbnails = st.button(t("video_refresh_thumbnails"))
+        with col_ext:
+            extension_options = [".mp4", ".mkv", ".ogg"]
+            selected_extensions = st.multiselect(t("video_extensions_label"), extension_options, default=extension_options)
+
+        video_df = self.scan_videos(self.working_dir, selected_extensions)
+        if video_df.empty:
+            st.write("No videos found with the selected extensions.")
+            return
 
         col1, col2 = st.columns([1, 3])
 
@@ -220,24 +270,41 @@ class VideoPlugin(Plugin):
                 hide_index=True
             )
 
-            if st.button(t("video_generate_subtitles")) and selected_videos["selection"]["rows"]:
-                with st.spinner(t("video_processing")):
-                    try:
-                        for idx in selected_videos["selection"]["rows"]:
-                            video_path = video_df.iloc[idx]["Full Path"]
-                            if not video_df.iloc[idx]["Has Subtitles"]:
-                                self.generate_subtitles(video_path, selected_model)
-                                st.success(t("video_success").format(video=os.path.basename(video_path)))
-                        st.rerun()
-                    except Exception as e:
-                        st.error(t("video_error").format(error=str(e)))
+            # 2. Boutons Generate Subtitles et Convert to MP4 sur la même ligne
+            col_gen, col_conv = st.columns(2)
+            with col_gen:
+                if st.button(t("video_generate_subtitles")) and selected_videos["selection"]["rows"]:
+                    with st.spinner(t("video_processing")):
+                        try:
+                            for idx in selected_videos["selection"]["rows"]:
+                                video_path = video_df.iloc[idx]["Full Path"]
+                                if not video_df.iloc[idx]["Has Subtitles"]:
+                                    self.generate_subtitles(video_path, selected_model)
+                                    st.success(t("video_success").format(video=os.path.basename(video_path)))
+                            st.rerun()
+                        except Exception as e:
+                            st.error(t("video_error").format(error=str(e)))
+            with col_conv:
+                if st.button(t("video_convert_to_mp4")) and selected_videos["selection"]["rows"]:
+                    for idx in selected_videos["selection"]["rows"]:
+                        video_path = video_df.iloc[idx]["Full Path"]
+                        if not video_path.endswith(".mp4"):
+                            self.convert_to_mp4(video_path)
+                    st.rerun()
 
-            # Bouton de conversion en MP4
-            if st.button(t("video_convert_to_mp4")) and selected_videos["selection"]["rows"]:
-                for idx in selected_videos["selection"]["rows"]:
-                    video_path = video_df.iloc[idx]["Full Path"]
-                    if not video_path.endswith(".mp4"):
-                        self.convert_to_mp4(video_path)
+            # 3. Renommer la vidéo
+            if selected_videos["selection"]["rows"]:
+                selected_idx = selected_videos["selection"]["rows"][0]
+                selected_video = video_df.iloc[selected_idx]
+                new_name = st.text_input("New Video Name", os.path.splitext(selected_video["Video"])[0])
+                if st.button(t("video_rename")) and new_name:
+                    self.rename_video(selected_video["Full Path"], new_name)
+                    st.rerun()
+
+            # 4. Fusionner les vidéos
+            if st.button(t("video_merge")) and selected_videos["selection"]["rows"]:
+                video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
+                self.merge_videos(video_paths, self.working_dir)
                 st.rerun()
 
             if selected_videos["selection"]["rows"]:
@@ -300,14 +367,13 @@ class VideoPlugin(Plugin):
                     st.write(t("video_subtitles_label").format(video=selected_video["Video"]))
                     selected_subtitles = st.dataframe(
                         filtered_subtitles_df,
-                        selection_mode="multi-row",  # Sélection multiple
+                        selection_mode="multi-row",
                         on_select="rerun",
                         key="subtitle_selector",
                         column_config={"Thumbnail": st.column_config.ImageColumn("Thumbnail", width="small") if generate_thumbnails else None},
                         hide_index=True
                     )
 
-                    # Édition sur une seule ligne
                     if selected_subtitles["selection"]["rows"]:
                         selected_subtitle_idx = selected_subtitles["selection"]["rows"][0]
                         selected_subtitle = filtered_subtitles_df.iloc[selected_subtitle_idx]
@@ -326,7 +392,12 @@ class VideoPlugin(Plugin):
                                 self.save_vtt(vtt_path, subtitles_df, chapters_df)
                                 st.rerun()
 
-                        # Affichage de la vidéo uniquement pour .mp4
+                        # 5. Découper la vidéo
+                        if st.button(t("video_split")):
+                            split_time = sum(float(x) * 60 ** i for i, x in enumerate(reversed(selected_subtitle["Start"].split(":")[:-1]))) + float(selected_subtitle["Start"].split(":")[-1])
+                            self.split_video(selected_video["Full Path"], split_time, self.working_dir)
+                            st.rerun()
+
                         if selected_video["Full Path"].endswith(".mp4"):
                             start_sec = sum(float(x) * 60 ** i for i, x in enumerate(reversed(selected_subtitle["Start"].split(":")[:-1]))) + float(selected_subtitle["Start"].split(":")[-1])
                             end_sec = sum(float(x) * 60 ** i for i, x in enumerate(reversed(selected_subtitle["End"].split(":")[:-1]))) + float(selected_subtitle["End"].split(":")[-1])
@@ -339,7 +410,6 @@ class VideoPlugin(Plugin):
                         else:
                             st.write("Video preview only available for .mp4 files.")
 
-                    # Ajout de chapitre avec sélection multiple
                     if selected_subtitles["selection"]["rows"] and len(selected_subtitles["selection"]["rows"]) >= 2:
                         start_idx = selected_subtitles["selection"]["rows"][0]
                         end_idx = selected_subtitles["selection"]["rows"][-1]
