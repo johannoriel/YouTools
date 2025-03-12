@@ -48,6 +48,8 @@ translations["en"].update({
     "video_shift_chapter_down": "Shift Chapter Down",
     "video_shift_n": "Shift by (subtitles)",
     "video_split_by_chapters": "Split by Chapters",
+    "video_move_up": "Move Up",
+    "video_move_down": "Move Down",
 })
 
 translations["fr"].update({
@@ -86,6 +88,8 @@ translations["fr"].update({
     "video_shift_chapter_down": "Déplacer le chapitre vers le bas",
     "video_shift_n": "Déplacer le chapitre de n positions",
     "video_split_by_chapters": "Découper la vidéo par chapitres",
+    "video_move_up": "Déplacer vers le haut",
+    "video_move_down": "Déplacer vers le bas",
 })
 
 class VideoPlugin(Plugin):
@@ -137,8 +141,15 @@ class VideoPlugin(Plugin):
         col1, col2 = st.columns([2, 3])
         with col1:
             st.write(t("video_list_label"))
+            # Initialiser l’ordre des vidéos dans session_state si non défini
+            if "video_order" not in st.session_state:
+                st.session_state["video_order"] = video_df.index.tolist()
+
+            # Appliquer l’ordre personnalisé au DataFrame
+            ordered_video_df = video_df.iloc[st.session_state["video_order"]].reset_index(drop=True)
+
             selected_videos = st.dataframe(
-                video_df[["Video", "Directory", "Duration", "Has Subtitles"]],
+                ordered_video_df[["Video", "Directory", "Duration", "Has Subtitles"]],
                 selection_mode="multi-row",
                 on_select="rerun",
                 key="video_selector",
@@ -150,7 +161,7 @@ class VideoPlugin(Plugin):
         with col1:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
-                selected_video = video_df.iloc[selected_idx]
+                selected_video = video_df.iloc[st.session_state["video_order"][selected_idx]]  # Utiliser l’ordre personnalisé
                 vtt_path = os.path.splitext(selected_video["Full Path"])[0] + ".vtt"
                 has_chapters = selected_video["Has Subtitles"] and os.path.exists(vtt_path) and "CHAPTERS" in open(vtt_path, "r", encoding="utf-8").read()
                 with st.expander("Video Actions", expanded=not has_chapters):
@@ -160,7 +171,7 @@ class VideoPlugin(Plugin):
                             with st.spinner(t("video_processing")):
                                 try:
                                     for idx in selected_videos["selection"]["rows"]:
-                                        video_path = video_df.iloc[idx]["Full Path"]
+                                        video_path = video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
                                         with st.spinner(f"Generating subtitles for {os.path.basename(video_path)}..."):
                                             generate_subtitles(video_path, selected_model)
                                         st.success(t("video_success").format(video=os.path.basename(video_path)))
@@ -171,7 +182,7 @@ class VideoPlugin(Plugin):
                         if st.button(t("video_convert_to_mp4")) and selected_videos["selection"]["rows"]:
                             with st.spinner("Converting videos..."):
                                 for idx in selected_videos["selection"]["rows"]:
-                                    video_path = video_df.iloc[idx]["Full Path"]
+                                    video_path = video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
                                     if not video_path.endswith(".mp4"):
                                         convert_to_mp4(video_path)
                                 st.rerun()
@@ -189,17 +200,17 @@ class VideoPlugin(Plugin):
                     with col_merge:
                         if st.button(t("video_merge")) and selected_videos["selection"]["rows"]:
                             with st.spinner("Merging videos..."):
-                                video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
+                                video_paths = [video_df.iloc[st.session_state["video_order"][idx]]["Full Path"] for idx in selected_videos["selection"]["rows"]]
                                 merge_videos(video_paths, self.working_dir)
                             st.rerun()
                     with col_delete:
                         if st.button(t("video_delete")) and selected_videos["selection"]["rows"]:
                             with st.spinner("Deleting videos..."):
-                                video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
+                                video_paths = [video_df.iloc[st.session_state["video_order"][idx]]["Full Path"] for idx in selected_videos["selection"]["rows"]]
                                 delete_videos(video_paths)
                             st.rerun()
 
-                    col_auto_chapter = st.columns([1, 1])
+                    col_auto_chapter = st.columns([1,1])
                     with col_auto_chapter[0]:
                         if st.button(t("video_auto_chapter")) and selected_videos["selection"]["rows"]:
                             with st.spinner(t("video_auto_chapter_processing")):
@@ -233,11 +244,10 @@ class VideoPlugin(Plugin):
                                             st.success(t("video_auto_chapter_success").format(video=os.path.basename(selected_video["Full Path"])))
                                             st.rerun()
                                         else:
-                                            st.error("No valid chapters generated by the PLL.")
+                                            st.error("No valid chapters generated by the LLM.")
                                 except Exception as e:
                                     st.error(t("video_error").format(error=str(e)))
 
-                    # Nouveau bouton "Split by Chapters"
                     with col_auto_chapter[1]:
                         if st.button(t("video_split_by_chapters")) and selected_videos["selection"]["rows"]:
                             with st.spinner("Splitting video by chapters..."):
@@ -246,6 +256,27 @@ class VideoPlugin(Plugin):
                                     st.error("No chapters available to split the video.")
                                 else:
                                     split_by_chapters(selected_video["Full Path"], self.working_dir, chapters_df=chapters_df)
+                                st.rerun()
+
+                    # Nouveaux boutons "Move Up" et "Move Down"
+                    col_move_up, col_move_down = st.columns(2)
+                    with col_move_up:
+                        if st.button(t("video_move_up")) and selected_videos["selection"]["rows"]:
+                            if selected_idx > 0:  # Ne pas remonter si déjà en haut
+                                current_order = st.session_state["video_order"]
+                                new_order = current_order.copy()
+                                # Échanger avec l’élément précédent
+                                new_order[selected_idx], new_order[selected_idx - 1] = new_order[selected_idx - 1], new_order[selected_idx]
+                                st.session_state["video_order"] = new_order
+                                st.rerun()
+                    with col_move_down:
+                        if st.button(t("video_move_down")) and selected_videos["selection"]["rows"]:
+                            if selected_idx < len(video_df) - 1:  # Ne pas descendre si déjà en bas
+                                current_order = st.session_state["video_order"]
+                                new_order = current_order.copy()
+                                # Échanger avec l’élément suivant
+                                new_order[selected_idx], new_order[selected_idx + 1] = new_order[selected_idx + 1], new_order[selected_idx]
+                                st.session_state["video_order"] = new_order
                                 st.rerun()
 
     def handle_chapters(self, col1, selected_videos, video_df, show_end_columns):
