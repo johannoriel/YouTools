@@ -122,10 +122,13 @@ def merge_videos(video_paths, output_dir):
         st.error(f"Merge failed: {str(e)}")
     return output_path
 
-def split_video(video_path, split_time, output_dir):
+def split_video(video_path, split_time_ms, output_dir):
+    """Découpe une vidéo en deux parties à un point donné en millisecondes."""
     split1_path = os.path.join(output_dir, "split1.mp4")
     split2_path = os.path.join(output_dir, "split2.mp4")
     try:
+        # Convertir millisecondes en secondes avec précision pour FFmpeg
+        split_time = split_time_ms / 1000.0
         stream1 = ffmpeg.input(video_path).output(split1_path, t=split_time, vcodec="copy", acodec="copy")
         ffmpeg.run(stream1)
         stream2 = ffmpeg.input(video_path, ss=split_time).output(split2_path, vcodec="copy", acodec="copy")
@@ -148,7 +151,7 @@ def delete_videos(video_paths):
 
 def generate_thumbnail(video_path, timestamp):
     cap = cv2.VideoCapture(video_path)
-    cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
+    cap.set(cv2.CAP_PROP_POS_MSEC, timestamp)  # timestamp en millisecondes maintenant
     ret, frame = cap.read()
     if ret:
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -168,3 +171,30 @@ def format_time(seconds):
     secs = int(seconds % 60)
     millis = int((seconds % 1) * 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+def parse_timecode_to_ms(timecode):
+    """Convertit un timecode HH:MM:SS.mmm en millisecondes."""
+    try:
+        parts = timecode.split(":")
+        if len(parts) != 3:
+            raise ValueError(f"Timecode invalide : {timecode}")
+
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds_part = parts[2]  # "SS.mmm"
+
+        # Séparer secondes et millisecondes
+        if "." in seconds_part:
+            seconds, millis = seconds_part.split(".")
+            seconds = int(seconds)
+            # Remplir avec des zéros si millisecondes < 3 chiffres
+            millis = int(millis.ljust(3, "0")[:3])
+        else:
+            seconds = int(seconds_part)
+            millis = 0
+
+        total_ms = (hours * 3600 + minutes * 60 + seconds) * 1000 + millis
+        return total_ms
+    except Exception as e:
+        st.error(f"Erreur lors de la conversion du timecode {timecode} : {str(e)}")
+        return 0
