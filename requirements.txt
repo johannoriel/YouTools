@@ -28,7 +28,7 @@ pyperclip
 diffsynth
 onnxruntime
 accelerate
-whisper
+openai-whisper
 langdetect
 moviepy
 googlesearch-python
