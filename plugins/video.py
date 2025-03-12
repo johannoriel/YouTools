@@ -9,6 +9,7 @@ from video_utils import (
 )
 import pandas as pd
 import os
+from plugins.ragllm import RagllmPlugin
 
 # Traductions
 translations["en"].update({
@@ -24,6 +25,8 @@ translations["en"].update({
     "video_subtitles_label": "Subtitles for {video}",
     "video_model_label": "Transcription Model",
     "video_chapter_title": "Chapter Title",
+    "video_chapter_start": "Chapter Start",  # Nouvelle traduction
+    "video_chapter_end": "Chapter End",  # Nouvelle traduction
     "video_add_chapter": "Add Chapter",
     "video_delete_chapter": "Delete Chapter",
     "video_edit_chapter": "Edit Chapter",
@@ -31,18 +34,16 @@ translations["en"].update({
     "video_generate_thumbnails": "Generate Thumbnails",
     "video_refresh_thumbnails": "Refresh Thumbnails",
     "video_convert_to_mp4": "Convert to MP4",
-    "video_convert_to_mp4": "Convert to MP4",
-    "video_rename": "Rename",
-    "video_merge": "Merge Videos",
-    "video_split": "Split Video",
-    "video_extensions_label": "Filter by Extensions",
-    "video_convert_to_mp4": "Convert to MP4",
     "video_rename": "Rename",
     "video_merge": "Merge Videos",
     "video_split": "Split Video",
     "video_extensions_label": "Filter by Extensions",
     "video_delete": "Delete Videos",
     "video_mute_label": "Mute videos",
+    "video_auto_chapter": "Auto-Generate Chapters",
+    "video_auto_chapter_processing": "Generating chapters automatically...",
+    "video_auto_chapter_success": "Chapters generated successfully for {video}!",
+    "video_auto_chapter_prompt": "Prompt for Auto-Chaptering",  # Nouvelle traduction
 })
 
 translations["fr"].update({
@@ -58,6 +59,8 @@ translations["fr"].update({
     "video_subtitles_label": "Sous-titres pour {video}",
     "video_model_label": "Modèle de transcription",
     "video_chapter_title": "Titre du chapitre",
+    "video_chapter_start": "Début du chapitre",  # Nouvelle traduction
+    "video_chapter_end": "Fin du chapitre",  # Nouvelle traduction
     "video_add_chapter": "Ajouter un chapitre",
     "video_delete_chapter": "Supprimer un chapitre",
     "video_edit_chapter": "Modifier un chapitre",
@@ -65,24 +68,23 @@ translations["fr"].update({
     "video_generate_thumbnails": "Générer les vignettes",
     "video_refresh_thumbnails": "Rafraîchir les vignettes",
     "video_convert_to_mp4": "Convertir en MP4",
-    "video_convert_to_mp4": "Convertir en MP4",
-    "video_rename": "Renommer",
-    "video_merge": "Fusionner les vidéos",
-    "video_split": "Découper la vidéo",
-    "video_extensions_label": "Filtrer par extensions",
-    "video_convert_to_mp4": "Convertir en MP4",
     "video_rename": "Renommer",
     "video_merge": "Fusionner les vidéos",
     "video_split": "Découper la vidéo",
     "video_extensions_label": "Filtrer par extensions",
     "video_delete": "Supprimer les vidéos",
     "video_mute_label": "Vidéos muettes",
+    "video_auto_chapter": "Générer les chapitres automatiquement",
+    "video_auto_chapter_processing": "Génération automatique des chapitres en cours...",
+    "video_auto_chapter_success": "Chapitres générés avec succès pour {video} !",
+    "video_auto_chapter_prompt": "Prompt pour le chapitrage automatique",  # Nouvelle traduction
 })
 
 class VideoPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.working_dir = None
+        self.ragllm = RagllmPlugin("ragllm", plugin_manager)
 
     def get_config_fields(self):
         return {
@@ -90,6 +92,11 @@ class VideoPlugin(Plugin):
                 "type": "text",
                 "label": t("video_config_workdir"),
                 "default": t("video_config_workdir_default")
+            },
+            "auto_chapter_prompt": {  # Nouveau champ de configuration
+                "type": "textarea",
+                "label": t("video_auto_chapter_prompt"),
+                "default": "Based on the following subtitles, generate a list of chapters with precise timecodes (e.g., 00:00:00.000) and titles followed by a dash and a short summary. Return the result in this format:\n\n00:00:00.000 - Title - Summary\n00:05:00.000 - Title - Summary\n\nHere are the subtitles:\n"
             }
         }
 
@@ -128,7 +135,7 @@ class VideoPlugin(Plugin):
             )
         return col1, col2, selected_videos
 
-    def handle_video_actions(self, col1, selected_videos, video_df, selected_model):
+    def handle_video_actions(self, col1, selected_videos, video_df, selected_model, config):
         with col1:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
@@ -181,6 +188,44 @@ class VideoPlugin(Plugin):
                                 delete_videos(video_paths)
                             st.rerun()
 
+                    col_auto_chapter = st.columns(1)[0]
+                    with col_auto_chapter:
+                        if st.button(t("video_auto_chapter")) and selected_videos["selection"]["rows"]:
+                            with st.spinner(t("video_auto_chapter_processing")):
+                                try:
+                                    subtitles_df, chapters_df = load_subtitles_and_chapters(vtt_path)
+                                    if subtitles_df.empty:
+                                        st.error("No subtitles available for chapter generation.")
+                                    else:
+                                        subtitles_text = "\n".join(
+                                            f"{row['Start']} - {row['Text']}" for _, row in subtitles_df.iterrows()
+                                        )
+                                        prompt = config.get(self.name, {}).get("auto_chapter_prompt", self.get_config_fields()["auto_chapter_prompt"]["default"]) + subtitles_text
+                                        sysprompt = "You are an AI assistant tasked with analyzing video subtitles and generating meaningful chapters with timecodes, titles, and summaries."
+                                        response = self.ragllm.process_with_llm(prompt, sysprompt, subtitles_text)
+                                        new_chapters = []
+                                        for line in response.split("\n"):
+                                            if line.strip() and " - " in line:
+                                                try:
+                                                    timecode, rest = line.split(" - ", 1)
+                                                    title, summary = rest.split(" - ", 1)
+                                                    new_chapters.append({"Start": timecode.strip(), "End": "", "Title": f"{title} - {summary}"})
+                                                except ValueError:
+                                                    continue
+                                        if new_chapters:
+                                            new_chapters_df = pd.DataFrame(new_chapters)
+                                            for i in range(len(new_chapters_df) - 1):
+                                                new_chapters_df.at[i, "End"] = new_chapters_df.at[i + 1, "Start"]
+                                            new_chapters_df.at[len(new_chapters_df) - 1, "End"] = subtitles_df["End"].iloc[-1]
+                                            chapters_df = pd.concat([chapters_df, new_chapters_df], ignore_index=True)
+                                            save_vtt(vtt_path, subtitles_df, chapters_df)
+                                            st.success(t("video_auto_chapter_success").format(video=os.path.basename(selected_video["Full Path"])))
+                                            st.rerun()
+                                        else:
+                                            st.error("No valid chapters generated by the LLM.")
+                                except Exception as e:
+                                    st.error(t("video_error").format(error=str(e)))
+
     def handle_chapters(self, col1, selected_videos, video_df):
         with col1:
             if selected_videos["selection"]["rows"]:
@@ -201,8 +246,21 @@ class VideoPlugin(Plugin):
                         col1, col2 = st.columns(2)
                         if selected_chapters["selection"]["rows"]:
                             chapter_idx = selected_chapters["selection"]["rows"][0]
-                            new_title = st.text_input(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"])
-                            if col1.button(t("video_edit_chapter")) and new_title:
+                            col_start, col_end, col_title = st.columns([1, 1, 2])
+                            with col_start:
+                                new_start = st.text_input(t("video_chapter_start"), chapters_df.iloc[chapter_idx]["Start"])
+                            with col_end:
+                                new_end = st.text_input(t("video_chapter_end"), chapters_df.iloc[chapter_idx]["End"])
+                            with col_title:
+                                new_title = st.text_input(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"])
+                            if col1.button(t("video_edit_chapter")) and new_title and new_start and new_end:
+                                # Ajuster les timecodes des chapitres adjacents
+                                if chapter_idx > 0 and new_start != chapters_df.iloc[chapter_idx]["Start"]:
+                                    chapters_df.at[chapter_idx - 1, "End"] = new_start
+                                if chapter_idx < len(chapters_df) - 1 and new_end != chapters_df.iloc[chapter_idx]["End"]:
+                                    chapters_df.at[chapter_idx + 1, "Start"] = new_end
+                                chapters_df.at[chapter_idx, "Start"] = new_start
+                                chapters_df.at[chapter_idx, "End"] = new_end
                                 chapters_df.at[chapter_idx, "Title"] = new_title
                                 save_vtt(vtt_path, subtitles_df, chapters_df)
                                 st.rerun()
@@ -234,6 +292,14 @@ class VideoPlugin(Plugin):
                         for i, thumbnail in st.session_state["thumbnails"].get(vtt_path, {}).items():
                             subtitles_df.at[i, "Thumbnail"] = thumbnail
 
+                    # Ajouter la colonne "Chapitre" après "End"
+                    subtitles_df["Chapitre"] = ""
+                    for i, sub in subtitles_df.iterrows():
+                        for _, chap in chapters_df.iterrows():
+                            if sub["Start"] >= chap["Start"] and sub["End"] <= chap["End"]:
+                                subtitles_df.at[i, "Chapitre"] = chap["Title"]
+                                break
+
                     if "chapter_selector" in st.session_state and st.session_state["chapter_selector"]["selection"]["rows"]:
                         selected_chapter_indices = st.session_state["chapter_selector"]["selection"]["rows"]
                         filtered_subtitles_df = pd.concat([
@@ -249,7 +315,11 @@ class VideoPlugin(Plugin):
                         selection_mode="multi-row",
                         on_select="rerun",
                         key="subtitle_selector",
-                        column_config={"Thumbnail": st.column_config.ImageColumn("Thumbnail", width="small") if generate_thumbnails else None},
+                        column_config={
+                            "Thumbnail": st.column_config.ImageColumn("Thumbnail", width="small") if generate_thumbnails else None,
+                            "Chapitre": st.column_config.TextColumn("Chapitre", width="medium")  # Réduit la largeur de la colonne "Chapitre"
+                        },
+                        column_order=["Start", "End", "Chapitre", "Text", "Thumbnail"] if generate_thumbnails else ["Start", "End", "Chapitre", "Text"],
                         hide_index=True
                     )
 
@@ -328,7 +398,7 @@ class VideoPlugin(Plugin):
             return
 
         col1, col2, selected_videos = self.display_videos(video_df)
-        self.handle_video_actions(col1, selected_videos, video_df, selected_model)
+        self.handle_video_actions(col1, selected_videos, video_df, selected_model, config)
         self.handle_chapters(col1, selected_videos, video_df)
         self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails, mute_videos)
 
