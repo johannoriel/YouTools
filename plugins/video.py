@@ -43,7 +43,10 @@ translations["en"].update({
     "video_auto_chapter": "Auto-Generate Chapters",
     "video_auto_chapter_processing": "Generating chapters automatically...",
     "video_auto_chapter_success": "Chapters generated successfully for {video}!",
-    "video_auto_chapter_prompt": "Prompt for Auto-Chaptering",  # Nouvelle traduction
+    "video_auto_chapter_prompt": "Prompt for Auto-Chaptering",
+    "video_shift_chapter_up": "Shift Chapter Up",
+    "video_shift_chapter_down": "Shift Chapter Down",
+    "video_shift_n": "Shift by (subtitles)",
 })
 
 translations["fr"].update({
@@ -77,7 +80,10 @@ translations["fr"].update({
     "video_auto_chapter": "Générer les chapitres automatiquement",
     "video_auto_chapter_processing": "Génération automatique des chapitres en cours...",
     "video_auto_chapter_success": "Chapitres générés avec succès pour {video} !",
-    "video_auto_chapter_prompt": "Prompt pour le chapitrage automatique",  # Nouvelle traduction
+    "video_auto_chapter_prompt": "Prompt pour le chapitrage automatique",
+    "video_shift_chapter_up": "Déplacer le chapitre vers le haut",
+    "video_shift_chapter_down": "Déplacer le chapitre vers le bas",
+    "video_shift_n": "Déplacer le chapitre de n positions"
 })
 
 class VideoPlugin(Plugin):
@@ -259,7 +265,6 @@ class VideoPlugin(Plugin):
                             with col_title:
                                 new_title = st.text_input(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"])
                             if col1.button(t("video_edit_chapter")) and new_title and new_start and new_end:
-                                # Ajuster les timecodes des chapitres adjacents
                                 if chapter_idx > 0 and new_start != chapters_df.iloc[chapter_idx]["Start"]:
                                     chapters_df.at[chapter_idx - 1, "End"] = new_start
                                 if chapter_idx < len(chapters_df) - 1 and new_end != chapters_df.iloc[chapter_idx]["End"]:
@@ -269,6 +274,32 @@ class VideoPlugin(Plugin):
                                 chapters_df.at[chapter_idx, "Title"] = new_title
                                 save_vtt(vtt_path, subtitles_df, chapters_df)
                                 st.rerun()
+
+                            # Boutons de décalage corrigés
+                            col_shift_up, col_shift_down, col_shift_n = st.columns([1, 1, 1])
+                            with col_shift_n:
+                                shift_n = st.number_input(t("video_shift_n"), min_value=1, value=1, step=1)
+                            with col_shift_up:
+                                if st.button(t("video_shift_chapter_up")):
+                                    subtitle_idx = subtitles_df[subtitles_df["Start"] == chapters_df.iloc[chapter_idx]["Start"]].index[0]
+                                    new_idx = max(0, subtitle_idx - shift_n)  # Ne pas dépasser le début
+                                    new_start = subtitles_df.iloc[new_idx]["Start"]
+                                    if chapter_idx > 0:
+                                        chapters_df.at[chapter_idx - 1, "End"] = new_start  # Ajuster la fin du précédent
+                                    chapters_df.at[chapter_idx, "Start"] = new_start  # Nouveau début, End inchangé
+                                    save_vtt(vtt_path, subtitles_df, chapters_df)
+                                    st.rerun()
+                            with col_shift_down:
+                                if st.button(t("video_shift_chapter_down")):
+                                    subtitle_idx = subtitles_df[subtitles_df["Start"] == chapters_df.iloc[chapter_idx]["Start"]].index[0]
+                                    new_idx = min(len(subtitles_df) - 1, subtitle_idx + shift_n)  # Ne pas dépasser la fin
+                                    new_start = subtitles_df.iloc[new_idx]["Start"]
+                                    if chapter_idx > 0:
+                                        chapters_df.at[chapter_idx - 1, "End"] = new_start  # Ajuster la fin du précédent
+                                    chapters_df.at[chapter_idx, "Start"] = new_start  # Nouveau début, End inchangé
+                                    save_vtt(vtt_path, subtitles_df, chapters_df)
+                                    st.rerun()
+
                         if col2.button(t("video_delete_chapter")) and selected_chapters["selection"]["rows"]:
                             chapter_idx = selected_chapters["selection"]["rows"][0]
                             chapters_df = chapters_df.drop(chapter_idx).reset_index(drop=True)
