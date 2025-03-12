@@ -52,6 +52,7 @@ translations["en"].update({
     "video_move_down": "Move Down",
     "video_delete_chapter_continuous": "Delete Chapter",
     "video_delete_chapter_discontinuous": "Discontinuous Delete",
+    "video_create_chapter": "Create Chapter",
 })
 
 translations["fr"].update({
@@ -94,6 +95,7 @@ translations["fr"].update({
     "video_move_down": "Descendre",
     "video_delete_chapter_continuous": "Supprimer le chapitre",
     "video_delete_chapter_discontinuous": "Supprimer discontinue",
+    "video_create_chapter": "Créer un chapitre",
 })
 
 class VideoPlugin(Plugin):
@@ -371,7 +373,7 @@ class VideoPlugin(Plugin):
         with col2:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
-                selected_video = video_df.iloc[selected_idx]
+                selected_video = video_df.iloc[st.session_state["video_order"][selected_idx]]
                 vtt_path = os.path.splitext(selected_video["Full Path"])[0] + ".vtt"
 
                 if selected_video["Has Subtitles"]:
@@ -389,12 +391,10 @@ class VideoPlugin(Plugin):
                         for i, thumbnail in st.session_state["thumbnails"].get(vtt_path, {}).items():
                             subtitles_df.at[i, "Thumbnail"] = thumbnail
 
-                    # Remplir la colonne "Chapitre" avec la première ligne seulement
                     subtitles_df["Chapitre"] = ""
                     for i, sub in subtitles_df.iterrows():
                         for _, chap in chapters_df.iterrows():
                             if sub["Start"] >= chap["Start"] and sub["End"] <= chap["End"]:
-                                # Prendre uniquement la première ligne du titre multiligne
                                 subtitles_df.at[i, "Chapitre"] = chap["Title"].split("\n")[0]
                                 break
 
@@ -447,19 +447,47 @@ class VideoPlugin(Plugin):
                                 save_vtt(vtt_path, subtitles_df, chapters_df)
                                 st.rerun()
 
-                        if st.button(t("video_split")):
-                            split_time_ms = parse_timecode_to_ms(selected_subtitle["Start"])
-                            split_video(selected_video["Full Path"], split_time_ms, self.working_dir)
-                            st.rerun()
+                        # Ligne avec "Découper" et "Créer chapitre"
+                        col_split, col_chapter_title, col_create_chapter = st.columns([1, 2, 1])
+                        with col_split:
+                            if st.button(t("video_split")):
+                                split_time_ms = parse_timecode_to_ms(selected_subtitle["Start"])
+                                split_by_chapters(selected_video["Full Path"], self.working_dir, split_time_ms=split_time_ms)
+                                st.rerun()
+                        with col_chapter_title:
+                            chapter_title = st.text_input(t("video_chapter_title"), "", key="new_chapter_title")
+                        with col_create_chapter:
+                            if st.button(t("video_create_chapter")) and chapter_title:
+                                new_start = selected_subtitle["Start"]
+                                # Trouver la position d’insertion dans chapters_df
+                                insert_idx = 0
+                                for i, chap in chapters_df.iterrows():
+                                    if parse_timecode_to_ms(chap["Start"]) < parse_timecode_to_ms(new_start):
+                                        insert_idx = i + 1
+                                    else:
+                                        break
+                                # Ajuster le End du chapitre précédent si existant
+                                if insert_idx > 0:
+                                    chapters_df.at[insert_idx - 1, "End"] = new_start
+                                # Définir le End du nouveau chapitre : jusqu’au chapitre suivant ou fin de la vidéo
+                                if insert_idx < len(chapters_df):
+                                    new_end = chapters_df.iloc[insert_idx]["Start"]  # Début du chapitre suivant
+                                else:
+                                    new_end = subtitles_df["End"].iloc[-1]  # Fin de la vidéo (dernier sous-titre)
+                                # Insérer le nouveau chapitre
+                                new_chapter = pd.DataFrame([{"Start": new_start, "End": new_end, "Title": chapter_title}], index=[insert_idx])
+                                chapters_df = pd.concat([chapters_df.iloc[:insert_idx], new_chapter, chapters_df.iloc[insert_idx:]]).reset_index(drop=True)
+                                save_vtt(vtt_path, subtitles_df, chapters_df)
+                                st.rerun()
 
                         if selected_subtitles["selection"]["rows"] and len(selected_subtitles["selection"]["rows"]) >= 2:
                             start_idx = selected_subtitles["selection"]["rows"][0]
                             end_idx = selected_subtitles["selection"]["rows"][-1]
                             start_time = filtered_subtitles_df.iloc[start_idx]["Start"]
                             end_time = filtered_subtitles_df.iloc[end_idx]["End"]
-                            chapter_title = st.text_input(t("video_chapter_title"), "")
-                            if st.button(t("video_add_chapter")) and chapter_title:
-                                new_chapter = pd.DataFrame([{"Start": start_time, "End": end_time, "Title": chapter_title}])
+                            chapter_title_multi = st.text_input(t("video_chapter_title"), "", key="multi_chapter_title")
+                            if st.button(t("video_add_chapter")) and chapter_title_multi:
+                                new_chapter = pd.DataFrame([{"Start": start_time, "End": end_time, "Title": chapter_title_multi}])
                                 chapters_df = pd.concat([chapters_df, new_chapter], ignore_index=True)
                                 save_vtt(vtt_path, subtitles_df, chapters_df)
                                 st.rerun()
