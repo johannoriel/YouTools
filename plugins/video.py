@@ -2,14 +2,13 @@ from global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from plugins.common import remove_quotes
-import os
+from video_utils import (
+    scan_videos, load_subtitles_and_chapters, save_vtt, generate_subtitles,
+    convert_to_mp4, rename_video, merge_videos, split_video, delete_videos,
+    generate_thumbnail, format_time
+)
 import pandas as pd
-import whisper
-from PIL import Image
-import io
-import cv2
-import base64
-import ffmpeg
+import os
 
 # Traductions
 translations["en"].update({
@@ -95,171 +94,10 @@ class VideoPlugin(Plugin):
     def get_tabs(self):
         return [{"name": t("video_tab"), "plugin": "videoplugin"}]
 
-    def scan_videos(self, directory, extensions):
-        video_data = []
-        for root, _, files in os.walk(directory):
-            for file in files:
-                if any(file.lower().endswith(ext) for ext in extensions):
-                    video_path = os.path.join(root, file)
-                    vtt_path = os.path.splitext(video_path)[0] + ".vtt"
-                    has_subtitles = os.path.exists(vtt_path)
-                    relative_dir = os.path.relpath(root, directory)
-                    cap = cv2.VideoCapture(video_path)
-                    duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS) if cap.isOpened() else 0
-                    cap.release()
-                    video_data.append({
-                        "Video": file,
-                        "Directory": relative_dir if relative_dir != "." else "",
-                        "Duration": f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}",
-                        "Has Subtitles": has_subtitles,
-                        "Full Path": video_path
-                    })
-        return pd.DataFrame(video_data)
-
-    def load_subtitles_and_chapters(self, vtt_path):
-        subtitles = []
-        chapters = []
-        if not os.path.exists(vtt_path):
-            return pd.DataFrame(columns=["Start", "End", "Text", "Thumbnail"]), []
-        with open(vtt_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            chapter_section = False
-            for i in range(len(lines)):
-                line = lines[i].strip()
-                if line == "CHAPTERS":
-                    chapter_section = True
-                    continue
-                if not chapter_section and "-->" in line and i + 1 < len(lines) and not lines[i].isdigit():
-                    start, end = line.split(" --> ")
-                    text = lines[i + 1].strip()
-                    subtitles.append({"Start": start, "End": end, "Text": text, "Thumbnail": None})
-                elif chapter_section and "-->" in line and i + 1 < len(lines):
-                    start, end = line.split(" --> ")
-                    title = lines[i + 1].strip()
-                    start_sec = sum(float(x) * 60 ** i for i, x in enumerate(reversed(start.split(":")[:-1]))) + float(start.split(":")[-1])
-                    end_sec = sum(float(x) * 60 ** i for i, x in enumerate(reversed(end.split(":")[:-1]))) + float(end.split(":")[-1])
-                    duration = end_sec - start_sec
-                    chapters.append({
-                        "Start": start,
-                        "End": end,
-                        "Title": title,
-                        "Duration": f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}"
-                    })
-        return pd.DataFrame(subtitles), pd.DataFrame(chapters)
-
-    def save_vtt(self, vtt_path, subtitles_df, chapters_df):
-        with open(vtt_path, "w", encoding="utf-8") as f:
-            f.write("WEBVTT\n\n")
-            for i, row in subtitles_df.iterrows():
-                f.write(f"{i + 1}\n")
-                f.write(f"{row['Start']} --> {row['End']}\n")
-                f.write(f"{row['Text']}\n\n")
-            if not chapters_df.empty:
-                f.write("CHAPTERS\n\n")
-                for _, row in chapters_df.iterrows():
-                    f.write(f"{row['Start']} --> {row['End']}\n")
-                    f.write(f"{row['Title']}\n\n")
-
-    def generate_subtitles(self, video_path, model_name):
-        model = whisper.load_model(model_name)
-        result = model.transcribe(video_path)
-        vtt_path = os.path.splitext(video_path)[0] + ".vtt"
-        with open(vtt_path, "w", encoding="utf-8") as f:
-            f.write("WEBVTT\n\n")
-            for i, segment in enumerate(result["segments"]):
-                start = self.format_time(segment["start"])
-                end = self.format_time(segment["end"])
-                text = segment["text"]
-                f.write(f"{i + 1}\n")
-                f.write(f"{start} --> {end}\n")
-                f.write(f"{text}\n\n")
-        return vtt_path
-
-    def convert_to_mp4(self, video_path):
-        output_path = os.path.splitext(video_path)[0] + ".mp4"
-        if not os.path.exists(output_path):
-            try:
-                stream = ffmpeg.input(video_path)
-                stream = ffmpeg.output(stream, output_path, vcodec="copy", acodec="copy")
-                ffmpeg.run(stream)
-                st.success(f"Converted {os.path.basename(video_path)} to MP4!")
-            except Exception as e:
-                st.error(f"Conversion failed: {str(e)}")
-        return output_path
-
-    def rename_video(self, video_path, new_name):
-        directory, old_name = os.path.split(video_path)
-        extension = os.path.splitext(old_name)[1]
-        new_path = os.path.join(directory, new_name + extension)
-        os.rename(video_path, new_path)
-        old_vtt = os.path.splitext(video_path)[0] + ".vtt"
-        if os.path.exists(old_vtt):
-            new_vtt = os.path.splitext(new_path)[0] + ".vtt"
-            os.rename(old_vtt, new_vtt)
-        return new_path
-
-    def merge_videos(self, video_paths, output_dir):
-        output_path = os.path.join(output_dir, "merge.mp4")
-        inputs = [ffmpeg.input(path) for path in video_paths]
-        try:
-            stream = ffmpeg.concat(*inputs, v=1, a=1).output(output_path)
-            ffmpeg.run(stream)
-            st.success("Videos merged into merge.mp4!")
-        except Exception as e:
-            st.error(f"Merge failed: {str(e)}")
-        return output_path
-
-    def split_video(self, video_path, split_time, output_dir):
-        split1_path = os.path.join(output_dir, "split1.mp4")
-        split2_path = os.path.join(output_dir, "split2.mp4")
-        try:
-            stream1 = ffmpeg.input(video_path).output(split1_path, t=split_time, vcodec="copy", acodec="copy")
-            ffmpeg.run(stream1)
-            stream2 = ffmpeg.input(video_path, ss=split_time).output(split2_path, vcodec="copy", acodec="copy")
-            ffmpeg.run(stream2)
-            st.success(f"Video split into {split1_path} and {split2_path}!")
-        except Exception as e:
-            st.error(f"Split failed: {str(e)}")
-        return split1_path, split2_path
-
-    def delete_videos(self, video_paths):
-        for path in video_paths:
-            vtt_path = os.path.splitext(path)[0] + ".vtt"
-            try:
-                os.remove(path)
-                if os.path.exists(vtt_path):
-                    os.remove(vtt_path)
-                st.success(f"Deleted {os.path.basename(path)}!")
-            except Exception as e:
-                st.error(f"Deletion failed for {os.path.basename(path)}: {str(e)}")
-
-    def generate_thumbnail(self, video_path, timestamp):
-        cap = cv2.VideoCapture(video_path)
-        cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
-        ret, frame = cap.read()
-        if ret:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame)
-            img = img.resize((100, 56), Image.Resampling.LANCZOS)
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            thumbnail_bytes = buf.getvalue()
-            cap.release()
-            return f"data:image/png;base64,{base64.b64encode(thumbnail_bytes).decode('utf-8')}"
-        cap.release()
-        return None
-
-    def format_time(self, seconds):
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-        millis = int((seconds % 1) * 1000)
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
-
-    def run(self, config):
+    def setup_header(self):
         st.header(t("video_header"))
-        self.working_dir = config.get(self.name, {}).get("video_workdir", t("video_config_workdir_default"))
 
+    def setup_controls(self):
         col_model, col_thumb, col_refresh, col_ext = st.columns([2, 1, 1, 2])
         with col_model:
             model_options = ["base", "medium", "turbo", "large-v3", "large-v3-turbo"]
@@ -271,14 +109,10 @@ class VideoPlugin(Plugin):
         with col_ext:
             extension_options = [".mp4", ".mkv", ".ogg"]
             selected_extensions = st.multiselect(t("video_extensions_label"), extension_options, default=extension_options)
+        return selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions
 
-        video_df = self.scan_videos(self.working_dir, selected_extensions)
-        if video_df.empty:
-            st.write("No videos found with the selected extensions.")
-            return
-
+    def display_videos(self, video_df):
         col1, col2 = st.columns([1, 3])
-
         with col1:
             st.write(t("video_list_label"))
             selected_videos = st.dataframe(
@@ -288,16 +122,18 @@ class VideoPlugin(Plugin):
                 key="video_selector",
                 hide_index=True
             )
+        return col1, col2, selected_videos
 
+    def handle_video_actions(self, col1, selected_videos, video_df, selected_model):
+        with col1:
             col_gen, col_conv = st.columns(2)
             with col_gen:
-                # 3. Générer les sous-titres même si le fichier existe
                 if st.button(t("video_generate_subtitles")) and selected_videos["selection"]["rows"]:
                     with st.spinner(t("video_processing")):
                         try:
                             for idx in selected_videos["selection"]["rows"]:
                                 video_path = video_df.iloc[idx]["Full Path"]
-                                self.generate_subtitles(video_path, selected_model)
+                                generate_subtitles(video_path, selected_model)
                                 st.success(t("video_success").format(video=os.path.basename(video_path)))
                             st.rerun()
                         except Exception as e:
@@ -307,7 +143,7 @@ class VideoPlugin(Plugin):
                     for idx in selected_videos["selection"]["rows"]:
                         video_path = video_df.iloc[idx]["Full Path"]
                         if not video_path.endswith(".mp4"):
-                            self.convert_to_mp4(video_path)
+                            convert_to_mp4(video_path)
                     st.rerun()
 
             if selected_videos["selection"]["rows"]:
@@ -315,26 +151,27 @@ class VideoPlugin(Plugin):
                 selected_video = video_df.iloc[selected_idx]
                 new_name = st.text_input("New Video Name", os.path.splitext(selected_video["Video"])[0])
                 if st.button(t("video_rename")) and new_name:
-                    self.rename_video(selected_video["Full Path"], new_name)
+                    rename_video(selected_video["Full Path"], new_name)
                     st.rerun()
 
             if st.button(t("video_merge")) and selected_videos["selection"]["rows"]:
                 video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
-                self.merge_videos(video_paths, self.working_dir)
+                merge_videos(video_paths, self.working_dir)
                 st.rerun()
 
-            # 2. Bouton supprimer
             if st.button(t("video_delete")) and selected_videos["selection"]["rows"]:
                 video_paths = [video_df.iloc[idx]["Full Path"] for idx in selected_videos["selection"]["rows"]]
-                self.delete_videos(video_paths)
+                delete_videos(video_paths)
                 st.rerun()
 
+    def handle_chapters(self, col1, selected_videos, video_df):
+        with col1:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
                 selected_video = video_df.iloc[selected_idx]
                 vtt_path = os.path.splitext(selected_video["Full Path"])[0] + ".vtt"
                 if selected_video["Has Subtitles"]:
-                    subtitles_df, chapters_df = self.load_subtitles_and_chapters(vtt_path)
+                    subtitles_df, chapters_df = load_subtitles_and_chapters(vtt_path)
                     if not chapters_df.empty:
                         st.write(t("video_chapters_label"))
                         selected_chapters = st.dataframe(
@@ -349,26 +186,26 @@ class VideoPlugin(Plugin):
                             new_title = st.text_input(t("video_chapter_title"), chapters_df.iloc[chapter_idx]["Title"])
                             if st.button(t("video_edit_chapter")) and new_title:
                                 chapters_df.at[chapter_idx, "Title"] = new_title
-                                self.save_vtt(vtt_path, subtitles_df, chapters_df)
+                                save_vtt(vtt_path, subtitles_df, chapters_df)
                                 st.rerun()
                         if st.button(t("video_delete_chapter")) and selected_chapters["selection"]["rows"]:
                             chapter_idx = selected_chapters["selection"]["rows"][0]
                             chapters_df = chapters_df.drop(chapter_idx).reset_index(drop=True)
-                            self.save_vtt(vtt_path, subtitles_df, chapters_df)
+                            save_vtt(vtt_path, subtitles_df, chapters_df)
                             st.rerun()
 
+    def handle_subtitles(self, col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails):
         with col2:
             if selected_videos["selection"]["rows"]:
                 selected_idx = selected_videos["selection"]["rows"][0]
                 selected_video = video_df.iloc[selected_idx]
                 vtt_path = os.path.splitext(selected_video["Full Path"])[0] + ".vtt"
 
-                # 5. Affichage vidéo MP4 même sans sous-titres
                 if selected_video["Full Path"].endswith(".mp4"):
                     st.video(selected_video["Full Path"], autoplay=True)
 
                 if selected_video["Has Subtitles"]:
-                    subtitles_df, chapters_df = self.load_subtitles_and_chapters(vtt_path)
+                    subtitles_df, chapters_df = load_subtitles_and_chapters(vtt_path)
 
                     if "thumbnails" not in st.session_state:
                         st.session_state["thumbnails"] = {}
@@ -376,7 +213,7 @@ class VideoPlugin(Plugin):
                         st.session_state["thumbnails"][vtt_path] = {}
                         for i, row in subtitles_df.iterrows():
                             seconds = sum(float(x) * 60 ** i for i, x in enumerate(reversed(row["Start"].split(":")[:-1]))) + float(row["Start"].split(":")[-1])
-                            thumbnail = self.generate_thumbnail(selected_video["Full Path"], seconds)
+                            thumbnail = generate_thumbnail(selected_video["Full Path"], seconds)
                             st.session_state["thumbnails"][vtt_path][i] = thumbnail
                     if generate_thumbnails:
                         for i, thumbnail in st.session_state["thumbnails"].get(vtt_path, {}).items():
@@ -413,7 +250,6 @@ class VideoPlugin(Plugin):
                             edited_text = st.text_input("Text", selected_subtitle["Text"], key="edit_text")
                         with col_edit_save:
                             if st.button("Save Subtitle"):
-                                # 4. Synchronisation des timecodes
                                 if edited_start != selected_subtitle["Start"] and selected_subtitle_idx > 0:
                                     subtitles_df.at[selected_subtitle_idx - 1, "End"] = edited_start
                                 if edited_end != selected_subtitle["End"] and selected_subtitle_idx < len(subtitles_df) - 1:
@@ -421,22 +257,19 @@ class VideoPlugin(Plugin):
                                 subtitles_df.at[selected_subtitle_idx, "Start"] = edited_start
                                 subtitles_df.at[selected_subtitle_idx, "End"] = edited_end
                                 subtitles_df.at[selected_subtitle_idx, "Text"] = edited_text
-                                self.save_vtt(vtt_path, subtitles_df, chapters_df)
+                                save_vtt(vtt_path, subtitles_df, chapters_df)
                                 st.rerun()
 
                         if st.button(t("video_split")):
                             split_time = sum(float(x) * 60 ** i for i, x in enumerate(reversed(selected_subtitle["Start"].split(":")[:-1]))) + float(selected_subtitle["Start"].split(":")[-1])
-                            self.split_video(selected_video["Full Path"], split_time, self.working_dir)
+                            split_video(selected_video["Full Path"], split_time, self.working_dir)
                             st.rerun()
 
                         if selected_video["Full Path"].endswith(".mp4"):
-                            # 1. Utilisation directe des timecodes
-                            start_sec = selected_subtitle["Start"]
-                            end_sec = selected_subtitle["End"]
                             st.video(
                                 selected_video["Full Path"],
-                                start_time=start_sec,
-                                end_time=end_sec,
+                                start_time=selected_subtitle["Start"],
+                                end_time=selected_subtitle["End"],
                                 autoplay=True
                             )
                         else:
@@ -451,12 +284,28 @@ class VideoPlugin(Plugin):
                         if st.button(t("video_add_chapter")) and chapter_title:
                             new_chapter = pd.DataFrame([{"Start": start_time, "End": end_time, "Title": chapter_title}])
                             chapters_df = pd.concat([chapters_df, new_chapter], ignore_index=True)
-                            self.save_vtt(vtt_path, subtitles_df, chapters_df)
+                            save_vtt(vtt_path, subtitles_df, chapters_df)
                             st.rerun()
                 else:
                     st.write("No subtitles available for this video yet.")
             else:
                 st.write("Select a video to view subtitles.")
+
+    def run(self, config):
+        self.working_dir = config.get(self.name, {}).get("video_workdir", t("video_config_workdir_default"))
+
+        self.setup_header()
+        selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions = self.setup_controls()
+
+        video_df = scan_videos(self.working_dir, selected_extensions)
+        if video_df.empty:
+            st.write("No videos found with the selected extensions.")
+            return
+
+        col1, col2, selected_videos = self.display_videos(video_df)
+        self.handle_video_actions(col1, selected_videos, video_df, selected_model)
+        self.handle_chapters(col1, selected_videos, video_df)
+        self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails, refresh_thumbnails)
 
 if __name__ == "__main__":
     st.write("Video Plugin standalone test")
