@@ -213,6 +213,67 @@ def split_video(video_path, split_time_ms, output_dir):
         st.error(f"Split failed: {str(e)}")
     return split1_path, split2_path
 
+def split_by_chapters(video_path, output_dir, chapters_df=None, split_time_ms=None):
+    """Découpe une vidéo en segments basés sur les chapitres ou un seul point de découpe.
+
+    Args:
+        video_path (str): Chemin de la vidéo source.
+        output_dir (str): Répertoire de sortie pour les fichiers découpés.
+        chapters_df (pd.DataFrame, optional): DataFrame contenant Start, End, et Title des chapitres.
+        split_time_ms (int, optional): Point de découpe unique en millisecondes (si aucun chapitre n’est fourni).
+
+    Returns:
+        list: Liste des chemins des fichiers générés.
+    """
+    output_files = []
+    try:
+        # Cas 1 : Découpage par un seul point (ancien comportement de split_video)
+        if split_time_ms is not None and chapters_df is None:
+            split_time = split_time_ms / 1000.0  # Convertir en secondes
+            split1_path = os.path.join(output_dir, "split1.mp4")
+            split2_path = os.path.join(output_dir, "split2.mp4")
+
+            stream1 = ffmpeg.input(video_path, ss=0).output(
+                split1_path, t=split_time, vcodec="h264", acodec="aac", strict="experimental",
+                map_metadata="-1", reset_timestamps=1
+            )
+            ffmpeg.run(stream1)
+            stream2 = ffmpeg.input(video_path, ss=split_time).output(
+                split2_path, vcodec="h264", acodec="aac", strict="experimental",
+                map_metadata="-1", reset_timestamps=1
+            )
+            ffmpeg.run(stream2)
+            output_files = [split1_path, split2_path]
+            st.success(f"Video split into {split1_path} and {split2_path}!")
+
+        # Cas 2 : Découpage par chapitres
+        elif chapters_df is not None and not chapters_df.empty:
+            for i, row in chapters_df.iterrows():
+                start_time = parse_timecode_to_ms(row["Start"]) / 1000.0  # Convertir en secondes
+                end_time = parse_timecode_to_ms(row["End"]) / 1000.0
+                duration = end_time - start_time
+                # Nom du fichier : "n - titre.mp4" (première ligne du titre seulement)
+                title = row["Title"].split("\n")[0].replace(":", "-").replace("/", "-")  # Remplacer caractères interdits
+                output_path = os.path.join(output_dir, f"{i + 1} - {title}.mp4")
+
+                stream = ffmpeg.input(video_path, ss=start_time).output(
+                    output_path, t=duration, vcodec="h264", acodec="aac", strict="experimental",
+                    map_metadata="-1", reset_timestamps=1
+                )
+                ffmpeg.run(stream)
+                output_files.append(output_path)
+            st.success(f"Video split into {len(output_files)} chapters!")
+
+        else:
+            st.error("No chapters or split time provided for splitting.")
+            return []
+
+    except Exception as e:
+        st.error(f"Split failed: {str(e)}")
+        return []
+
+    return output_files
+
 def delete_videos(video_paths):
     for path in video_paths:
         vtt_path = os.path.splitext(path)[0] + ".vtt"
