@@ -227,15 +227,37 @@ class VideoPlugin(Plugin):
                             with st.spinner("Merging videos..."):
                                 video_paths = [video_df.iloc[st.session_state["video_order"][idx]]
                                                ["Full Path"] for idx in selected_videos["selection"]["rows"]]
+                                print(video_paths)
                                 merge_videos(video_paths, self.working_dir)
                             st.rerun()
                     with col_delete:
+                        # Initialiser l'état dans session_state si non présent
+                        if "delete_requested" not in st.session_state:
+                            st.session_state["delete_requested"] = False
+                        if "videos_to_delete" not in st.session_state:
+                            st.session_state["videos_to_delete"] = []
+
+                        # Bouton pour demander la suppression
                         if st.button(t("video_delete")) and selected_videos["selection"]["rows"]:
-                            with st.spinner("Deleting videos..."):
-                                video_paths = [video_df.iloc[st.session_state["video_order"][idx]]
-                                               ["Full Path"] for idx in selected_videos["selection"]["rows"]]
-                                delete_videos(video_paths)
+                            st.session_state["delete_requested"] = True
+                            st.session_state["videos_to_delete"] = [
+                                video_df.iloc[st.session_state["video_order"][idx]]["Full Path"] for idx in selected_videos["selection"]["rows"]]
                             st.rerun()
+
+                        # Afficher l'alerte et la confirmation si une suppression est demandée
+                        if st.session_state["delete_requested"]:
+                            video_names = [os.path.basename(
+                                path) for path in st.session_state["videos_to_delete"]]
+                            st.warning(
+                                f"Are you sure you want to delete the following videos?\n\n{', '.join(video_names)}\n\nThis action cannot be undone.", icon="⚠️")
+                            if st.button("Confirm Deletion"):
+                                with st.spinner("Deleting videos..."):
+                                    delete_videos(
+                                        st.session_state["videos_to_delete"])
+                                # Réinitialiser l'état après suppression
+                                st.session_state["delete_requested"] = False
+                                st.session_state["videos_to_delete"] = []
+                                st.rerun()
 
                     col_auto_chapter = st.columns([1, 1])
                     with col_auto_chapter[0]:
@@ -300,7 +322,7 @@ class VideoPlugin(Plugin):
                                         "No chapters available to split the video.")
                                 else:
                                     split_by_chapters(
-                                        selected_video["Full Path"], self.working_dir, chapters_df=chapters_df)
+                                        selected_video["Full Path"], os.path.dirname(selected_video["Full Path"]), chapters_df=chapters_df)
                                 st.rerun()
 
                     # Nouveaux boutons "Move Up" et "Move Down"
@@ -541,7 +563,7 @@ class VideoPlugin(Plugin):
                             if st.button(t("video_split")):
                                 split_time_ms = parse_timecode_to_ms(
                                     selected_subtitle["Start"])
-                                split_by_chapters(
+                                split_video(
                                     selected_video["Full Path"], self.working_dir, split_time_ms=split_time_ms)
                                 st.rerun()
                         with col_chapter_title:
