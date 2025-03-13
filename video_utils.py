@@ -166,74 +166,97 @@ def rename_video(old_path, new_name):
 
 def merge_videos(video_paths, output_dir):
     """
-    Fusionne plusieurs vidéos en une seule en utilisant la méthode de concaténation avec fichier intermédiaire,
-    qui est plus fiable que la concaténation directe.
+    Fusionne plusieurs vidéos en une seule avec un pré-encodage individuel pour garantir la compatibilité.
+
+    Args:
+        video_paths (list): Liste des chemins des fichiers vidéo à fusionner.
+        output_dir (str): Répertoire de sortie pour la vidéo fusionnée.
+
+    Returns:
+        str: Chemin de la vidéo fusionnée.
     """
+    import os
+    import ffmpeg
+    import streamlit as st
+    from tempfile import NamedTemporaryFile
+
     output_path = os.path.join(output_dir, "merge.mp4")
     if os.path.exists(output_path):
-        os.remove(output_path)  # Écraser le fichier existant s'il existe
+        os.remove(output_path)  # Écraser le fichier existant
 
     try:
-        # Créer un fichier de liste temporaire pour ffmpeg
+        # Étape 1 : Pré-encoder chaque vidéo dans un format standardisé
+        temp_files = []
+        for video_path in video_paths:
+            # Créer un fichier temporaire pour la vidéo pré-encodée
+            with NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+                temp_path = temp_file.name
+                temp_files.append(temp_path)
+
+                # Ré-encodage avec paramètres stricts
+                stream = ffmpeg.input(video_path)
+                stream = ffmpeg.output(
+                    stream,
+                    temp_path,
+                    vcodec="libx264",      # Codec vidéo H.264 avec la bibliothèque libx264
+                    preset="medium",       # Preset équilibré pour qualité/vitesse
+                    # Qualité raisonnable (0-51, plus bas = meilleure qualité)
+                    crf=23,
+                    acodec="aac",          # Codec audio AAC
+                    ar=44100,              # Fréquence d'échantillonnage audio standardisée
+                    ac=2,                  # 2 canaux audio (stéréo)
+                    # Framerate fixé à 30 fps (ajustable si besoin)
+                    r=30,
+                    strict="experimental",
+                    map_metadata="-1",     # Supprimer les métadonnées héritées
+                    movflags="faststart"   # Optimisation pour le streaming
+                )
+                ffmpeg.run(stream, overwrite_output=True)
+                st.info(
+                    f"Pré-encodage terminé pour {os.path.basename(video_path)}")
+
+        # Étape 2 : Créer un fichier de concaténation
         concat_file_path = os.path.join(output_dir, "concat_list.txt")
         with open(concat_file_path, "w") as f:
-            for video_path in video_paths:
-                f.write(f"file '{os.path.abspath(video_path)}'\n")
+            for temp_path in temp_files:
+                f.write(f"file '{os.path.abspath(temp_path)}'\n")
 
-        # Utiliser la méthode de concaténation par fichier qui fonctionne avec plus de 2 fichiers
-        # et gère mieux les différences de codecs
+        # Étape 3 : Fusionner les vidéos pré-encodées
         stream = ffmpeg.input(concat_file_path, format='concat', safe=0)
         stream = ffmpeg.output(
             stream,
             output_path,
-            c='copy',  # Essayer d'abord de copier sans réencodage pour conserver la qualité
-            movflags='faststart'  # Optimisation pour la lecture en streaming
+            vcodec="libx264",      # Ré-encodage final en H.264
+            acodec="aac",
+            ar=44100,              # Assurer une fréquence audio cohérente
+            ac=2,                  # Stéréo
+            r=30,                  # Framerate cohérent
+            preset="medium",
+            crf=23,
+            strict="experimental",
+            map_metadata="-1",
+            movflags="faststart"
         )
-
-        # Exécuter la commande FFmpeg
         ffmpeg.run(stream, overwrite_output=True)
 
-        # Supprimer le fichier de liste temporaire
+        # Nettoyage des fichiers temporaires
         os.remove(concat_file_path)
+        for temp_path in temp_files:
+            os.remove(temp_path)
 
         st.success(f"Videos merged into {output_path}!")
+        return output_path
+
     except Exception as e:
-        # Si la première méthode échoue (probablement à cause de l'incompatibilité des codecs),
-        # essayer avec réencodage
-        try:
-            st.warning("First merge attempt failed, trying with re-encoding...")
-
-            # Recréer le fichier de liste
-            concat_file_path = os.path.join(output_dir, "concat_list.txt")
-            with open(concat_file_path, "w") as f:
-                for video_path in video_paths:
-                    f.write(f"file '{os.path.abspath(video_path)}'\n")
-
-            # Utiliser la méthode avec réencodage
-            stream = ffmpeg.input(concat_file_path, format='concat', safe=0)
-            stream = ffmpeg.output(
-                stream,
-                output_path,
-                vcodec="h264",  # Réencoder la vidéo
-                acodec="aac",   # Réencoder l'audio
-                strict="experimental",
-                map_metadata="-1",  # Supprimer les métadonnées héritées
-                movflags='faststart'  # Optimisation pour la lecture en streaming
-            )
-
-            # Exécuter la commande FFmpeg
-            ffmpeg.run(stream, overwrite_output=True)
-
-            # Supprimer le fichier de liste temporaire
+        st.error(f"Merge failed: {str(e)}")
+        print(f"Error details: {str(e)}")  # Pour debug
+        # Nettoyer les fichiers temporaires en cas d'échec
+        if os.path.exists(concat_file_path):
             os.remove(concat_file_path)
-
-            st.success(f"Videos merged into {output_path} (with re-encoding)!")
-        except Exception as e2:
-            st.error(f"Both merge attempts failed: {str(e2)}")
-            print(f"First error: {str(e)}")
-            print(f"Second error: {str(e2)}")
-
-    return output_path
+        for temp_path in temp_files:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        return None
 
 
 def split_video_fast(video_path, split_time_ms, output_dir):
