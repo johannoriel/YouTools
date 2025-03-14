@@ -134,6 +134,8 @@ class ImggenPlugin(Plugin):
             st.session_state.imggen_steps = 2
         if 'imggen_style' not in st.session_state:
             st.session_state.imggen_style = ""
+        if 'imggen_prompt' not in st.session_state:
+                st.session_state.imggen_prompt = ""
 
         col1, col2 = st.columns(2)
         with col1:
@@ -153,7 +155,10 @@ class ImggenPlugin(Plugin):
                 st.session_state.immgen_style = "oil painting"
 
         aspect_ratio = st.selectbox(
-            t("aspect_ratio"), ["1:1", "16:9"], key="imggen_aspect_ratio")
+            t("aspect_ratio"),
+            ["1:1", "4:3", "3:4", "16:9", "9:16"],
+            key="imggen_aspect_ratio"
+        )
         remove_background = st.checkbox(
             t("remove_background"), key="imggen_remove_background")
         background_removal_method = st.selectbox(t("background_removal_method"), [
@@ -171,6 +176,12 @@ class ImggenPlugin(Plugin):
         styles = config['imggen']['styles'].split(',')
         style = st.selectbox(
             t("style"), [""] + [s.strip() for s in styles], key="imggen_style")
+
+        multi_styles_input = st.text_input(
+                "Multiple Styles (comma-separated, e.g., photorealistic, cartoon, anime)",
+                "",
+                key="imggen_multi_styles"
+            )
 
         if 'imggen_num_images' not in st.session_state:
             st.session_state.imggen_num_images = 1
@@ -212,60 +223,65 @@ class ImggenPlugin(Plugin):
                             "Invalid seed list format. Please use comma-separated integers (e.g., 123, 456, 789)")
                         return
 
+                # Liste des styles multiples
+                multi_styles = [s.strip() for s in multi_styles_input.split(',')] if multi_styles_input else None
+
                 self.generate_images(background_prompt,
-                                     sub_prompts, aspect_ratio, remove_background, background_removal_method,
-                                     None if use_random_seed or num_images > 1 else seed, use_face, steps, input_image,
-                                     config['imggen']['face_prompt'], style, config['imggen']['output_dir'],
-                                     num_images, manual_seeds  # Ajout de manual_seeds
-                                     )
+                                        sub_prompts, aspect_ratio, remove_background, background_removal_method,
+                                        None if use_random_seed or num_images > 1 else seed, use_face, steps, input_image,
+                                        config['imggen']['face_prompt'], style, config['imggen']['output_dir'],
+                                        num_images, manual_seeds, multi_styles  # Ajout de multi_styles
+                                        )
 
     def generate_images(self, background_prompt, prompts, aspect_ratio, remove_background, background_removal_method,
-                        seed, use_face, steps, input_image, face_prompt, style, output_dir, num_images, manual_seeds=None):
+                        seed, use_face, steps, input_image, face_prompt, style, output_dir, num_images, manual_seeds=None, multi_styles=None):
         num_columns = 3  # Nombre de colonnes dans la galerie
         cols = st.columns(num_columns)
 
         progress_placeholder = st.empty()
         progress_bar = progress_placeholder.progress(0)
 
-        # Si une liste de graines manuelles est fournie, on l'utilise, sinon on génère des graines aléatoires
         if manual_seeds:
             seeds = manual_seeds
         else:
-            seeds = [seed if seed is not None else random.randint(
-                0, 2**32 - 1) for _ in range(num_images)]
+            seeds = [seed if seed is not None else random.randint(0, 2**32 - 1) for _ in range(num_images)]
 
-        # Génération et affichage progressif des images
+        total_images = len(seeds) * len(prompts) * (len(multi_styles) if multi_styles else 1)
+        image_count = 0
+
         for i, current_seed in enumerate(seeds):
+            generator = torch.Generator().manual_seed(current_seed)  # Même graine pour tous les styles
+
             for j, sub_prompt in enumerate(prompts):
-                full_prompt = sub_prompt
-                if style:
-                    full_prompt += f", style: {style}"
+                if multi_styles:
+                    styles_to_use = multi_styles
+                else:
+                    styles_to_use = [style] if style else [""]
 
-                # Utiliser la même graine pour tous les sous-prompts à cette itération
-                used_seed = current_seed
-                generator = torch.Generator().manual_seed(used_seed)
+                for k, current_style in enumerate(styles_to_use):
+                    full_prompt = sub_prompt
+                    style_suffix = f", style: {current_style}" if current_style else ""
+                    full_prompt += style_suffix
 
-                # Génère l'image
-                image, _ = self.generate_image(background_prompt,
-                                               full_prompt, aspect_ratio, remove_background, background_removal_method,
-                                               used_seed, use_face, steps, input_image, face_prompt
-                                               )
+                    image, _ = self.generate_image(background_prompt,
+                                                   full_prompt, aspect_ratio, remove_background, background_removal_method,
+                                                   current_seed, use_face, steps, input_image, face_prompt
+                                                   )
 
-                # Choisir la colonne dans laquelle afficher l'image
-                col_idx = (i * len(prompts) + j) % num_columns
-                with cols[col_idx]:  # Mise à jour dans la colonne correspondante
-                    st.image(
-                        image, caption=f"Image {i+1}/{len(seeds)} \nSeed: {used_seed}\nPrompt: {full_prompt}", use_container_width=True)
+                    col_idx = image_count % num_columns
+                    with cols[col_idx]:
+                        caption = f"Image {i+1}/{len(seeds)} \nSeed: {current_seed}\nPrompt: {sub_prompt}"
+                        if current_style:
+                            caption += f"\nStyle: {current_style}"
+                        st.image(image, caption=caption, use_container_width=True)
 
-                # Sauvegarder l'image avec la seed
-                self.save_image(image, output_dir, sub_prompt, used_seed)
+                    # Passer current_style à save_image
+                    self.save_image(image, output_dir, sub_prompt, current_seed, current_style)
 
-                # Mettre à jour la barre de progression
-                progress_bar.progress(
-                    ((i * len(prompts)) + j + 1) / (len(seeds) * len(prompts)))
+                    image_count += 1
+                    progress_bar.progress(image_count / total_images)
 
-        # Lorsque tout est terminé, remplacez la barre de progression par un message
-        progress_placeholder.empty()  # Efface la barre de progression
+        progress_placeholder.empty()
         st.success(t("imggen_done"))
 
     def generate_image(self, background_prompt, prompt, aspect_ratio="1:1", remove_background=True, background_removal_method="ai", seed=None, face=True, steps=2, input_image=None, face_prompt=""):
@@ -283,15 +299,17 @@ class ImggenPlugin(Plugin):
 
         if aspect_ratio == "1:1":
             height, width = 1024, 1024
+        elif aspect_ratio == "4:3":
+            height, width = 768, 1024  # ou 1024x1366 selon la résolution souhaitée
+        elif aspect_ratio == "3:4":
+            height, width = 1024, 768  # ou 1366x1024
         elif aspect_ratio == "16:9":
             height, width = 1080, 1920
-            if face and input_image is None:
-                print(
-                    "Warning: 16:9 aspect ratio is not suitable for face generation. Disabling face mode.")
-                face = False
-                prompt = original_prompt
+        elif aspect_ratio == "9:16":
+            height, width = 1920, 1080
         else:
-            raise ValueError("Invalid aspect ratio. Choose '1:1' or '16:9'.")
+            raise ValueError("Invalid aspect ratio. Choose '1:1', '4:3', '3:4', '16:9', or '9:16'.")
+
 
         print(f"Using prompt: {prompt}")
 
@@ -374,12 +392,11 @@ class ImggenPlugin(Plugin):
         return result
 
     @staticmethod
-    def save_image(image, output_dir, prompt, seed):  # Ajout du paramètre seed
+    def save_image(image, output_dir, prompt, seed, style=None):
         os.makedirs(output_dir, exist_ok=True)
-        # Prendre les 5 premiers mots du prompt et ajouter la seed
         filename_base = "_".join(prompt.split()[:5])
-        # Inclusion de la seed dans le nom
-        filename = f"{filename_base}_{seed}.png"
+        style_part = f"_{style.replace(' ', '_')}" if style else ""
+        filename = re.sub(r'[^a-zA-Z0-9_]', '', f"{filename_base}{style_part}_{seed}") + ".png"
         filepath = os.path.join(output_dir, filename)
         image.save(filepath)
         print(f"Image saved to: {filepath}")
@@ -393,7 +410,9 @@ def main():
     parser.add_argument("-i", "--input-image", type=str,
                         help="Path to input image for img2img")
     parser.add_argument("-ar", "--aspect_ratio",
-                        choices=["1:1", "16:9"], default="1:1", help="Aspect ratio of the image")
+                        choices=["1:1", "4:3", "3:4", "16:9", "9:16"],  # Ajout des nouveaux formats
+                        default="1:1",
+                        help="Aspect ratio of the image")
     parser.add_argument("-nb", "--no-background-removal", action="store_false",
                         dest="remove_background", help="Don't remove the background")
     parser.add_argument(
