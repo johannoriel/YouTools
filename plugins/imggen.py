@@ -393,6 +393,7 @@ class ImggenPlugin(Plugin):
 
     @staticmethod
     def save_image(image, output_dir, prompt, seed, style=None):
+        import re
         os.makedirs(output_dir, exist_ok=True)
         filename_base = "_".join(prompt.split()[:5])
         style_part = f"_{style.replace(' ', '_')}" if style else ""
