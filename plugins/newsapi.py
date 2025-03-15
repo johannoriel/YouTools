@@ -22,11 +22,14 @@ translations["en"].update({
     "newsapi_sort_by_label": "Sort By",
     "newsapi_source_label": "Source",
     "newsapi_category_label": "Category",
+    "newsapi_pagesize_label": "Articles per Page",
     "newsapi_summarize_label": "Summarize Trends with LLM",
     "newsapi_search_button": "Search Trends",
     "newsapi_summarize_button": "Summarize Trends",
+    "newsapi_previous_button": "Previous Page",
+    "newsapi_next_button": "Next Page",
     "newsapi_processing": "Fetching news trends...",
-    "newsapi_success": "Trends fetched successfully! Found {count} articles.",
+    "newsapi_success": "Trends fetched successfully! Found {count} articles (Page {page}/{total_pages}).",
     "newsapi_error": "An error occurred: {error}",
     "newsapi_no_results": "No results found for this query.",
     "newsapi_request_debug": "API Request Details",
@@ -45,11 +48,14 @@ translations["fr"].update({
     "newsapi_sort_by_label": "Trier par",
     "newsapi_source_label": "Source",
     "newsapi_category_label": "Catégorie",
+    "newsapi_pagesize_label": "Articles par page",
     "newsapi_summarize_label": "Résumer les tendances avec LLM",
     "newsapi_search_button": "Rechercher les tendances",
     "newsapi_summarize_button": "Résumer les tendances",
+    "newsapi_previous_button": "Page précédente",
+    "newsapi_next_button": "Page suivante",
     "newsapi_processing": "Récupération des tendances en cours...",
-    "newsapi_success": "Tendances récupérées avec succès ! {count} articles trouvés.",
+    "newsapi_success": "Tendances récupérées avec succès ! {count} articles trouvés (Page {page}/{total_pages}).",
     "newsapi_error": "Une erreur s'est produite : {error}",
     "newsapi_no_results": "Aucun résultat trouvé pour cette requête.",
     "newsapi_request_debug": "Détails de la requête API",
@@ -60,23 +66,27 @@ class NewsapiPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
-        # Initialisation des sources dans session_state si elles n'existent pas encore
         if "newsapi_french_sources" not in st.session_state:
             st.session_state["newsapi_french_sources"] = self._fetch_french_sources(
             )
+        # Initialisation des variables dans session_state
+        if "newsapi_current_page" not in st.session_state:
+            # 0 signifie pas de recherche active
+            st.session_state["newsapi_current_page"] = 0
+        if "newsapi_total_results" not in st.session_state:
+            st.session_state["newsapi_total_results"] = 0
+        if "newsapi_search_params" not in st.session_state:
+            st.session_state["newsapi_search_params"] = {}
 
     def _fetch_french_sources(self):
         """Récupère dynamiquement les sources françaises via l'endpoint /sources."""
         api_key = self.plugin_manager.config.get(
             self.name, {}).get("newsapi_api_key", "")
         if not api_key or api_key == t("newsapi_api_key_default"):
-            return [""]  # Retourne une liste vide par défaut si pas de clé
+            return [""]
 
         url = "https://newsapi.org/v2/top-headlines/sources"
-        params = {
-            "apiKey": api_key,
-            "country": "fr"  # Limite aux sources françaises
-        }
+        params = {"apiKey": api_key, "country": "fr"}
         try:
             response = requests.get(url, params=params)
             response.raise_for_status()
@@ -85,7 +95,7 @@ class NewsapiPlugin(Plugin):
                 return [""] + [source["id"] for source in data["sources"]]
         except Exception as e:
             st.error(f"Failed to fetch sources: {str(e)}")
-        return [""]  # Retourne une liste vide en cas d'erreur
+        return [""]
 
     def get_config_fields(self):
         """Définit les champs de configuration, dont la clé API."""
@@ -106,6 +116,99 @@ class NewsapiPlugin(Plugin):
     def get_tabs(self):
         """Définit l'onglet pour NewsAPI dans l'interface."""
         return [{"name": t("newsapi_tab"), "plugin": "newsapiplugin"}]
+
+    def _fetch_results(self, api_key, endpoint, query, language, page_size, page, sort_by, country, source, category, config, summarize_with_llm):
+        """Fonction pour récupérer les résultats avec pagination."""
+        with st.spinner(t("newsapi_processing")):
+            try:
+                url = f"https://newsapi.org/v2/{endpoint}"
+                params = {
+                    "apiKey": api_key,
+                    "language": language,
+                    "pageSize": page_size,
+                    "page": page
+                }
+
+                if endpoint == "everything":
+                    params["q"] = remove_quotes(query) if query else "*"
+                    params["sortBy"] = sort_by
+                    params["from"] = (
+                        datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                else:  # top-headlines
+                    if query:
+                        params["q"] = remove_quotes(query)
+                    if source:
+                        params["sources"] = source
+                    elif country:
+                        params["country"] = country
+                    if category:
+                        params["category"] = category
+
+                # Affichage de la requête dans un expander collapsé
+                with st.expander(t("newsapi_request_debug"), expanded=False):
+                    st.write(f"**URL**: {url}")
+                    st.write(f"**Params**: {params}")
+
+                # Appel à l'API
+                response = requests.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+
+                # Mise à jour du total des résultats
+                st.session_state["newsapi_total_results"] = data["totalResults"]
+
+                # Vérification des résultats
+                if data["status"] == "ok" and data["totalResults"] > 0:
+                    articles = data["articles"]
+                    total_pages = (data["totalResults"] +
+                                   page_size - 1) // page_size
+                    st.success(t("newsapi_success").format(
+                        count=len(articles),
+                        page=page,
+                        total_pages=total_pages
+                    ))
+
+                    # Affichage des résultats
+                    for article in articles:
+                        st.subheader(article["title"])
+                        st.write(f"Source: {article['source']['name']}")
+                        st.write(f"Published: {article['publishedAt']}")
+                        st.write(article["description"])
+                        st.markdown(f"[Read more]({article['url']})")
+                        st.write("---")
+
+                    # Résumé LLM si activé dès le départ
+                    if summarize_with_llm and self.ragllm_plugin:
+                        llm_prompt = "Summarize the key trends from these news articles."
+                        llm_sys_prompt = config['ragllm']['llm_sys_prompt']
+                        article_texts = "\n".join(
+                            [a["description"] or "" for a in articles])
+                        llm_response = self.ragllm_plugin.process_with_llm(
+                            llm_PROMPT,
+                            llm_sys_prompt,
+                            article_texts
+                        )
+                        st.write("**LLM Trend Summary:**")
+                        st.write(llm_response)
+                    elif self.ragllm_plugin:
+                        if st.button(t("newsapi_summarize_button")):
+                            llm_prompt = "Summarize the key trends from these news articles."
+                            llm_sys_prompt = config['ragllm']['llm_sys_prompt']
+                            article_texts = "\n".join(
+                                [a["description"] or "" for a in articles])
+                            llm_response = self.ragllm_plugin.process_with_llm(
+                                llm_prompt,
+                                llm_sys_prompt,
+                                article_texts
+                            )
+                            st.write("**LLM Trend Summary:**")
+                            st.write(llm_response)
+
+                else:
+                    st.warning(t("newsapi_no_results"))
+
+            except Exception as e:
+                st.error(t("newsapi_error").format(error=str(e)))
 
     def run(self, config):
         """Logique principale du plugin NewsAPI."""
@@ -137,6 +240,14 @@ class NewsapiPlugin(Plugin):
                 self.name, {}).get("newsapi_default_language", "fr"))
         )
 
+        page_size = st.number_input(
+            t("newsapi_pagesize_label"),
+            min_value=1,
+            max_value=100,
+            value=10,
+            step=1
+        )
+
         # Paramètres spécifiques selon l'endpoint
         if endpoint == "everything":
             sort_by = st.selectbox(
@@ -152,13 +263,12 @@ class NewsapiPlugin(Plugin):
             country = st.selectbox(
                 t("newsapi_country_label"),
                 options=["", "fr", "us", "gb", "de"],
-                index=1,  # France par défaut
+                index=1,
                 format_func=lambda x: "All Countries" if x == "" else {
                     "fr": "France", "us": "USA", "gb": "UK", "de": "Germany"}.get(x, x)
             )
             source = st.selectbox(
                 t("newsapi_source_label"),
-                # Sources depuis session_state
                 options=st.session_state["newsapi_french_sources"],
                 index=0,
                 format_func=lambda x: "All Sources" if x == "" else x
@@ -170,7 +280,6 @@ class NewsapiPlugin(Plugin):
                 index=0,
                 format_func=lambda x: "All Categories" if x == "" else x
             )
-
             if source and country:
                 st.warning(
                     "Note: Selecting a specific source overrides the country filter in NewsAPI.")
@@ -181,88 +290,49 @@ class NewsapiPlugin(Plugin):
 
         # Bouton pour lancer la recherche
         if st.button(t("newsapi_search_button")):
-            with st.spinner(t("newsapi_processing")):
-                try:
-                    # Préparation de la requête à l'API NewsAPI
-                    url = f"https://newsapi.org/v2/{endpoint}"
-                    params = {
-                        "apiKey": api_key,
-                        "language": language,
-                        "pageSize": 10,
-                    }
+            st.session_state["newsapi_current_page"] = 1
+            st.session_state["newsapi_search_params"] = {
+                "endpoint": endpoint,
+                "query": query,
+                "language": language,
+                "page_size": page_size,
+                "sort_by": sort_by,
+                "country": country,
+                "source": source,
+                "category": category,
+                "summarize_with_llm": summarize_with_llm
+            }
 
-                    if endpoint == "everything":
-                        params["q"] = remove_quotes(query) if query else "*"
-                        params["sortBy"] = sort_by
-                        params["from"] = (
-                            datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-                    else:  # top-headlines
-                        if query:
-                            params["q"] = remove_quotes(query)
-                        if source:
-                            params["sources"] = source
-                        elif country:
-                            params["country"] = country
-                        if category:
-                            params["category"] = category
+        # Affichage des résultats si une page est active
+        if st.session_state["newsapi_current_page"] > 0 and st.session_state["newsapi_search_params"]:
+            params = st.session_state["newsapi_search_params"]
+            self._fetch_results(
+                api_key,
+                params["endpoint"],
+                params["query"],
+                params["language"],
+                params["page_size"],
+                st.session_state["newsapi_current_page"],
+                params["sort_by"],
+                params["country"],
+                params["source"],
+                params["category"],
+                config,
+                params["summarize_with_llm"]
+            )
 
-                    # Affichage de la requête dans un expander collapsé
-                    with st.expander(t("newsapi_request_debug"), expanded=False):
-                        st.write(f"**URL**: {url}")
-                        st.write(f"**Params**: {params}")
-
-                    # Appel à l'API
-                    response = requests.get(url, params=params)
-                    response.raise_for_status()
-                    data = response.json()
-
-                    # Vérification des résultats
-                    if data["status"] == "ok" and data["totalResults"] > 0:
-                        articles = data["articles"]
-                        st.success(t("newsapi_success").format(
-                            count=len(articles)))
-
-                        # Affichage des résultats
-                        for article in articles:
-                            st.subheader(article["title"])
-                            st.write(f"Source: {article['source']['name']}")
-                            st.write(f"Published: {article['publishedAt']}")
-                            st.write(article["description"])
-                            st.markdown(f"[Read more]({article['url']})")
-                            st.write("---")
-
-                        # Résumé LLM si activé dès le départ
-                        if summarize_with_llm and self.ragllm_plugin:
-                            llm_prompt = "Summarize the key trends from these news articles."
-                            llm_sys_prompt = config['ragllm']['llm_sys_prompt']
-                            article_texts = "\n".join(
-                                [a["description"] or "" for a in articles])
-                            llm_response = self.ragllm_plugin.process_with_llm(
-                                llm_prompt,
-                                llm_sys_prompt,
-                                article_texts
-                            )
-                            st.write("**LLM Trend Summary:**")
-                            st.write(llm_response)
-                        elif self.ragllm_plugin:
-                            if st.button(t("newsapi_summarize_button")):
-                                llm_prompt = "Summarize the key trends from these news articles."
-                                llm_sys_prompt = config['ragllm']['llm_sys_prompt']
-                                article_texts = "\n".join(
-                                    [a["description"] or "" for a in articles])
-                                llm_response = self.ragllm_plugin.process_with_llm(
-                                    llm_prompt,
-                                    llm_sys_prompt,
-                                    article_texts
-                                )
-                                st.write("**LLM Trend Summary:**")
-                                st.write(llm_response)
-
-                    else:
-                        st.warning(t("newsapi_no_results"))
-
-                except Exception as e:
-                    st.error(t("newsapi_error").format(error=str(e)))
+            # Boutons de navigation après les résultats
+            total_pages = (st.session_state["newsapi_total_results"] +
+                           params["page_size"] - 1) // params["page_size"]
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(t("newsapi_previous_button"), disabled=st.session_state["newsapi_current_page"] <= 1):
+                    st.session_state["newsapi_current_page"] -= 1
+                    st.rerun()  # Relance l'exécution pour afficher la nouvelle page
+            with col2:
+                if st.button(t("newsapi_next_button"), disabled=st.session_state["newsapi_current_page"] >= total_pages):
+                    st.session_state["newsapi_current_page"] += 1
+                    st.rerun()  # Relance l'exécution pour afficher la nouvelle page
 
 
 if __name__ == "__main__":
