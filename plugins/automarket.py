@@ -141,6 +141,9 @@ class AutomarketPlugin(Plugin):
             st.session_state.campaign_responses = []
         if 'campaign_excluded_comments' not in st.session_state:
             st.session_state.campaign_excluded_comments = []
+        # Add this line to initialize target_videos
+        if 'target_videos' not in st.session_state:
+            st.session_state.target_videos = []
 
     def get_config_fields(self):
         return {
@@ -199,7 +202,8 @@ class AutomarketPlugin(Plugin):
         for order in ["relevance", "date"]:
             search_results = self.youtube_api.search_videos(
                 keyword, max_videos * 2, order=order, language=st.session_state.lang, combine_keywords=combine_keywords)
-            st.info(f"Nombre de vidéos trouvées par l'API pour '{keyword}' (ordre: {order}) : {len(search_results)}")
+            st.info(
+                f"Nombre de vidéos trouvées par l'API pour '{keyword}' (ordre: {order}) : {len(search_results)}")
             rejected = 0
 
             for video in search_results:
@@ -519,7 +523,7 @@ class AutomarketPlugin(Plugin):
             title = f"{t('automarket_reponse_to_comment').format(i+1)} : {response['video_title']}"
             with st.expander(title, expanded=st.session_state.expand_all):
                 st.write(f"{t('automarket_channel')}: {response['channel_title']} "
-                            f"({self.youtube_api.format_count(response['subscriber_count'])} subscribers)")
+                         f"({self.youtube_api.format_count(response['subscriber_count'])} subscribers)")
                 if st.button(t("automarket_add_to_trusted"), key=f"{prefix}_add_trusted_{i}"):
                     channel_url = f"https://www.youtube.com/channel/{response['channel_id']}"
                     add_target_channel(
@@ -535,9 +539,9 @@ class AutomarketPlugin(Plugin):
                 st.write(
                     f"{t('automarket_video')}: [{response['video_title']}](https://www.youtube.com/watch?v={response['target_video_id']})")
                 st.write(f"Views: {self.youtube_api.format_count(response['view_count'])}, "
-                            f"Likes: {self.youtube_api.format_count(response['like_count'])}, "
-                            f"Comments: {response['comment_count']}, "
-                            f"Age: {response['days_old']} days")
+                         f"Likes: {self.youtube_api.format_count(response['like_count'])}, "
+                         f"Comments: {response['comment_count']}, "
+                         f"Age: {response['days_old']} days")
                 st.write(f"{t('automarket_keyword')}: {response['keyword']}")
                 st.write(
                     f"{t('automarket_criterion')}: {response['criterion']}")
@@ -561,8 +565,9 @@ class AutomarketPlugin(Plugin):
         if st.button(t("automarket_post_responses"), key=f"{prefix}_post_responses"):
             with st.spinner(t("automarket_posting")):
                 selected_responses = [r for i, r in enumerate(responses)
-                                        if not st.session_state.selected_responses.get(i, False)]
-                self.post_responses(config, selected_responses, campaign_timestamp)
+                                      if not st.session_state.selected_responses.get(i, False)]
+                self.post_responses(
+                    config, selected_responses, campaign_timestamp)
 
                 # Calcul des statistiques
                 total_videos = len(set(
@@ -577,7 +582,8 @@ class AutomarketPlugin(Plugin):
                 posted_responses = len(selected_responses)
                 moderated_responses = sum(1 for r in selected_responses if self.youtube_api.post_comment_reply(
                     r['comment_id'], r['response']) and self.youtube_api.post_comment_reply(r['comment_id'], r['response']).get('moderation_status', 'unknown') != 'published')
-                published_responses = posted_responses - moderated_responses  # Calcul des réponses publiées
+                published_responses = posted_responses - \
+                    moderated_responses  # Calcul des réponses publiées
 
                 save_campaign_stats(campaign_timestamp, {
                     'total_videos': total_videos,
@@ -602,8 +608,8 @@ class AutomarketPlugin(Plugin):
                     st.write(f"Responses posted: {posted_responses}")
                     st.write(
                         f"{t('automarket_moderated_responses')}: {moderated_responses}")
-                    st.write(f"**Responses published: {published_responses}**")  # Ajout en gras
-
+                    # Ajout en gras
+                    st.write(f"**Responses published: {published_responses}**")
 
     def log_selected_videos(self, prefix: str, videos: List[Dict[str, Any]], keyword: str = "N/A"):
         """Affiche un log des vidéos retenues avec leurs statistiques."""
