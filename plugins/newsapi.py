@@ -29,6 +29,7 @@ translations["en"].update({
     "newsapi_success": "Trends fetched successfully! Found {count} articles.",
     "newsapi_error": "An error occurred: {error}",
     "newsapi_no_results": "No results found for this query.",
+    "newsapi_request_debug": "API Request Details",
 })
 
 translations["fr"].update({
@@ -51,6 +52,7 @@ translations["fr"].update({
     "newsapi_success": "Tendances récupérées avec succès ! {count} articles trouvés.",
     "newsapi_error": "Une erreur s'est produite : {error}",
     "newsapi_no_results": "Aucun résultat trouvé pour cette requête.",
+    "newsapi_request_debug": "Détails de la requête API",
 })
 
 
@@ -58,6 +60,32 @@ class NewsapiPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
+        # Initialisation des sources dans session_state si elles n'existent pas encore
+        if "newsapi_french_sources" not in st.session_state:
+            st.session_state["newsapi_french_sources"] = self._fetch_french_sources(
+            )
+
+    def _fetch_french_sources(self):
+        """Récupère dynamiquement les sources françaises via l'endpoint /sources."""
+        api_key = self.plugin_manager.config.get(
+            self.name, {}).get("newsapi_api_key", "")
+        if not api_key or api_key == t("newsapi_api_key_default"):
+            return [""]  # Retourne une liste vide par défaut si pas de clé
+
+        url = "https://newsapi.org/v2/top-headlines/sources"
+        params = {
+            "apiKey": api_key,
+            "country": "fr"  # Limite aux sources françaises
+        }
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            if data["status"] == "ok":
+                return [""] + [source["id"] for source in data["sources"]]
+        except Exception as e:
+            st.error(f"Failed to fetch sources: {str(e)}")
+        return [""]  # Retourne une liste vide en cas d'erreur
 
     def get_config_fields(self):
         """Définit les champs de configuration, dont la clé API."""
@@ -71,7 +99,7 @@ class NewsapiPlugin(Plugin):
                 "type": "select",
                 "label": t("newsapi_language_label"),
                 "options": [("en", "English"), ("fr", "Français"), ("es", "Español"), ("de", "Deutsch")],
-                "default": "fr"  # Par défaut en français
+                "default": "fr"
             }
         }
 
@@ -130,8 +158,8 @@ class NewsapiPlugin(Plugin):
             )
             source = st.selectbox(
                 t("newsapi_source_label"),
-                options=["", "le-monde", "le-parisien",
-                         "france-24", "bbc-news", "cnn"],
+                # Sources depuis session_state
+                options=st.session_state["newsapi_french_sources"],
                 index=0,
                 format_func=lambda x: "All Sources" if x == "" else x
             )
@@ -143,7 +171,6 @@ class NewsapiPlugin(Plugin):
                 format_func=lambda x: "All Categories" if x == "" else x
             )
 
-            # Avertissement si source et pays sont combinés (incompatibles dans NewsAPI)
             if source and country:
                 st.warning(
                     "Note: Selecting a specific source overrides the country filter in NewsAPI.")
@@ -161,7 +188,7 @@ class NewsapiPlugin(Plugin):
                     params = {
                         "apiKey": api_key,
                         "language": language,
-                        "pageSize": 10,  # Limite à 10 pour le plan gratuit
+                        "pageSize": 10,
                     }
 
                     if endpoint == "everything":
@@ -174,10 +201,15 @@ class NewsapiPlugin(Plugin):
                             params["q"] = remove_quotes(query)
                         if source:
                             params["sources"] = source
-                        elif country:  # Utilise le pays si aucune source spécifique n'est choisie
+                        elif country:
                             params["country"] = country
                         if category:
                             params["category"] = category
+
+                    # Affichage de la requête dans un expander collapsé
+                    with st.expander(t("newsapi_request_debug"), expanded=False):
+                        st.write(f"**URL**: {url}")
+                        st.write(f"**Params**: {params}")
 
                     # Appel à l'API
                     response = requests.get(url, params=params)
@@ -213,7 +245,6 @@ class NewsapiPlugin(Plugin):
                             st.write("**LLM Trend Summary:**")
                             st.write(llm_response)
                         elif self.ragllm_plugin:
-                            # Bouton pour résumer après les résultats
                             if st.button(t("newsapi_summarize_button")):
                                 llm_prompt = "Summarize the key trends from these news articles."
                                 llm_sys_prompt = config['ragllm']['llm_sys_prompt']
