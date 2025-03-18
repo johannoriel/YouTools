@@ -9,6 +9,7 @@ import ast
 import time
 import random
 import re
+from bench_db import BenchDB
 
 try:
     from pylatexenc.latex2text import LatexNodes2Text
@@ -66,8 +67,10 @@ class BenchPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
-        if 'bench_results' not in st.session_state:
-            st.session_state.bench_results = {}
+        self.db = BenchDB()
+        if 'prompts' not in st.session_state:
+            st.session_state.prompts = self.get_config_fields()[
+                "bench_prompts"]["default"]
         # Ensure config has our structure
         if not plugin_manager.config.get(name):
             plugin_manager.config[name] = self.get_config_fields()
@@ -210,23 +213,28 @@ class BenchPlugin(Plugin):
             name = url  # Keep full URL for custom APIs
         return f"{model} ({name})" if model else name
 
-    def call_llm(self, url: str, api_key: str, model: str, prompt: str, sysprompt: str = "You are a helpful AI assistant") -> str:
-        """Custom LLM call with load balancing across multiple API keys and retry mechanism"""
-        # Get all servers with the same model from st.session_state.servers
+    def shorten_response(self, response: str) -> str:
+        """Raccourcit une réponse en conservant nstart premiers et nend derniers caractères."""
+        config = self.plugin_manager.config.get(self.name, {})
+        nstart = int(config.get("nstart", 200))
+        nend = int(config.get("nend", 200))
+        if len(response) <= nstart + nend:
+            return response
+        return f"{response[:nstart]}\n\n[...]\n\n{response[-nend:]}"
+
+    def call_llm(self, url: str, api_key: str, model: str, prompt: str, sysprompt: str = "You are a helpful AI assistant") -> tuple:
+        """Custom LLM call with load balancing, returning raw response and lengths."""
         available_servers = [s for s in st.session_state.servers if s.get(
             "model") == model and s.get("url") == url]
         if not available_servers:
-            return f"Error: No servers found for model {model} at {url}"
+            return f"LLM Error: No servers found for model {model} at {url}", 0, 0, 0
 
-        # Shuffle servers for random selection
         servers = available_servers.copy()
         random.shuffle(servers)
-        # Limit retries to the number of available keys
         max_retries = len(servers)
         attempts = 0
 
         while attempts < max_retries:
-            # Select the current server (with its API key)
             current_server = servers[attempts]
             current_url = current_server.get("url", url)
             current_api_key = current_server.get("api_key", api_key)
@@ -254,46 +262,33 @@ class BenchPlugin(Plugin):
 
                 data = response.json()
 
-                # Handle different response formats
-                if "choices" in data:  # OpenAI-compatible (LM Studio)
+                if "choices" in data:
                     raw_response = data["choices"][0]["message"]["content"]
-                elif "response" in data:  # Ollama
+                elif "response" in data:
                     raw_response = data["response"]
                 else:
-                    raw_response = "Error: Unexpected response format"
+                    raw_response = "LLM Error: Unexpected response format"
 
-                # Log raw response length
                 st.write(
                     f"API raw response length for {model} at {current_url} (key attempt {attempts}): {len(raw_response)} characters")
-
-                # Convert LaTeX to readable text
                 converted_response = self.convert_latex_to_text(raw_response)
                 st.write(
                     f"Length after LaTeX conversion: {len(converted_response)} characters")
-
-                # Get nstart and nend from config
-                config = self.plugin_manager.config.get(self.name, {})
-                nstart = int(config.get("nstart", 200))
-                nend = int(config.get("nend", 200))
-
-                # Shorten the response
-                shortened_response = self.shorten_response(
-                    converted_response, nstart, nend)
+                shortened_response = self.shorten_response(converted_response)
                 st.write(
                     f"Shortened response length: {len(shortened_response)} characters")
 
-                return shortened_response
+                return raw_response, len(raw_response), len(converted_response), len(shortened_response)
 
             except requests.exceptions.RequestException as e:
-                error_msg = f"Error calling LLM at {current_url} (attempt {attempts}/{max_retries}): {str(e)}"
+                error_msg = f"LLM Error: calling LLM at {current_url} (attempt {attempts}/{max_retries}): {str(e)}"
                 st.warning(error_msg)
                 if attempts == max_retries:
                     st.error(
                         f"All {max_retries} API keys exhausted for {model} at {url}")
-                    return f"Error: {error_msg}"
-                # Retry with the next key
+                    return f"LLM Error: {error_msg}", 0, 0, 0
 
-        return f"Error: No successful response after {max_retries} attempts"
+        return f"LLM Error: No successful response after {max_retries} attempts", 0, 0, 0
 
     def get_cuda_memory_stats(self, device_index=0):
         """Retourne les stats de mémoire CUDA en Mo"""
@@ -454,6 +449,51 @@ class BenchPlugin(Plugin):
             self.plugin_manager.save_config(config)
             st.success("Configuration saved successfully!")
 
+    @st.dialog("Full Response")
+    def show_full_response(self, response):
+        """Affiche la réponse complète dans une boîte de dialogue, convertie depuis LaTeX."""
+        converted_response = self.convert_latex_to_text(response)
+        st.write(converted_response)
+        if st.button("Close"):
+            st.rerun()
+
+    def display_results(self, results, active_prompts, server):
+        """Affiche les résultats pour un modèle donné avec séparation et dialogue."""
+        active_results = [r for r in results if r["prompt"]
+                          in set(p["prompt"] for p in active_prompts)]
+        if active_results:
+            for i, result in enumerate(active_results):
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                with col1:
+                    st.write(f"Prompt: {result['prompt']}")
+                    converted_response = self.convert_latex_to_text(
+                        result['response'])  # Conversion avant raccourcissement
+                    shortened_response = self.shorten_response(
+                        converted_response)
+                    st.write(f"Response: {shortened_response}")
+                with col2:
+                    st.write(f"Expected: {result['expected']}")
+                with col3:
+                    result_id = self.db.get_result(
+                        server["model"], server["url"], result["prompt"])["id"]
+                    score = st.slider("Score", 0, 5, result["score"],
+                                      key=f"score_{result_id}",
+                                      on_change=lambda r_id=result_id: self.db.update_score(
+                        r_id, st.session_state[f"score_{r_id}"]))
+                with col4:
+                    if st.button("Full Response", key=f"full_{result_id}"):
+                        # Passe raw_response au dialogue
+                        self.show_full_response(result['response'])
+
+                if i < len(active_results) - 1:  # Barre horizontale sauf après le dernier
+                    st.divider()
+        else:
+            st.write("No valid results available for this model.")
+
+        total_time_db = sum(r["execution_time"] for r in active_results)
+        st.write(
+            f"Total time for {len(active_results)} prompts: {total_time_db:.2f} seconds")
+
     def bench_tab(self, config):
         st.header(t("bench_header"))
 
@@ -467,53 +507,41 @@ class BenchPlugin(Plugin):
         prompts = st.session_state.get("prompts", config.get(
             self.name, {}).get("bench_prompts", []))
 
+        if 'tested_models' not in st.session_state:
+            st.session_state.tested_models = set(
+                self.get_server_display_name(s["url"], s["model"])
+                for s in servers
+                for m, url in self.db.get_all_models()
+                if m == s.get("model") and url == s.get("url")
+            )
+
         model_options = [self.get_server_display_name(
             s["url"], s["model"]) for s in servers if s.get("model")]
-
         selected_models = st.multiselect(t("select_models"), model_options)
-
-        # Supprimer les résultats des modèles qui ne sont plus sélectionnés
-        if 'bench_results' in st.session_state:
-            current_models = set(selected_models)
-            existing_models = set(st.session_state.bench_results.keys())
-            models_to_remove = existing_models - current_models
-            for model in models_to_remove:
-                del st.session_state.bench_results[model]
-
+        force_test = st.checkbox("Force re-run of tests", value=False)
         debug_mode = st.checkbox(
             "Debug (use only first 3 prompts)", value=False)
 
         if st.button(t("run_bench")) and selected_models:
             with st.spinner(t("running_bench")):
-                # S'assurer que bench_results existe
-                if 'bench_results' not in st.session_state:
-                    st.session_state.bench_results = {}
-
-                # Filter out excluded prompts
                 active_prompts = [
                     p for p in prompts if not p.get("excluded", False)]
                 if debug_mode and len(active_prompts) > 3:
                     active_prompts = active_prompts[:3]
 
                 total_tasks = 0
-                # Calculer le nombre total de tâches uniquement pour les nouveaux tests ou tests invalides
                 for model_id in selected_models:
-                    if model_id not in st.session_state.bench_results:
-                        total_tasks += len(active_prompts)
-                    else:
-                        # Vérifier les prompts existants, en excluant les réponses vides ou contenant "Error"
-                        existing_prompts = set(
-                            r["prompt"] for r in st.session_state.bench_results[model_id]["results"]
-                            if r["response"] and "Error" not in r["response"])
-                        new_prompts = set(p["prompt"] for p in active_prompts)
-                        total_tasks += len(new_prompts - existing_prompts)
+                    server = next(s for s in servers if self.get_server_display_name(
+                        s["url"], s["model"]) == model_id)
+                    for prompt_data in active_prompts:
+                        if force_test or not self.db.get_result(server["model"], server["url"], prompt_data["prompt"]):
+                            total_tasks += 1
 
                 progress_bar = st.progress(0.0)
                 tasks_completed = 0
 
                 sorted_models = sorted(
                     selected_models, key=lambda model_id: 0 if "Ollama" in model_id else 1)
-
                 server = ""
                 for i, model_id in enumerate(sorted_models):
                     prev_server = server
@@ -530,92 +558,46 @@ class BenchPlugin(Plugin):
                         previous_is_ollama = False
 
                     with st.expander(f"Results for {model_id}", expanded=True):
-                        # Si le modèle existe déjà, récupérer ses résultats existants
-                        if model_id in st.session_state.bench_results:
-                            results = st.session_state.bench_results[model_id]["results"]
-                            total_time = st.session_state.bench_results[model_id]["total_time"]
-                        else:
-                            results = []
-                            total_time = 0.0
-
-                        start_time = time.time()
-
-                        # Identifier les prompts existants valides (non vides et sans "Error")
-                        existing_prompts = set(
-                            r["prompt"] for r in results
-                            if r["response"] and "Error" not in r["response"])
+                        total_time = 0.0
+                        results = self.db.get_results_by_model(
+                            server["model"], server["url"])
+                        existing_prompts = set(r["prompt"] for r in results)
                         prompts_to_run = [
-                            p for p in active_prompts if p["prompt"] not in existing_prompts]
+                            p for p in active_prompts if force_test or p["prompt"] not in existing_prompts]
 
-                        # Régénérer les réponses pour les prompts à refaire
                         for prompt_data in prompts_to_run:
                             prompt = prompt_data["prompt"]
                             expected = prompt_data["expected"]
                             try:
-                                response = self.call_llm(
+                                start_time = time.time()
+                                raw_response, raw_len, conv_len, short_len = self.call_llm(
                                     url=server["url"],
                                     api_key=server["api_key"],
                                     model=server["model"],
                                     prompt=prompt
                                 )
-                                st.write(
-                                    f"Length before storage in bench_results: {len(response)} characters")
+                                execution_time = time.time() - start_time
+                                total_time += execution_time
 
-                                # Si le prompt existe déjà dans results (cas d'erreur ou vide précédent), le mettre à jour
-                                for i, result in enumerate(results):
-                                    if result["prompt"] == prompt:
-                                        results[i] = {
-                                            "prompt": prompt,
-                                            "expected": expected,
-                                            "response": response
-                                        }
-                                        break
+                                if self.db.save_result(server["model"], server["url"], prompt, raw_response, expected,
+                                                       execution_time, raw_len, conv_len, short_len):
+                                    tasks_completed += 1
+                                    if total_tasks > 0:
+                                        progress_bar.progress(
+                                            tasks_completed / total_tasks)
+                                    st.session_state.tested_models.add(
+                                        model_id)
                                 else:
-                                    # Sinon, ajouter le nouveau résultat
-                                    results.append({
-                                        "prompt": prompt,
-                                        "expected": expected,
-                                        "response": response
-                                    })
-
-                                col1, col2 = st.columns([2, 1])
-                                with col1:
-                                    st.write(f"Prompt: {prompt}")
-                                    st.write(
-                                        f"Length before display: {len(response)} characters")
-                                    st.write(f"Response: {response}")
-                                with col2:
-                                    st.write(f"Expected: {expected}")
+                                    st.warning(
+                                        f"Result for '{prompt}' not saved due to error or empty response")
 
                             except Exception as e:
-                                st.error(f"Error: {str(e)}")
+                                st.error(f"LLM Error: {str(e)}")
 
-                            tasks_completed += 1
-                            if total_tasks > 0:
-                                progress_bar.progress(
-                                    tasks_completed / total_tasks)
-
-                        # Afficher les résultats existants qui correspondent aux prompts actifs
-                        for result in [r for r in results if r["prompt"] in set(p["prompt"] for p in active_prompts)]:
-                            if result["prompt"] not in [p["prompt"] for p in prompts_to_run]:
-                                col1, col2 = st.columns([2, 1])
-                                with col1:
-                                    st.write(f"Prompt: {result['prompt']}")
-                                    st.write(f"Response: {result['response']}")
-                                with col2:
-                                    st.write(f"Expected: {result['expected']}")
-
-                        end_time = time.time()
-                        elapsed_time = end_time - start_time
-                        total_time += elapsed_time
-
-                        st.write(
-                            f"Total time for {len(active_prompts)} prompts: {total_time:.2f} seconds")
-
-                        st.session_state.bench_results[model_id] = {
-                            "results": results,
-                            "total_time": total_time
-                        }
+                        # Afficher les résultats avec la fonction commune
+                        results = self.db.get_results_by_model(
+                            server["model"], server["url"])
+                        self.display_results(results, active_prompts, server)
 
                 if total_tasks > 0:
                     progress_bar.progress(1.0)
@@ -624,51 +606,74 @@ class BenchPlugin(Plugin):
                     st.write(
                         "All selected tests were already completed with valid responses.")
 
+        elif selected_models:
+            for model_id in selected_models:
+                server = next(s for s in servers if self.get_server_display_name(
+                    s["url"], s["model"]) == model_id)
+                with st.expander(f"Results for {model_id}", expanded=True):
+                    results = self.db.get_results_by_model(
+                        server["model"], server["url"])
+                    active_prompts = [
+                        p for p in prompts if not p.get("excluded", False)]
+                    self.display_results(results, active_prompts, server)
+
     def compare_tab(self, config):
         st.header(t("compare_models"))
 
-        available_models = list(st.session_state.bench_results.keys())
+        available_models = [f"{model} ({server}) - Score: {self.db.get_total_score(model, server)}"
+                            for model, server in self.db.get_all_models()]
         if not available_models:
             st.write("No benchmark results available yet")
             return
 
         col1, col2 = st.columns(2)
         with col1:
-            model1 = st.selectbox(t("model1_label"), available_models)
+            model1_display = st.selectbox(t("model1_label"), available_models)
+            model1, server1 = model1_display.split(
+                " (")[0], model1_display.split(" (")[1].split(")")[0]
         with col2:
-            model2 = st.selectbox(t("model2_label"), available_models)
+            model2_display = st.selectbox(t("model2_label"), available_models)
+            model2, server2 = model2_display.split(
+                " (")[0], model2_display.split(" (")[1].split(")")[0]
 
         if model1 and model2:
-            # Récupération des résultats et temps
-            results1 = st.session_state.bench_results.get(
-                model1, {}).get("results", [])
-            time1 = st.session_state.bench_results.get(
-                model1, {}).get("total_time", 0)
-            results2 = st.session_state.bench_results.get(
-                model2, {}).get("results", [])
-            time2 = st.session_state.bench_results.get(
-                model2, {}).get("total_time", 0)
+            results1 = self.db.get_results_by_model(model1, server1)
+            time1 = sum(r["execution_time"] for r in results1)
+            total_score1 = self.db.get_total_score(model1, server1)
+            results2 = self.db.get_results_by_model(model2, server2)
+            time2 = sum(r["execution_time"] for r in results2)
+            total_score2 = self.db.get_total_score(model2, server2)
 
-            # Affichage des temps totaux
+            # Ajouter le temps total dans les titres
             col1, col2 = st.columns(2)
             with col1:
-                st.write(f"{model1} - Total time: {time1:.2f} seconds")
+                st.write(
+                    f"{model1} ({server1}) - Total Score: {total_score1}, Total Time: {time1:.2f} seconds")
             with col2:
-                st.write(f"{model2} - Total time: {time2:.2f} seconds")
+                st.write(
+                    f"{model2} ({server2}) - Total Score: {total_score2}, Total Time: {time2:.2f} seconds")
 
-            # Affichage des résultats comme avant
-            for i, (r1, r2) in enumerate(zip(results1, results2)):
+            # Afficher les réponses raccourcies avec conversion LaTeX
+            for r1, r2 in zip(results1, results2):
                 col0, col1, col2 = st.columns([1, 3, 3])
                 with col0:
                     st.write(f"Expected: {r1['expected']}")
                 with col1:
                     st.write(f"Prompt: {r1['prompt']}")
-                    st.markdown(r1['response'])
+                    converted_response1 = self.convert_latex_to_text(
+                        r1['response'])
+                    shortened_response1 = self.shorten_response(
+                        converted_response1)
+                    st.markdown(shortened_response1)
                 with col2:
                     st.write(f"Prompt: {r2['prompt']}")
-                    st.markdown(r2['response'])
+                    converted_response2 = self.convert_latex_to_text(
+                        r2['response'])
+                    shortened_response2 = self.shorten_response(
+                        converted_response2)
+                    st.markdown(shortened_response2)
 
-                if i < len(results1) - 1:
+                if r1 != results1[-1]:
                     st.divider()
 
 
