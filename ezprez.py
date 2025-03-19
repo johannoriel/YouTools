@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import os
+import time
 from streamlit_shortcuts import button, add_keyboard_shortcuts
 
 # Configuration du logging
@@ -79,18 +80,15 @@ def process_lines(lines, directories):
     while i < len(lines):
         line = lines[i].strip()
 
-        # Séparateur de slides
         if line == "---":
             if current_markdown:
                 result.append({"type": "markdown", "content": "\n".join(current_markdown)})
                 current_markdown = []
             i += 1
-            # Ignorer les lignes vides après ---
             while i < len(lines) and not lines[i].strip():
                 i += 1
             continue
 
-        # Séparateur de colonnes
         if line == "--" and i > 0 and i + 1 < len(lines):
             prev_item = None
             if current_markdown:
@@ -99,8 +97,7 @@ def process_lines(lines, directories):
             elif result:
                 prev_item = result.pop()
 
-            i += 1  # Passer le "--"
-            # Ignorer les lignes vides après --
+            i += 1
             while i < len(lines) and not lines[i].strip():
                 i += 1
             if i >= len(lines):
@@ -112,12 +109,10 @@ def process_lines(lines, directories):
             i += 1
             continue
 
-        # Ignorer les lignes vides avant --- ou --
         if not line and i + 1 < len(lines) and lines[i + 1].strip() in ["---", "--"]:
             i += 1
             continue
 
-        # Traitement d'une ligne individuelle
         item = parse_single_line(line, directories, linkify)
         if item["type"] == "markdown":
             current_markdown.append(item["content"])
@@ -141,7 +136,7 @@ def parse_single_line(line, directories, linkify):
 
     md_file_match = re.match(r'!?\[(.*?)\]\((file://.*?)\)', line)
     md_link_match = re.match(r'!?\[(.*?)\]\((https?://.*?)\)', line)
-    md_image_match = re.match(r'!\[(?:\|(\d+))?(.*?)\]\(([^h].*?)\)', line)  # Support |xxx
+    md_image_match = re.match(r'!\[(?:\|(\d+))?(.*?)\]\(([^h].*?)\)', line)
 
     if md_file_match:
         file_path = md_file_match.group(2).replace('file://', '')
@@ -152,7 +147,7 @@ def parse_single_line(line, directories, linkify):
             return {"type": content_type, "content": file_path, "title": title if title else None}
 
     if md_image_match:
-        size = md_image_match.group(1)  # |xxx
+        size = md_image_match.group(1)
         title = md_image_match.group(2).strip()
         filepath = md_image_match.group(3)
         ext = Path(filepath).suffix.lower()
@@ -192,7 +187,9 @@ def display_item(item, directories, is_presentation=False):
     elif item["type"] == "tweet":
         if item["title"]:
             st.subheader(item["title"])
+        st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
         item["component"].component()
+        st.markdown("</div>", unsafe_allow_html=True)
     elif item["type"] == "youtube":
         if item["title"]:
             st.subheader(item["title"])
@@ -234,61 +231,51 @@ def display_item(item, directories, is_presentation=False):
             display_item(item["items"][1], directories, is_presentation)
 
 def main():
-    # Configuration initiale
     if 'presentation_mode' not in st.session_state:
         st.session_state['presentation_mode'] = False
 
-    # Appliquer la configuration de page
     if st.session_state['presentation_mode']:
         st.set_page_config(layout="wide", initial_sidebar_state="collapsed", page_title=None)
     else:
         st.set_page_config(layout="centered", initial_sidebar_state="expanded", page_title="Présentation Rapide")
 
-    # Titre uniquement hors mode présentation
     if not st.session_state['presentation_mode']:
         st.title("Présentation Rapide")
 
     directories = load_directories()
 
-    # Sidebar pour saisie et navigation
     with st.sidebar:
         st.header("Préparation")
         input_text = st.text_area("Collez vos lignes ici :", height=200, key="input_text")
 
         col1, col2 = st.columns(2)
         with col1:
-            preview = st.button("Preview")
+            preview = button("Preview", "Ctrl+P", lambda: st.session_state.update({'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}), hint=True)
         with col2:
             launch = button("Launch", "Ctrl+Enter", lambda: st.session_state.update({'presentation_mode': True, 'current_slide': 0, 'input_text': st.session_state.get('input_text', ''), 'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}), hint=True)
 
-        if preview and 'input_text' in st.session_state:
-            st.session_state['slides'] = process_lines(st.session_state['input_text'].split("\n"), directories)
-
-        # Navigation en mode présentation
         if st.session_state['presentation_mode']:
             st.header("Navigation")
             col1, col2 = st.columns(2)
             with col1:
-                button("Première", "Home", lambda: st.session_state.update({'current_slide': 0}), hint=True)
+                button("Précédent", "ArrowLeft", lambda: [st.session_state.update({'current_slide': max(0, st.session_state['current_slide'] - 1)})], hint=True)
             with col2:
-                button("Dernière", "End", lambda: st.session_state.update({'current_slide': len(st.session_state['slides']) - 1}), hint=True)
+                button("Suivant", "ArrowRight", lambda: [st.session_state.update({'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1)})], hint=True)
 
             col3, col4 = st.columns(2)
             with col3:
-                button("Précédent", "ArrowLeft", lambda: st.session_state.update({'current_slide': max(0, st.session_state['current_slide'] - 1)}), hint=True)
+                button("Première", "Home", lambda: st.session_state.update({'current_slide': 0}), hint=True)
             with col4:
-                button("Suivant", "ArrowRight", lambda: st.session_state.update({'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1)}), hint=True)
+                button("Dernière", "End", lambda: st.session_state.update({'current_slide': len(st.session_state['slides']) - 1}), hint=True)
 
             button("Exit", "Escape", lambda: st.session_state.update({'presentation_mode': False}), hint=True)
 
-    # Affichage principal
     if not st.session_state['presentation_mode'] and 'slides' in st.session_state:
         st.header("Aperçu")
         for item in st.session_state['slides']:
             display_item(item, directories, is_presentation=False)
             st.markdown("---")
 
-    # Mode présentation
     if st.session_state['presentation_mode']:
         if 'slides' not in st.session_state or not st.session_state['slides']:
             st.warning("Veuillez entrer du contenu et générer les slides avant de lancer la présentation.")
@@ -302,16 +289,16 @@ def main():
         current = st.session_state['current_slide']
 
         if slides:
-            st.subheader(f"Slide {current + 1}/{len(slides)}")
+            #st.subheader(f"Slide {current + 1}/{len(slides)}")
             display_item(slides[current], directories, is_presentation=True)
 
-        # Raccourcis clavier globaux
         add_keyboard_shortcuts({
             'ArrowLeft': 'Précédent',
             'ArrowRight': 'Suivant',
             'Home': 'Première',
             'End': 'Dernière',
             'Ctrl+Enter': 'Launch',
+            'Ctrl+P': 'Preview',
             'Escape': 'Exit'
         })
 
