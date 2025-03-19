@@ -63,10 +63,10 @@ def url_to_image(url):
         logger.error(f"Error converting URL {url} to image: {str(e)}")
         return None
 
-# Class to handle Twitter embeds
+# Class to handle Twitter embeds (modified)
 class Tweet(object):
-    """Handles fetching and embedding a tweet from a Twitter URL."""
-    def __init__(self, url, embed_str=False):
+    """Handles fetching and embedding a tweet from a Twitter URL with optional custom height."""
+    def __init__(self, url, embed_str=False, height=600):
         if not embed_str:
             api = f"https://publish.twitter.com/oembed?url={url}"
             try:
@@ -82,10 +82,11 @@ class Tweet(object):
         else:
             self.text = url
             self.title = url
+        self.height = height  # Store custom height
 
     def component(self):
-        """Returns the tweet as an HTML component for Streamlit."""
-        return components.html(self.text, height=600)
+        """Returns the tweet as an HTML component for Streamlit with specified height."""
+        return components.html(self.text, height=self.height)
 
 # Check if a URL is a Twitter link
 def is_twitter_url(url):
@@ -168,13 +169,14 @@ def process_lines(lines, directories):
 
     return result
 
-# Parse a single line into an item
+# Parse a single line into an item (corrected tweet regex)
 def parse_single_line(line, directories, linkify):
     """
     Parses a single line into an item based on its content:
     - Supports file extensions (.jpg, .png, .mp4, .flv).
     - Handles Markdown links for files, images, and URLs.
     - Supports custom image height with |xxx syntax (e.g., ![|725](path)).
+    - Supports custom tweet height with |xxx syntax (e.g., [|725](tweet_url) or [title|725](tweet_url)).
     - Titles are None if empty in Markdown links.
     """
     extensions = {'.jpg': 'image', '.png': 'image', '.mp4': 'video', '.flv': 'video'}
@@ -187,6 +189,7 @@ def parse_single_line(line, directories, linkify):
     md_image_match = re.match(r'!\[(?:\|(\d+))?(.*?)\]\(([^h].*?)\)', line)
 
     if md_file_match:
+        print("File Match")
         file_path = md_file_match.group(2).replace('file://', '')
         ext = Path(file_path).suffix.lower()
         content_type = extensions.get(ext, 'unknown')
@@ -195,6 +198,7 @@ def parse_single_line(line, directories, linkify):
             return {"type": content_type, "content": file_path, "title": title if title else None}
 
     if md_image_match:
+        print("Image Match")
         size = md_image_match.group(1)
         title = md_image_match.group(2).strip()
         filepath = md_image_match.group(3)
@@ -205,9 +209,24 @@ def parse_single_line(line, directories, linkify):
                 item["size"] = int(size)
             return item
 
+    if md_link_match and is_twitter_url(md_link_match.group(2)):
+        raw_title = md_link_match.group(1)  # Capture everything before the URL
+        url = md_link_match.group(2)
+        size = None
+        title = raw_title.strip() if raw_title else None
+        if raw_title and '|' in raw_title:
+            title_str, size_str = raw_title.split('|', 1)
+            if size_str.strip().isdigit():
+                size = int(size_str.strip())
+                title = title_str.strip() if title_str.strip() else None
+        tweet = Tweet(url, height=size if size else 600)
+        return {"type": "tweet", "component": tweet, "url": url, "title": title}
+
     if md_link_match:
+        print("Link Match")
         url = md_link_match.group(2)
         title = md_link_match.group(1).strip()
+        print(title)
         if is_twitter_url(url):
             tweet = Tweet(url)
             return {"type": "tweet", "component": tweet, "url": url, "title": title if title else None}
@@ -218,6 +237,7 @@ def parse_single_line(line, directories, linkify):
 
     matches = linkify.match(line)
     if matches:
+        print("Link Match")
         url = matches[0].url
         if is_twitter_url(url):
             tweet = Tweet(url)
@@ -228,6 +248,7 @@ def parse_single_line(line, directories, linkify):
             return {"type": "web", "url": url, "title": None}
 
     return {"type": "markdown", "content": line}
+
 
 # Center content using columns
 def center_content(display_func, *args, **kwargs):
@@ -245,18 +266,21 @@ def center_content(display_func, *args, **kwargs):
     with col3:
         st.write("")
 
-# Display an item in the app
+# Display an item in the app (modified for vertical centering)
 def display_item(item, directories, is_presentation=False):
     """
     Displays an item based on its type:
     - Markdown: Renders as text.
-    - Tweet: Centered embed with optional title.
+    - Tweet: Centered embed with optional title and custom height.
     - YouTube: Centered video with optional title.
     - Image: Centered with custom or default height (200px preview, 500px presentation).
     - Video: Centered local video with optional title.
     - Web: Centered webpage screenshot with optional title.
-    - Group: Two items in side-by-side columns.
+    - Group: Two items in side-by-side columns, vertically centered in presentation mode if enabled.
     """
+    vertical_center = st.session_state.get('vertical_center', False) and is_presentation
+    alignment = "center" if vertical_center else "top"
+
     if item["type"] == "markdown":
         st.markdown(item["content"])
     elif item["type"] == "tweet":
@@ -297,13 +321,13 @@ def display_item(item, directories, is_presentation=False):
         else:
             st.error("Failed to convert URL to image")
     elif item["type"] == "group":
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2, vertical_alignment=alignment)
         with col1:
             display_item(item["items"][0], directories, is_presentation)
         with col2:
             display_item(item["items"][1], directories, is_presentation)
 
-# Main application logic
+# Main application logic (modified)
 def main():
     """
     Main function for the presentation app:
@@ -370,12 +394,11 @@ def main():
                         color: #FFFFFF;
                         padding: 10px;
                         margin: 5px 0;
-                        display: inline-block; /* Keeps content tight around text */
+                        display: inline-block;
                     }
-                    /* Ensure lists maintain proper spacing */
                     ul, ol {
                         display: block;
-                        padding: 10px 10px 10px 30px; /* Adjust padding for bullet alignment */
+                        padding: 10px 10px 10px 30px;
                     }
                     li {
                         margin: 0;
@@ -383,6 +406,9 @@ def main():
                     }
                     </style>
                 """, unsafe_allow_html=True)
+
+            # Add checkbox for vertical centering in presentation mode
+            st.checkbox("Center Vertically", value=False, key="vertical_center")
 
     # Preview mode: Show all slides
     if not st.session_state['presentation_mode'] and 'slides' in st.session_state:
