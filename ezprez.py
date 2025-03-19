@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import os
+from streamlit_shortcuts import button, add_keyboard_shortcuts
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -79,7 +80,6 @@ def process_lines(lines, directories):
         if not line:
             continue
 
-        # Détection des fichiers locaux simples
         extensions = {'.jpg': 'image', '.png': 'image', '.mp4': 'video', '.flv': 'video'}
         for ext, content_type in extensions.items():
             if line.endswith(ext):
@@ -89,12 +89,11 @@ def process_lines(lines, directories):
                     current_markdown = []
                 continue
 
-        # Détection des liens Markdown
         md_file_match = re.match(r'!?\[(.*?)\]\((file://.*?)\)', line)
         md_link_match = re.match(r'!?\[(.*?)\]\((https?://.*?)\)', line)
-        md_image_match = re.match(r'!\[(.*?)\]\(([^h].*?)\)', line)  # Image relative sans http/file
+        md_image_match = re.match(r'!\[(.*?)\]\(([^h].*?)\)', line)
 
-        if md_file_match:  # Fichier local absolu
+        if md_file_match:
             file_path = md_file_match.group(2).replace('file://', '')
             ext = Path(file_path).suffix.lower()
             content_type = extensions.get(ext, 'unknown')
@@ -105,7 +104,7 @@ def process_lines(lines, directories):
                 current_markdown = []
             continue
 
-        if md_image_match:  # Image relative
+        if md_image_match:
             filepath = md_image_match.group(2)
             ext = Path(filepath).suffix.lower()
             if ext in extensions:
@@ -115,7 +114,7 @@ def process_lines(lines, directories):
                 current_markdown = []
             continue
 
-        if md_link_match:  # URL en Markdown
+        if md_link_match:
             url = md_link_match.group(2)
             title = md_link_match.group(1) or url
             if is_twitter_url(url):
@@ -130,7 +129,6 @@ def process_lines(lines, directories):
                 current_markdown = []
             continue
 
-        # URLs simples
         matches = linkify.match(line)
         if matches:
             url = matches[0].url
@@ -165,7 +163,16 @@ def display_item(item, directories):
     elif item["type"] == "image":
         filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
         st.subheader(item["title"])
-        st.image(filepath)
+        st.image(filepath, use_column_width=True)  # Ajuste à la largeur, hauteur limitée par CSS ci-dessous
+        st.markdown("""
+            <style>
+            img {
+                max-height: 500px;
+                object-fit: contain;
+                overflow-y: auto;
+            }
+            </style>
+        """, unsafe_allow_html=True)
     elif item["type"] == "video":
         filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
         st.subheader(item["title"])
@@ -174,8 +181,17 @@ def display_item(item, directories):
         st.subheader(item["title"])
         image_path = url_to_image(item["url"])
         if image_path:
-            st.image(image_path)
-            os.remove(image_path)  # Nettoyage
+            st.image(image_path, use_container_width=True)
+            st.markdown("""
+                <style>
+                img {
+                    max-height: 500px;
+                    object-fit: contain;
+                    overflow-y: auto;
+                }
+                </style>
+            """, unsafe_allow_html=True)
+            os.remove(image_path)
         else:
             st.error("Impossible de convertir l'URL en image")
 
@@ -183,7 +199,6 @@ def main():
     st.title("Présentation Rapide")
     directories = load_directories()
 
-    # Zone de préparation
     st.header("1. Zone de Préparation")
     input_text = st.text_area("Collez vos lignes ici :", height=200)
 
@@ -191,7 +206,7 @@ def main():
     with col1:
         preview = st.button("Preview")
     with col2:
-        launch = st.button("Launch")
+        launch = button("Launch", "Ctrl+Enter", lambda: st.session_state.update({'presentation_mode': True, 'current_slide': 0}), hint=True)
 
     if preview:
         st.header("2. Aperçu")
@@ -202,11 +217,10 @@ def main():
                 display_item(item, directories)
                 st.markdown("---")
 
-    if launch or ('presentation_mode' in st.session_state and st.session_state['presentation_mode']):
+    if 'presentation_mode' in st.session_state and st.session_state['presentation_mode']:
         if not input_text:
             st.warning("Veuillez entrer du contenu avant de lancer la présentation.")
             return
-        st.session_state['presentation_mode'] = True
         lines = input_text.split("\n")
         slides = process_lines(lines, directories)
 
@@ -217,30 +231,20 @@ def main():
 
         col1, col2, col3 = st.columns([1, 6, 1])
         with col1:
-            if st.button("Précédent") and current > 0:
-                st.session_state['current_slide'] -= 1
+            button("Précédent", "ArrowLeft", lambda: st.session_state.update({'current_slide': max(0, st.session_state['current_slide'] - 1)}), hint=True)
         with col3:
-            if st.button("Suivant") and current < len(slides) - 1:
-                st.session_state['current_slide'] += 1
+            button("Suivant", "ArrowRight", lambda: st.session_state.update({'current_slide': min(len(slides) - 1, st.session_state['current_slide'] + 1)}), hint=True)
 
         if slides:
             st.subheader(f"Slide {current + 1}/{len(slides)}")
             display_item(slides[current], directories)
 
-        st.markdown("""
-            <script>
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'ArrowLeft') {
-                    document.getElementById('prev').click();
-                }
-                if (e.key === 'ArrowRight') {
-                    document.getElementById('next').click();
-                }
-            });
-            </script>
-            <button id="prev" style="display:none" onclick="streamlitCallback('Précédent')">Prev</button>
-            <button id="next" style="display:none" onclick="streamlitCallback('Suivant')">Next</button>
-        """, unsafe_allow_html=True)
+        # Ajouter les raccourcis clavier globaux
+        add_keyboard_shortcuts({
+            'ArrowLeft': 'Précédent',
+            'ArrowRight': 'Suivant',
+            'Ctrl+Enter': 'Launch'
+        })
 
 if __name__ == "__main__":
     main()
