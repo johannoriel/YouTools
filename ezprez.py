@@ -308,7 +308,7 @@ def main():
     """
     Main function for the presentation app:
     - Two modes: Preview (centered layout) and Presentation (wide layout).
-    - Sidebar contains input area and controls, always visible.
+    - Sidebar contains input area and controls, always accessible.
     - In Preview mode: Displays all slides with separators.
     - In Presentation mode: Shows one slide at a time, sidebar collapsed, navigation controls visible.
     - Keyboard shortcuts: Ctrl+P (Preview), Ctrl+Enter (Launch), ArrowLeft/Right (Prev/Next), Home/End (First/Last), Escape (Exit).
@@ -355,6 +355,34 @@ def main():
                 button("Last", "End", lambda: st.session_state.update({'current_slide': len(st.session_state['slides']) - 1}), hint=True)
 
             button("Exit", "Escape", lambda: st.session_state.update({'presentation_mode': False}), hint=True)
+
+            # Add checkbox for green background in presentation mode
+            green_bg = st.checkbox("Green Background", value=False, key="green_bg")
+            if green_bg:
+                st.markdown("""
+                    <style>
+                    .stApp {
+                        background-color: #00FF00;
+                    }
+                    /* Style for Markdown elements */
+                    h1, h2, h3, h4, h5, h6, p, ul, ol, li, blockquote {
+                        background-color: #000000;
+                        color: #FFFFFF;
+                        padding: 10px;
+                        margin: 5px 0;
+                        display: inline-block; /* Keeps content tight around text */
+                    }
+                    /* Ensure lists maintain proper spacing */
+                    ul, ol {
+                        display: block;
+                        padding: 10px 10px 10px 30px; /* Adjust padding for bullet alignment */
+                    }
+                    li {
+                        margin: 0;
+                        display: block;
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
 
     # Preview mode: Show all slides
     if not st.session_state['presentation_mode'] and 'slides' in st.session_state:
