@@ -10,8 +10,7 @@ import re
 import subprocess
 import tempfile
 import os
-import time
-from streamlit_shortcuts import button, add_keyboard_shortcuts
+from streamlit_shortcuts import button
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -81,9 +80,9 @@ def process_lines(lines, directories):
         line = lines[i].strip()
 
         if line == "---":
-            if current_markdown:
+            if current_markdown and "\n".join(current_markdown).strip():
                 result.append({"type": "markdown", "content": "\n".join(current_markdown)})
-                current_markdown = []
+            current_markdown = []
             i += 1
             while i < len(lines) and not lines[i].strip():
                 i += 1
@@ -91,7 +90,7 @@ def process_lines(lines, directories):
 
         if line == "--" and i > 0 and i + 1 < len(lines):
             prev_item = None
-            if current_markdown:
+            if current_markdown and "\n".join(current_markdown).strip():
                 prev_item = {"type": "markdown", "content": "\n".join(current_markdown)}
                 current_markdown = []
             elif result:
@@ -117,13 +116,13 @@ def process_lines(lines, directories):
         if item["type"] == "markdown":
             current_markdown.append(item["content"])
         else:
-            if current_markdown:
+            if current_markdown and "\n".join(current_markdown).strip():
                 result.append({"type": "markdown", "content": "\n".join(current_markdown)})
                 current_markdown = []
             result.append(item)
         i += 1
 
-    if current_markdown:
+    if current_markdown and "\n".join(current_markdown).strip():
         result.append({"type": "markdown", "content": "\n".join(current_markdown)})
 
     return result
@@ -181,25 +180,32 @@ def parse_single_line(line, directories, linkify):
 
     return {"type": "markdown", "content": line}
 
+def center_content(display_func, *args, **kwargs):
+    col1, col2, col3 = st.columns([1, 6, 1])
+    with col1:
+        st.write("")
+    with col2:
+        display_func(*args, **kwargs)
+    with col3:
+        st.write("")
+
 def display_item(item, directories, is_presentation=False):
     if item["type"] == "markdown":
         st.markdown(item["content"])
     elif item["type"] == "tweet":
         if item["title"]:
             st.subheader(item["title"])
-        st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
-        item["component"].component()
-        st.markdown("</div>", unsafe_allow_html=True)
+        center_content(lambda: item["component"].component())
     elif item["type"] == "youtube":
         if item["title"]:
             st.subheader(item["title"])
-        st.video(item["url"])
+        center_content(st.video, item["url"])
     elif item["type"] == "image":
         filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
         if item["title"]:
             st.subheader(item["title"])
         max_height = item.get("size", 500 if is_presentation else 200)
-        st.image(filepath, use_container_width=True)
+        center_content(st.image, filepath, use_container_width=True)
         st.markdown(f"""
             <style>
             img {{
@@ -213,13 +219,13 @@ def display_item(item, directories, is_presentation=False):
         filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
         if item["title"]:
             st.subheader(item["title"])
-        st.video(filepath)
+        center_content(st.video, filepath)
     elif item["type"] == "web":
         if item["title"]:
             st.subheader(item["title"])
         image_path = url_to_image(item["url"])
         if image_path:
-            st.image(image_path, use_container_width=True)
+            center_content(st.image, image_path, use_container_width=True)
             os.remove(image_path)
         else:
             st.error("Impossible de convertir l'URL en image")
@@ -258,9 +264,9 @@ def main():
             st.header("Navigation")
             col1, col2 = st.columns(2)
             with col1:
-                button("Précédent", "ArrowLeft", lambda: [st.session_state.update({'current_slide': max(0, st.session_state['current_slide'] - 1)})], hint=True)
+                button("Précédent", "ArrowLeft", lambda: st.session_state.update({'current_slide': max(0, st.session_state['current_slide'] - 1)}), hint=True)
             with col2:
-                button("Suivant", "ArrowRight", lambda: [st.session_state.update({'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1)})], hint=True)
+                button("Suivant", "ArrowRight", lambda: st.session_state.update({'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1)}), hint=True)
 
             col3, col4 = st.columns(2)
             with col3:
@@ -291,16 +297,6 @@ def main():
         if slides:
             #st.subheader(f"Slide {current + 1}/{len(slides)}")
             display_item(slides[current], directories, is_presentation=True)
-
-        add_keyboard_shortcuts({
-            'ArrowLeft': 'Précédent',
-            'ArrowRight': 'Suivant',
-            'Home': 'Première',
-            'End': 'Dernière',
-            'Ctrl+Enter': 'Launch',
-            'Ctrl+P': 'Preview',
-            'Escape': 'Exit'
-        })
 
 if __name__ == "__main__":
     main()
