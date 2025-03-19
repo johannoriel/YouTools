@@ -189,7 +189,6 @@ def parse_single_line(line, directories, linkify):
     md_image_match = re.match(r'!\[(?:\|(\d+))?(.*?)\]\(([^h].*?)\)', line)
 
     if md_file_match:
-        print("File Match")
         file_path = md_file_match.group(2).replace('file://', '')
         ext = Path(file_path).suffix.lower()
         content_type = extensions.get(ext, 'unknown')
@@ -198,7 +197,6 @@ def parse_single_line(line, directories, linkify):
             return {"type": content_type, "content": file_path, "title": title if title else None}
 
     if md_image_match:
-        print("Image Match")
         size = md_image_match.group(1)
         title = md_image_match.group(2).strip()
         filepath = md_image_match.group(3)
@@ -223,7 +221,6 @@ def parse_single_line(line, directories, linkify):
         return {"type": "tweet", "component": tweet, "url": url, "title": title}
 
     if md_link_match:
-        print("Link Match")
         url = md_link_match.group(2)
         title = md_link_match.group(1).strip()
         print(title)
@@ -251,81 +248,89 @@ def parse_single_line(line, directories, linkify):
 
 
 # Center content using columns
-def center_content(display_func, *args, **kwargs):
+def center_content(in_group, display_func, *args, **kwargs):
     """
     Centers content by wrapping it in a 1-6-1 column layout.
     Args:
         display_func: The Streamlit function to display the content (e.g., st.image, st.video).
         *args, **kwargs: Arguments to pass to the display function.
     """
-    col1, col2, col3 = st.columns([1, 6, 1])
-    with col1:
-        st.write("")
-    with col2:
+    if in_group:
         display_func(*args, **kwargs)
-    with col3:
-        st.write("")
+    else:
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            st.write("")
+        with col2:
+            display_func(*args, **kwargs)
+        with col3:
+            st.write("")
 
 # Display an item in the app (modified for vertical centering)
-def display_item(item, directories, is_presentation=False):
+def display_item(item, directories, is_presentation=False, in_group=False):
     """
     Displays an item based on its type:
+    - All items are wrapped in a single column with optional vertical centering in presentation mode.
     - Markdown: Renders as text.
     - Tweet: Centered embed with optional title and custom height.
     - YouTube: Centered video with optional title.
     - Image: Centered with custom or default height (200px preview, 500px presentation).
     - Video: Centered local video with optional title.
     - Web: Centered webpage screenshot with optional title.
-    - Group: Two items in side-by-side columns, vertically centered in presentation mode if enabled.
+    - Group: Two items in side-by-side columns, vertically centered if enabled.
     """
     vertical_center = st.session_state.get('vertical_center', False) and is_presentation
     alignment = "center" if vertical_center else "top"
 
-    if item["type"] == "markdown":
-        st.markdown(item["content"])
-    elif item["type"] == "tweet":
-        if item["title"]:
-            st.subheader(item["title"])
-        center_content(lambda: item["component"].component())
-    elif item["type"] == "youtube":
-        if item["title"]:
-            st.subheader(item["title"])
-        center_content(st.video, item["url"])
-    elif item["type"] == "image":
-        filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
-        if item["title"]:
-            st.subheader(item["title"])
-        max_height = item.get("size", 500 if is_presentation else 200)
-        center_content(st.image, filepath, use_container_width=True)
-        st.markdown(f"""
-            <style>
-            img {{
-                max-height: {max_height}px;
-                object-fit: contain;
-                overflow-y: auto;
-            }}
-            </style>
-        """, unsafe_allow_html=True)
-    elif item["type"] == "video":
-        filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
-        if item["title"]:
-            st.subheader(item["title"])
-        center_content(st.video, filepath)
-    elif item["type"] == "web":
-        if item["title"]:
-            st.subheader(item["title"])
-        image_path = url_to_image(item["url"])
-        if image_path:
-            center_content(st.image, image_path, use_container_width=True)
-            os.remove(image_path)
-        else:
-            st.error("Failed to convert URL to image")
-    elif item["type"] == "group":
+    if item["type"] == "group":
         col1, col2 = st.columns(2, vertical_alignment=alignment)
         with col1:
-            display_item(item["items"][0], directories, is_presentation)
+            display_item(item["items"][0], directories, is_presentation, True)
         with col2:
-            display_item(item["items"][1], directories, is_presentation)
+            display_item(item["items"][1], directories, is_presentation, True)
+    else:
+        # Wrap all non-group items in a single column for consistent vertical alignment
+        (col,) = st.columns(1, vertical_alignment=alignment)
+        with col:
+            if item["type"] == "markdown":
+                st.markdown(item["content"])
+            elif item["type"] == "tweet":
+                if item["title"]:
+                    st.subheader(item["title"])
+                center_content(in_group,lambda: item["component"].component())
+            elif item["type"] == "youtube":
+                if item["title"]:
+                    st.subheader(item["title"])
+                center_content(in_group,st.video, item["url"])
+            elif item["type"] == "image":
+                filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
+                if item["title"]:
+                    st.subheader(item["title"])
+                max_height = item.get("size", 500 if is_presentation else 200)
+                center_content(in_group,st.image, filepath, use_container_width=True)
+                st.markdown(f"""
+                    <style>
+                    img {{
+                        max-height: {max_height}px;
+                        object-fit: contain;
+                        overflow-y: auto;
+                    }}
+                    </style>
+                """, unsafe_allow_html=True)
+            elif item["type"] == "video":
+                filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
+                if item["title"]:
+                    st.subheader(item["title"])
+                center_content(in_group,st.video, filepath)
+            elif item["type"] == "web":
+                if item["title"]:
+                    st.subheader(item["title"])
+                image_path = url_to_image(item["url"])
+                if image_path:
+                    center_content(in_group,st.image, image_path, use_container_width=True)
+                    os.remove(image_path)
+                else:
+                    st.error("Failed to convert URL to image")
 
 # Main application logic (modified)
 def main():
