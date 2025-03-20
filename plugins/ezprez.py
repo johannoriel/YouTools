@@ -32,6 +32,8 @@ import subprocess
 import tempfile
 import os
 from streamlit_shortcuts import button
+from urllib.parse import unquote
+
 
 # Configure logging for debugging purposes
 logging.basicConfig(level=logging.INFO)
@@ -157,6 +159,7 @@ def process_lines(lines, directories):
     - '--' groups two items into columns within the same slide.
     - Empty lines around separators are ignored.
     - Empty slides are filtered out.
+    - Handles multiple items returned by parse_single_line (e.g., from included files).
     """
     result = []
     current_markdown = []
@@ -181,8 +184,7 @@ def process_lines(lines, directories):
         if line == "--" and i > 0 and i + 1 < len(lines):
             prev_item = None
             if current_markdown and "\n".join(current_markdown).strip():
-                prev_item = {"type": "markdown",
-                             "content": "\n".join(current_markdown)}
+                prev_item = {"type": "markdown", "content": "\n".join(current_markdown)}
                 current_markdown = []
             elif result:
                 prev_item = result.pop()
@@ -195,20 +197,28 @@ def process_lines(lines, directories):
                     result.append(prev_item)
                 break
 
-            # Collect all lines until next separator or end as the next item
-            next_lines = []
+            # Collect and parse lines for the next column individually
+            next_items = []
             while i < len(lines) and lines[i].strip() not in ["---", "--"]:
                 if lines[i].strip():
-                    next_lines.append(lines[i])
+                    parsed = parse_single_line(lines[i], directories, linkify)
+                    if isinstance(parsed, list):
+                        next_items.extend(parsed)
+                    else:
+                        next_items.append(parsed)
                 i += 1
-            if next_lines:
-                next_item = {"type": "markdown",
-                             "content": "\n".join(next_lines)}
+
+            # If we have items for both columns, group them
+            if next_items:
+                next_item = next_items[0] if len(next_items) == 1 else {
+                    "type": "markdown", "content": "\n".join(item["content"] for item in next_items if item["type"] == "markdown")
+                } or next_items[0]  # Fallback to first item if no markdown
                 if prev_item and next_item:
-                    result.append(
-                        {"type": "group", "items": [prev_item, next_item]})
+                    result.append({"type": "group", "items": [prev_item, next_item]})
                 elif prev_item:
                     result.append(prev_item)
+                if len(next_items) > 1:
+                    result.extend(next_items[1:])  # Add any additional items
             continue
 
         # Ignore empty lines before separators
@@ -216,16 +226,25 @@ def process_lines(lines, directories):
             i += 1
             continue
 
-        # Process individual line
-        item = parse_single_line(line, directories, linkify)
-        if item["type"] == "markdown":
-            current_markdown.append(item["content"])
-        else:
+        # Process individual line, which may return a single item or a list
+        items = parse_single_line(line, directories, linkify)
+        if isinstance(items, list):
+            # If parse_single_line returns a list (e.g., from included file), extend result
             if current_markdown and "\n".join(current_markdown).strip():
                 result.append(
                     {"type": "markdown", "content": "\n".join(current_markdown)})
                 current_markdown = []
-            result.append(item)
+            result.extend(items)
+        else:
+            # Handle single item as before
+            if items["type"] == "markdown":
+                current_markdown.append(items["content"])
+            else:
+                if current_markdown and "\n".join(current_markdown).strip():
+                    result.append(
+                        {"type": "markdown", "content": "\n".join(current_markdown)})
+                    current_markdown = []
+                result.append(items)
         i += 1
 
     if current_markdown and "\n".join(current_markdown).strip():
@@ -234,24 +253,21 @@ def process_lines(lines, directories):
 
     return result
 
-# Parse a single line into an item (corrected tweet regex)
-
 
 def parse_single_line(line, directories, linkify):
     """
-    Parses a single line into an item based on its content:
-    - Supports file extensions (.jpg, .png, .mp4, .flv).
-    - Handles Markdown links for files, images, and URLs.
-    - Supports custom image height with |xxx syntax (e.g., ![|725](path)).
-    - Supports custom tweet height with |xxx syntax (e.g., [|725](tweet_url) or [title|725](tweet_url)).
-    - Titles are None if empty in Markdown links.
+    Parses a single line into an item or list of items based on its content.
     """
     extensions = {'.jpg': 'image', '.png': 'image',
                   '.mp4': 'video', '.flv': 'video'}
+
     for ext, content_type in extensions.items():
         if line.endswith(ext):
             return {"type": content_type, "content": line}
 
+    obsidian_pattern = re.match(r'obsidian://open\?vault=.*?&file=(.*)', line)
+    md_file_pattern = re.match(r'(.+\.md)$', line.strip())
+    md_link_pattern = re.match(r'\[(.*?)\]\((.+\.md)\)', line)
     md_file_match = re.match(r'!?\[(.*?)\]\((file://.*?)\)', line)
     md_link_match = re.match(r'!?\[(.*?)\]\((https?://.*?)\)', line)
     md_image_match = re.match(r'!\[(?:\|(\d+))?(.*?)\]\(([^h].*?)\)', line)
@@ -263,6 +279,34 @@ def parse_single_line(line, directories, linkify):
         if content_type in ['image', 'video']:
             title = md_file_match.group(1).strip()
             return {"type": content_type, "content": file_path, "title": title if title else None}
+
+    if obsidian_pattern:
+        file_path = unquote(obsidian_pattern.group(1))
+        # Add .md to Obsidian link
+        full_path = find_file(file_path + '.md', directories)
+        if full_path:
+            return include_file_content(full_path, directories, linkify)
+        return {"type": "markdown", "content": f"File not found: {file_path}.md"}
+
+    if md_file_pattern:
+        file_path = md_file_pattern.group(1)
+        full_path = find_file(file_path, directories)
+        if full_path:
+            return include_file_content(full_path, directories, linkify)
+        return {"type": "markdown", "content": f"File not found: {file_path}"}
+
+    if md_link_pattern:
+        title = md_link_pattern.group(1).strip(
+        ) if md_link_pattern.group(1).strip() else None
+        file_path = md_link_pattern.group(2)
+        full_path = find_file(file_path, directories)
+        if full_path:
+            items = include_file_content(full_path, directories, linkify)
+            if title and items:
+                # Apply title to the first item if provided
+                items[0]["title"] = title
+            return items
+        return {"type": "markdown", "content": f"File not found: {file_path}"}
 
     if md_image_match:
         size = md_image_match.group(1)
@@ -277,7 +321,7 @@ def parse_single_line(line, directories, linkify):
             return item
 
     if md_link_match and is_twitter_url(md_link_match.group(2)):
-        raw_title = md_link_match.group(1)  # Capture everything before the URL
+        raw_title = md_link_match.group(1)
         url = md_link_match.group(2)
         size = None
         title = raw_title.strip() if raw_title else None
@@ -312,6 +356,19 @@ def parse_single_line(line, directories, linkify):
             return {"type": "web", "url": url, "title": None}
 
     return {"type": "markdown", "content": line}
+
+
+def include_file_content(filepath, directories, linkify):
+    """Reads a file and processes its content into a list of items."""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # Split into lines and process into items
+        lines = content.splitlines()
+        items = process_lines(lines, directories)
+        return items if items else [{"type": "markdown", "content": "Empty file"}]
+    except Exception as e:
+        return [{"type": "markdown", "content": f"Error reading file {filepath}: {str(e)}"}]
 
 # Center content using columns
 
@@ -363,6 +420,7 @@ def display_item(item, directories, is_presentation=False, in_group=False):
         # Wrap all non-group items in a single column for consistent vertical alignment
         (col,) = st.columns(1, vertical_alignment=alignment)
         with col:
+            #st.info(item['type'])
             if item["type"] == "markdown":
                 st.markdown(item["content"])
             elif item["type"] == "tweet":
@@ -453,7 +511,7 @@ class EzprezPlugin(Plugin):
                 button(t("ezprez_preview_button"), "Ctrl+P", lambda: st.session_state.update(
                     {'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}), hint=True)
             with col2:
-                button(t("ezprez_launch_button"), "Ctrl+Enter", lambda: st.session_state.update({'presentation_mode': True, 'current_slide': 0, 'input_text': st.session_state.get(
+                button(t("ezprez_launch_button"), "Ctrl+Enter", lambda: st.session_state.update({'presentation_mode': True, 'input_text': st.session_state.get(
                     'input_text', ''), 'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}), hint=True)
 
             # Navigation controls in presentation mode
