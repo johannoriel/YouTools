@@ -52,6 +52,7 @@ translations["en"].update({
     "ezprez_next_button": "Next",
     "ezprez_first_button": "First",
     "ezprez_last_button": "Last",
+    "ezprez_skip_button": "Skip",
     "ezprez_exit_button": "Exit",
     "ezprez_green_bg_label": "Green Background",
     "ezprez_vertical_center_label": "Center Vertically",
@@ -72,6 +73,7 @@ translations["fr"].update({
     "ezprez_next_button": "Suivant",
     "ezprez_first_button": "Premier",
     "ezprez_last_button": "Dernier",
+    "ezprez_skip_button": "Passer",
     "ezprez_exit_button": "Quitter",
     "ezprez_green_bg_label": "Fond Vert",
     "ezprez_vertical_center_label": "Centrer Verticalement",
@@ -122,7 +124,7 @@ def url_to_image(url):
 class Tweet(object):
     """Handles fetching and embedding a tweet from a Twitter URL with optional custom height."""
 
-    def __init__(self, url, embed_str=False, height=600):
+    def __init__(self, url, embed_str=False, height=800):
         if not embed_str:
             api = f"https://publish.twitter.com/oembed?hide_thread=true&url={url}&widget=Video"
             try:
@@ -433,6 +435,11 @@ def preprocess_markdown(content):
     import re
     return re.sub(r'==([^=]+)==', r':orange-background[\1]', content)
 
+
+@st.dialog("Video")
+def display_video(filepath):
+    st.video(filepath)
+
 # Display an item in the app (modified for vertical centering)
 
 
@@ -466,11 +473,11 @@ def display_item(item, directories, is_presentation=False, in_group=False):
             if item["type"] == "markdown":
                 st.markdown(preprocess_markdown(item["content"]))
             elif item["type"] == "tweet":
-                if item["title"]:
+                if 'title' in item and item["title"]:
                     st.subheader(item["title"])
                 center_content(in_group, lambda: item["component"].component())
             elif item["type"] == "youtube":
-                if item["title"]:
+                if "title" in item and item["title"]:
                     st.subheader(item["title"])
                 center_content(in_group, st.video, item["url"])
             elif item["type"] == "image":
@@ -492,11 +499,16 @@ def display_item(item, directories, is_presentation=False, in_group=False):
             elif item["type"] == "video":
                 filepath = find_file(item["content"], directories) if not item["content"].startswith(
                     '/') else item["content"]
-                if item["title"]:
-                    st.subheader(item["title"])
-                center_content(in_group, st.video, filepath)
+                if "title" in item and item["title"]:
+                    if item["title"] == "popup" and is_presentation:
+                        display_video(filepath)
+                    else:
+                        st.subheader(item["title"])
+                        center_content(in_group, st.video, filepath)
+                else:
+                    center_content(in_group, st.video, filepath)
             elif item["type"] == "web":
-                if item["title"]:
+                if "title" in item and item["title"]:
                     st.subheader(item["title"])
                 image_path = url_to_image(item["url"])
                 if image_path:
@@ -575,7 +587,12 @@ class EzprezPlugin(Plugin):
                     button(t("ezprez_last_button"), "End", lambda: st.session_state.update(
                         {'current_slide': len(st.session_state['slides']) - 1}), hint=True)
 
-                button(t("ezprez_exit_button"), "Escape", lambda: st.session_state.update(
+                col5, col6 = st.columns(2)
+                with col5:
+                    button(t("ezprez_skip_button"), "ArrowDown", lambda: st.session_state.update(
+                        {'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 2)}), hint=True)
+                with col6:
+                    button(t("ezprez_exit_button"), "Escape", lambda: st.session_state.update(
                     {'presentation_mode': False}), hint=True)
 
                 # Add checkbox for green background in presentation mode
