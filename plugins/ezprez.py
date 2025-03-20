@@ -80,20 +80,6 @@ translations["fr"].update({
     "ezprez_config_directories_default": "Entrez les répertoires séparés par des sauts de ligne",
 })
 
-# Load directory paths from a config.ini file or plugin config
-
-
-def load_directories(config):
-    """Loads predefined directories from config.ini or plugin configuration to search for local files."""
-    directories = config.get("ezprez", {}).get("directories", "").split("\n")
-    if not directories or not any(d.strip() for d in directories):
-        config_parser = configparser.ConfigParser()
-        config_parser.read('config.ini')
-        return config_parser.get('Paths', 'directories', fallback='').split('\n')
-    return directories
-
-# Find a file in the predefined directories
-
 
 def find_file(filename, directories):
     """Searches for a file in the specified directories and returns its full path if found."""
@@ -441,7 +427,9 @@ class EzprezPlugin(Plugin):
 
         if not st.session_state['presentation_mode']:
             st.header(t("ezprez_header"))
-        directories = load_directories(config)
+
+        directories = [os.path.expanduser(dir.strip()) for dir in config.get(
+            "ezprez", {}).get("ezprez_directories", "").split("\n") if dir.strip()]
 
         # Sidebar for input and navigation
         with st.sidebar:
