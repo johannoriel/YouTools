@@ -171,6 +171,10 @@ def process_lines(lines, directories):
     for line in lines:
         stripped_line = line.strip()
 
+        # Vérifier si la ligne est un commentaire sur une seule ligne
+        if stripped_line.startswith("%%") and stripped_line.endswith("%%"):
+            continue
+
         # Début ou fin d'un commentaire
         if stripped_line == "%%":
             in_comment = not in_comment
