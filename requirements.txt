@@ -35,5 +35,4 @@ googlesearch-python
 pylatexenc
 praw
 linkify-it-py
-streamlit-shortcuts
 

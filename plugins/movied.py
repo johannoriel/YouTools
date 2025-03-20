@@ -11,7 +11,7 @@ import json
 translations["en"].update({
     "movied_tab": "Automated Video Editor",
     "movied_header": "Automated Video Editor",
-    "movied_workdir": "Working Directory",
+    "movied_workdir": "Movie Editor Working Directory",
     "movied_workdir_default": "/path/to/videos",
     "movied_media_dirs": "Media Directories (one per line)",
     "movied_media_dirs_default": "/path/to/images\n/path/to/videos",
@@ -34,7 +34,7 @@ translations["en"].update({
 translations["fr"].update({
     "movied_tab": "Éditeur Vidéo Automatisé",
     "movied_header": "Éditeur Vidéo Automatisé",
-    "movied_workdir": "Répertoire de travail",
+    "movied_workdir": "Répertoire de travail Editeur de Vidéo Automatisé",
     "movied_workdir_default": "/chemin/vers/vidéos",
     "movied_media_dirs": "Répertoires de médias (un par ligne)",
     "movied_media_dirs_default": "/chemin/vers/images\n/chemin/vers/vidéos",

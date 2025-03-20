@@ -58,7 +58,7 @@ translations["en"].update({
 translations["fr"].update({
     "video_tab": "Éditeur Vidéo",
     "video_header": "Éditeur Vidéo Basé sur les Sous-titres",
-    "video_config_workdir": "Répertoire de travail",
+    "video_config_workdir": "Répertoire de travail des vidéos",
     "video_config_workdir_default": "/chemin/vers/vidéos",
     "video_list_label": "Vidéos Disponibles",
     "video_generate_subtitles": "Générer les Sous-titres",
