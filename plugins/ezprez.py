@@ -111,7 +111,7 @@ class Tweet(object):
 
     def __init__(self, url, embed_str=False, height=600):
         if not embed_str:
-            api = f"https://publish.twitter.com/oembed?url={url}"
+            api = f"https://publish.twitter.com/oembed?hide_thread=true&url={url}&widget=Video"
             try:
                 response = requests.get(api, timeout=10)
                 response.raise_for_status()
@@ -415,6 +415,11 @@ def center_content(in_group, display_func, *args, **kwargs):
         with col3:
             st.write("")
 
+def preprocess_markdown(content):
+    """Remplace ==texte== par :orange-background[texte] dans une ligne markdown."""
+    import re
+    return re.sub(r'==([^=]+)==', r':orange-background[\1]', content)
+
 # Display an item in the app (modified for vertical centering)
 
 
@@ -446,7 +451,7 @@ def display_item(item, directories, is_presentation=False, in_group=False):
         with col:
             #st.info(item['type'])
             if item["type"] == "markdown":
-                st.markdown(item["content"])
+                st.markdown(preprocess_markdown(item["content"]))
             elif item["type"] == "tweet":
                 if item["title"]:
                     st.subheader(item["title"])
@@ -458,9 +463,9 @@ def display_item(item, directories, is_presentation=False, in_group=False):
             elif item["type"] == "image":
                 filepath = find_file(item["content"], directories) if not item["content"].startswith(
                     '/') else item["content"]
-                if item["title"]:
+                if "title" in item and item["title"]:
                     st.subheader(item["title"])
-                max_height = item.get("size", 500 if is_presentation else 200)
+                max_height = item.get("size", 800 if is_presentation else 200)
                 st.image(filepath, use_container_width=True)
                 st.markdown(f"""
                     <style>
