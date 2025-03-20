@@ -191,13 +191,24 @@ def process_lines(lines, directories):
             while i < len(lines) and not lines[i].strip():
                 i += 1
             if i >= len(lines):
+                if prev_item:
+                    result.append(prev_item)
                 break
-            next_line = lines[i].strip()
-            next_item = parse_single_line(next_line, directories, linkify)
-            if prev_item and next_item:
-                result.append(
-                    {"type": "group", "items": [prev_item, next_item]})
-            i += 1
+
+            # Collect all lines until next separator or end as the next item
+            next_lines = []
+            while i < len(lines) and lines[i].strip() not in ["---", "--"]:
+                if lines[i].strip():
+                    next_lines.append(lines[i])
+                i += 1
+            if next_lines:
+                next_item = {"type": "markdown",
+                             "content": "\n".join(next_lines)}
+                if prev_item and next_item:
+                    result.append(
+                        {"type": "group", "items": [prev_item, next_item]})
+                elif prev_item:
+                    result.append(prev_item)
             continue
 
         # Ignore empty lines before separators
