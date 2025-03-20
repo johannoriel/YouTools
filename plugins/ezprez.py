@@ -82,12 +82,25 @@ translations["fr"].update({
 
 
 def find_file(filename, directories):
-    """Searches for a file in the specified directories and returns its full path if found."""
+    """Searches for a file in the specified directories and returns its full path if found.
+    Handles both encoded (e.g., %20) and decoded (e.g., space) filenames."""
+    from urllib.parse import unquote
+    # Décoder le nom de fichier (ex. %20 -> espace)
+    decoded_filename = unquote(filename)
+
     for directory in directories:
-        full_path = Path(directory) / filename
-        if full_path.exists():
-            return str(full_path)
+        # Tester avec le nom décodé
+        full_path_decoded = Path(directory) / decoded_filename
+        if full_path_decoded.exists():
+            return str(full_path_decoded)
+
+        # Tester avec le nom original (encodé)
+        full_path_encoded = Path(directory) / filename
+        if full_path_encoded.exists():
+            return str(full_path_encoded)
+
     return None
+
 
 # Convert a web URL to an image using wkhtmltoimage
 
@@ -282,7 +295,7 @@ def parse_single_line(line, directories, linkify):
     """
     Parses a single line into an item or list of items based on its content.
     """
-    extensions = {'.jpg': 'image', '.png': 'image',
+    extensions = {'.jpg': 'image', '.png': 'image', '.jpeg': 'image', '.gif': 'image',
                   '.mp4': 'video', '.flv': 'video'}
 
     for ext, content_type in extensions.items():
