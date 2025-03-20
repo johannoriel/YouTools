@@ -55,7 +55,6 @@ translations["en"].update({
     "ezprez_exit_button": "Exit",
     "ezprez_green_bg_label": "Green Background",
     "ezprez_vertical_center_label": "Center Vertically",
-    "ezprez_preview_header": "Preview",
     "ezprez_no_content_warning": "Please enter content and generate slides before launching the presentation.",
     "ezprez_config_directories_label": "Directories for file search",
     "ezprez_config_directories_default": "Enter directories separated by newlines",
@@ -76,7 +75,6 @@ translations["fr"].update({
     "ezprez_exit_button": "Quitter",
     "ezprez_green_bg_label": "Fond Vert",
     "ezprez_vertical_center_label": "Centrer Verticalement",
-    "ezprez_preview_header": "Aperçu",
     "ezprez_no_content_warning": "Veuillez entrer du contenu et générer des diapositives avant de lancer la présentation.",
     "ezprez_config_directories_label": "Répertoires pour la recherche de fichiers",
     "ezprez_config_directories_default": "Entrez les répertoires séparés par des sauts de ligne",
@@ -600,7 +598,6 @@ class EzprezPlugin(Plugin):
 
         # Preview mode: Show all slides
         if not st.session_state['presentation_mode'] and 'slides' in st.session_state:
-            st.header(t("ezprez_preview_header"))
             for item in st.session_state['slides']:
                 display_item(item, directories, is_presentation=False)
                 st.markdown("---")
