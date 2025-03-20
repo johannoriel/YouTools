@@ -158,14 +158,36 @@ def process_lines(lines, directories):
     - Empty lines around separators are ignored.
     - Empty slides are filtered out.
     - Handles multiple items returned by parse_single_line (e.g., from included files).
+    - Ignores content between %% and %% as comments.
     """
     result = []
     current_markdown = []
     linkify = LinkifyIt()
 
+    # Pré-traitement pour supprimer les commentaires
+    filtered_lines = []
+    in_comment = False
+
+    for line in lines:
+        stripped_line = line.strip()
+
+        # Début ou fin d'un commentaire
+        if stripped_line == "%%":
+            in_comment = not in_comment
+            continue
+
+        # Ignorer la ligne si elle est dans un commentaire
+        if not in_comment:
+            filtered_lines.append(line)
+
+    # Vérifier qu'on n'est pas resté dans un commentaire non fermé
+    if in_comment:
+        logger.warning("Unclosed comment block detected (missing closing %%)")
+
+    # Traitement des lignes filtrées
     i = 0
-    while i < len(lines):
-        line = lines[i].strip()
+    while i < len(filtered_lines):
+        line = filtered_lines[i].strip()
 
         # Handle slide separator
         if line == "---":
@@ -174,12 +196,12 @@ def process_lines(lines, directories):
                     {"type": "markdown", "content": "\n".join(current_markdown)})
             current_markdown = []
             i += 1
-            while i < len(lines) and not lines[i].strip():
+            while i < len(filtered_lines) and not filtered_lines[i].strip():
                 i += 1
             continue
 
         # Handle column separator
-        if line == "--" and i > 0 and i + 1 < len(lines):
+        if line == "--" and i > 0 and i + 1 < len(filtered_lines):
             prev_item = None
             if current_markdown and "\n".join(current_markdown).strip():
                 prev_item = {"type": "markdown", "content": "\n".join(current_markdown)}
@@ -188,18 +210,18 @@ def process_lines(lines, directories):
                 prev_item = result.pop()
 
             i += 1
-            while i < len(lines) and not lines[i].strip():
+            while i < len(filtered_lines) and not filtered_lines[i].strip():
                 i += 1
-            if i >= len(lines):
+            if i >= len(filtered_lines):
                 if prev_item:
                     result.append(prev_item)
                 break
 
             # Collect and parse lines for the next column individually
             next_items = []
-            while i < len(lines) and lines[i].strip() not in ["---", "--"]:
-                if lines[i].strip():
-                    parsed = parse_single_line(lines[i], directories, linkify)
+            while i < len(filtered_lines) and filtered_lines[i].strip() not in ["---", "--"]:
+                if filtered_lines[i].strip():
+                    parsed = parse_single_line(filtered_lines[i], directories, linkify)
                     if isinstance(parsed, list):
                         next_items.extend(parsed)
                     else:
@@ -220,7 +242,7 @@ def process_lines(lines, directories):
             continue
 
         # Ignore empty lines before separators
-        if not line and i + 1 < len(lines) and lines[i + 1].strip() in ["---", "--"]:
+        if not line and i + 1 < len(filtered_lines) and filtered_lines[i + 1].strip() in ["---", "--"]:
             i += 1
             continue
 
