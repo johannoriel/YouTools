@@ -296,14 +296,21 @@ def process_lines(lines, directories):
 def parse_single_line(line, directories, linkify):
     """
     Parses a single line into an item or list of items based on its content.
+    Updated to detect online images from URLs.
     """
     extensions = {'.jpg': 'image', '.png': 'image', '.jpeg': 'image', '.gif': 'image',
                   '.mp4': 'video', '.flv': 'video'}
 
+    # Check for local or online files by extension
     for ext, content_type in extensions.items():
-        if line.endswith(ext):
-            return {"type": content_type, "content": line}
+        if line.strip().endswith(ext):
+            # If it’s a URL (starts with http/https), treat as online content
+            if line.strip().startswith(('http://', 'https://')):
+                return {"type": content_type, "content": line.strip(), "is_online": True}
+            # Otherwise, assume local file
+            return {"type": content_type, "content": line.strip()}
 
+    # Existing patterns (Obsidian, Markdown files, etc.) remain unchanged until image match
     obsidian_pattern = re.match(r'obsidian://open\?vault=.*?&file=(.*)', line)
     md_file_pattern = re.match(r'(.+\.md)$', line.strip())
     md_link_pattern = re.match(r'\[(.*?)\]\((.+\.md)\)', line)
@@ -352,9 +359,14 @@ def parse_single_line(line, directories, linkify):
         title = md_image_match.group(2).strip()
         filepath = md_image_match.group(3)
         ext = Path(filepath).suffix.lower()
-        if ext in extensions:
+        is_online = filepath.startswith(('http://', 'https://'))
+        if ext in extensions or (is_online and ext in extensions):
             item = {
-                "type": extensions[ext], "content": filepath, "title": title if title else None}
+                "type": extensions.get(ext, 'image'),
+                "content": filepath,
+                "title": title if title else None,
+                "is_online": is_online
+            }
             if size:
                 item["size"] = int(size)
             return item
@@ -369,7 +381,7 @@ def parse_single_line(line, directories, linkify):
             if size_str.strip().isdigit():
                 size = int(size_str.strip())
                 title = title_str.strip() if title_str.strip() else None
-        tweet = Tweet(url, height=size if size else 600)
+        tweet = Tweet(url, height=size if size else 800)
         return {"type": "tweet", "component": tweet, "url": url, "title": title}
 
     if md_link_match:
@@ -386,7 +398,10 @@ def parse_single_line(line, directories, linkify):
     matches = linkify.match(line)
     if matches:
         url = matches[0].url
-        if is_twitter_url(url):
+        ext = Path(url).suffix.lower()
+        if ext in extensions:
+            return {"type": extensions[ext], "content": url, "is_online": True}
+        elif is_twitter_url(url):
             tweet = Tweet(url)
             return {"type": "tweet", "component": tweet, "url": url, "title": None}
         elif is_youtube_url(url):
@@ -455,8 +470,7 @@ def display_item(item, directories, is_presentation=False, in_group=False):
     - Web: Centered webpage screenshot with optional title.
     - Group: Two items in side-by-side columns, vertically centered if enabled.
     """
-    vertical_center = st.session_state.get(
-        'vertical_center', False) and is_presentation
+    vertical_center = st.session_state.get('vertical_center', False) and is_presentation
     alignment = "center" if vertical_center else "top"
 
     if item["type"] == "group":
@@ -469,11 +483,10 @@ def display_item(item, directories, is_presentation=False, in_group=False):
         # Wrap all non-group items in a single column for consistent vertical alignment
         (col,) = st.columns(1, vertical_alignment=alignment)
         with col:
-            #st.info(item['type'])
             if item["type"] == "markdown":
                 st.markdown(preprocess_markdown(item["content"]))
             elif item["type"] == "tweet":
-                if 'title' in item and item["title"]:
+                if "title" in item and item["title"]:
                     st.subheader(item["title"])
                 center_content(in_group, lambda: item["component"].component())
             elif item["type"] == "youtube":
@@ -481,8 +494,9 @@ def display_item(item, directories, is_presentation=False, in_group=False):
                     st.subheader(item["title"])
                 center_content(in_group, st.video, item["url"])
             elif item["type"] == "image":
-                filepath = find_file(item["content"], directories) if not item["content"].startswith(
-                    '/') else item["content"]
+                filepath = item["content"]
+                if not item.get("is_online", False):
+                    filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
                 if "title" in item and item["title"]:
                     st.subheader(item["title"])
                 max_height = item.get("size", 800 if is_presentation else 200)
@@ -497,8 +511,7 @@ def display_item(item, directories, is_presentation=False, in_group=False):
                     </style>
                 """, unsafe_allow_html=True)
             elif item["type"] == "video":
-                filepath = find_file(item["content"], directories) if not item["content"].startswith(
-                    '/') else item["content"]
+                filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
                 if "title" in item and item["title"]:
                     if item["title"] == "popup" and is_presentation:
                         display_video(filepath)
