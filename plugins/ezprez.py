@@ -485,22 +485,24 @@ class EzprezPlugin(Plugin):
                 if green_bg:
                     st.markdown("""
                         <style>
-                        .stApp {
+                        /* Apply green background only to stMain */
+                        .stMain {
                             background-color: #00FF00;
                         }
-                        /* Style for Markdown elements */
-                        h1, h2, h3, h4, h5, h6, p, ul, ol, li, blockquote {
+                        /* Style for Markdown elements within stMain */
+                        .stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain h5, .stMain h6,
+                        .stMain p, .stMain ul, .stMain ol, .stMain li, .stMain blockquote {
                             background-color: #000000;
                             color: #FFFFFF;
                             padding: 10px;
                             margin: 5px 0;
                             display: inline-block;
                         }
-                        ul, ol {
+                        .stMain ul, .stMain ol {
                             display: block;
                             padding: 10px 10px 10px 30px;
                         }
-                        li {
+                        .stMain li {
                             margin: 0;
                             display: block;
                         }
@@ -510,6 +512,34 @@ class EzprezPlugin(Plugin):
                 # Add checkbox for vertical centering in presentation mode
                 st.checkbox(t("ezprez_vertical_center_label"),
                             value=False, key="vertical_center")
+                # Add font size slider for presentation mode
+                font_size_scale = st.slider(
+                    "Font Size Scale", min_value=1.0, max_value=6.0, value=2.0, step=0.1, key="font_size_scale")
+
+        # Apply font size scaling in presentation mode only to main content
+        if st.session_state['presentation_mode']:
+            font_size_scale = st.session_state.get('font_size_scale', 1.0)
+            st.markdown(f"""
+                <style>
+                /* Target only the main content area (stMain) */
+                .stMain {{
+                    font-size: calc(1rem * {font_size_scale});
+                }}
+                /* Increase heading sizes relative to the base font size within stMain */
+                .stMain h1 {{
+                    font-size: calc(2.5rem * {font_size_scale});
+                }}
+                .stMain h2 {{
+                    font-size: calc(2rem * {font_size_scale});
+                }}
+                .stMain h3 {{
+                    font-size: calc(1.5rem * {font_size_scale});
+                }}
+                .stMain p, .stMain li {{
+                    font-size: calc(1rem * {font_size_scale});
+                }}
+                </style>
+            """, unsafe_allow_html=True)
 
         # Preview mode: Show all slides
         if not st.session_state['presentation_mode'] and 'slides' in st.session_state:
