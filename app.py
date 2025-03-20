@@ -73,7 +73,7 @@ class Plugin:
     def run(self, config: Dict[str, Any]):
         pass
 
-    def get_sidebar_config_ui(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def get_sidebar_config_ui(self, expander, config: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
 
@@ -128,14 +128,14 @@ class PluginManager:
                     st.rerun()
         return all_ui
 
-    def get_sidebar_config_for_core_plugins(self, config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    def get_sidebar_config_for_core_plugins(self, expander, config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """Get sidebar configuration for core plugins only."""
         sidebar_configs = {}
         for plugin_name in CORE_PLUGINS:
             plugin = self.get_plugin(plugin_name)
             if plugin:
                 sidebar_config = plugin.get_sidebar_config_ui(
-                    config.get(plugin_name, {}))
+                    expander, config.get(plugin_name, {}))
                 if sidebar_config:
                     sidebar_configs[plugin_name] = sidebar_config
         return sidebar_configs
@@ -209,8 +209,10 @@ def main():
     tabs = [{"id": "configurations", "name": t(
         "configurations")}] + plugin_manager.get_all_tabs()
 
+    expander = st.sidebar.expander("Configuration", expanded=True)
+
     # Language selection
-    new_lang = st.sidebar.selectbox(
+    new_lang = expander.selectbox(
         "Choose your language / Choisissez votre langue",
         options=["en", "fr"],
         index=["en", "fr"].index(st.session_state.lang),
@@ -223,13 +225,13 @@ def main():
 
     # Handle core plugins sidebar configuration
     core_sidebar_configs = plugin_manager.get_sidebar_config_for_core_plugins(
-        config)
+        expander, config)
     for plugin_name, sidebar_config in core_sidebar_configs.items():
         for key, value in sidebar_config.items():
             config.setdefault(plugin_name, {})[key] = value
 
     # Ajouter le bouton "Clean session" dans la barre latérale
-    if st.sidebar.button(t("Clean session")):
+    if expander.button(t("Clean session")):
         st.session_state.clear()  # Cela réinitialise st.session_state
         st.rerun()  # Relancer l'application pour refléter les changements
 
@@ -245,7 +247,7 @@ def main():
 
     selected_tab_index = [tab["id"] for tab in sorted_tabs].index(
         st.session_state.selected_tab_id)
-    selected_tab = st.sidebar.radio(
+    selected_tab = expander.radio(
         t("navigation"), tab_names, index=selected_tab_index, key="tab_selector")
 
     new_selected_tab_id = next(
