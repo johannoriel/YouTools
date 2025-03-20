@@ -183,7 +183,13 @@ class PluginManager:
 
 
 def main():
-    st.set_page_config(page_title="YoutTools", layout="wide")
+    if 'presentation_mode' not in st.session_state or ('presentation_mode' in st.session_state and not st.session_state.presentation_mode):
+        st.set_page_config(page_title="YoutTools",
+                           layout="wide", initial_sidebar_state="expanded")
+        st.title(t("page_title"))
+    else:
+        st.set_page_config(page_title="YoutTools", layout="wide",
+                           initial_sidebar_state="collapsed")
 
     # Load configuration
     config = load_config()
@@ -196,7 +202,6 @@ def main():
     # Initialize language
     if 'lang' not in st.session_state:
         st.session_state.lang = config['common']['language']
-    st.title(t("page_title"))
 
     # Load environment variables
     load_dotenv()
