@@ -473,28 +473,28 @@ def generate_animation_css(animation_type, is_exit=False):
             css += """
             @keyframes exitLeft {
                 0% { transform: translateX(0); opacity: 1; }
-                100% { transform: translateX(-100%); opacity: 0; }
+                100% { transform: translateX(-100%); opacity: 1; }
             }
             """
         elif animation_type == 'right':
             css += """
             @keyframes exitRight {
                 0% { transform: translateX(0); opacity: 1; }
-                100% { transform: translateX(100%); opacity: 0; }
+                100% { transform: translateX(100%); opacity: 1; }
             }
             """
         elif animation_type == 'top':
             css += """
             @keyframes exitTop {
                 0% { transform: translateY(0); opacity: 1; }
-                100% { transform: translateY(-100%); opacity: 0; }
+                100% { transform: translateY(-100%); opacity: 1; }
             }
             """
         elif animation_type == 'bottom':
             css += """
             @keyframes exitBottom {
                 0% { transform: translateY(0); opacity: 1; }
-                100% { transform: translateY(100%); opacity: 0; }
+                100% { transform: translateY(100%); opacity: 1; }
             }
             """
         css += f"""
@@ -508,42 +508,42 @@ def generate_animation_css(animation_type, is_exit=False):
         if animation_type == 'left':
             css += """
             @keyframes left {
-                0% { transform: translateX(-100%); opacity: 0; }
+                0% { transform: translateX(-100%); opacity: 1; }
                 100% { transform: translateX(0); opacity: 1; }
             }
             """
         elif animation_type == 'right':
             css += """
             @keyframes right {
-                0% { transform: translateX(100%); opacity: 0; }
+                0% { transform: translateX(100%); opacity: 1; }
                 100% { transform: translateX(0); opacity: 1; }
             }
             """
         elif animation_type == 'top':
             css += """
             @keyframes top {
-                0% { transform: translateY(-100%); opacity: 0; }
+                0% { transform: translateY(-100%); opacity: 1; }
                 100% { transform: translateY(0); opacity: 1; }
             }
             """
         elif animation_type == 'bottom':
             css += """
             @keyframes bottom {
-                0% { transform: translateY(100%); opacity: 0; }
+                0% { transform: translateY(100%); opacity: 1; }
                 100% { transform: translateY(0); opacity: 1; }
             }
             """
         elif animation_type == 'zoomIn':
             css += """
             @keyframes zoomIn {
-                0% { transform: scale(0); opacity: 0; }
+                0% { transform: scale(0); opacity: 1; }
                 100% { transform: scale(1); opacity: 1; }
             }
             """
         elif animation_type == 'zoomOut':
             css += """
             @keyframes zoomOut {
-                0% { transform: scale(1.5); opacity: 0; }
+                0% { transform: scale(1.5); opacity: 1; }
                 100% { transform: scale(1); opacity: 1; }
             }
             """
