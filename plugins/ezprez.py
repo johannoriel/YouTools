@@ -33,6 +33,7 @@ import tempfile
 import os
 from streamlit_shortcuts import button
 from urllib.parse import unquote
+import random
 
 
 # Configure logging for debugging purposes
@@ -131,16 +132,16 @@ class Tweet(object):
                 response = requests.get(api, timeout=10)
                 response.raise_for_status()
                 data = response.json()
-                self.text = data["html"]
+                self.text = f'<div class="myTweet">{data["html"]}</div>'
                 self.title = data.get("title", url)
             except (requests.RequestException, ValueError) as e:
                 logger.error(f"Error fetching tweet {url}: {str(e)}")
-                self.text = f"<p>Tweet error: {str(e)}</p>"
+                self.text = f'<div class="myTweet"><p>Tweet error: {str(e)}</p></div>'
                 self.title = "Error"
         else:
-            self.text = url
+            self.text = f'<div class="myTweet">{url}</div>'
             self.title = url
-        self.height = height  # Store custom height
+        self.height = height
 
     def component(self):
         """Returns the tweet as an HTML component for Streamlit with specified height."""
@@ -223,7 +224,8 @@ def process_lines(lines, directories):
         if line == "--" and i > 0 and i + 1 < len(filtered_lines):
             prev_item = None
             if current_markdown and "\n".join(current_markdown).strip():
-                prev_item = {"type": "markdown", "content": "\n".join(current_markdown)}
+                prev_item = {"type": "markdown",
+                             "content": "\n".join(current_markdown)}
                 current_markdown = []
             elif result:
                 prev_item = result.pop()
@@ -240,7 +242,8 @@ def process_lines(lines, directories):
             next_items = []
             while i < len(filtered_lines) and filtered_lines[i].strip() not in ["---", "--"]:
                 if filtered_lines[i].strip():
-                    parsed = parse_single_line(filtered_lines[i], directories, linkify)
+                    parsed = parse_single_line(
+                        filtered_lines[i], directories, linkify)
                     if isinstance(parsed, list):
                         next_items.extend(parsed)
                     else:
@@ -253,7 +256,8 @@ def process_lines(lines, directories):
                     "type": "markdown", "content": "\n".join(item["content"] for item in next_items if item["type"] == "markdown")
                 } or next_items[0]  # Fallback to first item if no markdown
                 if prev_item and next_item:
-                    result.append({"type": "group", "items": [prev_item, next_item]})
+                    result.append(
+                        {"type": "group", "items": [prev_item, next_item]})
                 elif prev_item:
                     result.append(prev_item)
                 if len(next_items) > 1:
@@ -445,6 +449,7 @@ def center_content(in_group, display_func, *args, **kwargs):
         with col3:
             st.write("")
 
+
 def preprocess_markdown(content):
     """Remplace ==texte== par :orange-background[texte] dans une ligne markdown."""
     import re
@@ -455,10 +460,82 @@ def preprocess_markdown(content):
 def display_video(filepath):
     st.video(filepath)
 
+# New function to generate animation CSS
+
+
+def generate_animation_css(animation_type=None):
+    if animation_type is None:
+        animation_type = random.choice(
+            ['left', 'right', 'top', 'bottom', 'zoomIn', 'zoomOut', 'rock'])
+
+    css = "<style>\n"
+
+    # Define animation keyframes based on type
+    if animation_type == 'left':
+        css += """
+        @keyframes slideInFromLeft {
+            0% { transform: translateX(-100%); opacity: 0; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+        """
+    elif animation_type == 'right':
+        css += """
+        @keyframes slideInFromRight {
+            0% { transform: translateX(100%); opacity: 0; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+        """
+    elif animation_type == 'top':
+        css += """
+        @keyframes slideInFromTop {
+            0% { transform: translateY(-100%); opacity: 0; }
+            100% { transform: translateY(0); opacity: 1; }
+        }
+        """
+    elif animation_type == 'bottom':
+        css += """
+        @keyframes slideInFromBottom {
+            0% { transform: translateY(100%); opacity: 0; }
+            100% { transform: translateY(0); opacity: 1; }
+        }
+        """
+    elif animation_type == 'zoomIn':
+        css += """
+        @keyframes zoomIn {
+            0% { transform: scale(0); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        """
+    elif animation_type == 'zoomOut':
+        css += """
+        @keyframes zoomOut {
+            0% { transform: scale(1.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        """
+    elif animation_type == 'rock':
+        css += """
+        @keyframes rock {
+            0% { transform: rotate(0deg); }
+            25% { transform: rotate(5deg); }
+            75% { transform: rotate(-5deg); }
+            100% { transform: rotate(0deg); }
+        }
+        """
+
+    # Apply animation to target elements
+    css += f"""
+    .stImage img, .stVideo, .stMarkdown > div, .myTweet {{
+        animation: {animation_type if animation_type != 'rock' else 'rock'} 3s ease-out;
+    }}
+    </style>
+    """
+    return css
+
 # Display an item in the app (modified for vertical centering)
 
 
-def display_item(item, directories, is_presentation=False, in_group=False):
+def display_item(item, directories, is_presentation=False, in_group=False, animation_type=None):
     """
     Displays an item based on its type:
     - All items are wrapped in a single column with optional vertical centering in presentation mode.
@@ -470,15 +547,22 @@ def display_item(item, directories, is_presentation=False, in_group=False):
     - Web: Centered webpage screenshot with optional title.
     - Group: Two items in side-by-side columns, vertically centered if enabled.
     """
-    vertical_center = st.session_state.get('vertical_center', False) and is_presentation
+    if is_presentation:
+        st.markdown(generate_animation_css(
+            animation_type), unsafe_allow_html=True)
+
+    vertical_center = st.session_state.get(
+        'vertical_center', False) and is_presentation
     alignment = "center" if vertical_center else "top"
 
     if item["type"] == "group":
         col1, col2 = st.columns(2, vertical_alignment=alignment)
         with col1:
-            display_item(item["items"][0], directories, is_presentation, True)
+            display_item(item["items"][0], directories,
+                         is_presentation, True, animation_type)
         with col2:
-            display_item(item["items"][1], directories, is_presentation, True)
+            display_item(item["items"][1], directories,
+                         is_presentation, True, animation_type)
     else:
         # Wrap all non-group items in a single column for consistent vertical alignment
         (col,) = st.columns(1, vertical_alignment=alignment)
@@ -496,7 +580,8 @@ def display_item(item, directories, is_presentation=False, in_group=False):
             elif item["type"] == "image":
                 filepath = item["content"]
                 if not item.get("is_online", False):
-                    filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
+                    filepath = find_file(item["content"], directories) if not item["content"].startswith(
+                        '/') else item["content"]
                 if "title" in item and item["title"]:
                     st.subheader(item["title"])
                 max_height = item.get("size", 800 if is_presentation else 200)
@@ -511,7 +596,8 @@ def display_item(item, directories, is_presentation=False, in_group=False):
                     </style>
                 """, unsafe_allow_html=True)
             elif item["type"] == "video":
-                filepath = find_file(item["content"], directories) if not item["content"].startswith('/') else item["content"]
+                filepath = find_file(item["content"], directories) if not item["content"].startswith(
+                    '/') else item["content"]
                 if "title" in item and item["title"]:
                     if item["title"] == "popup" and is_presentation:
                         display_video(filepath)
@@ -560,6 +646,7 @@ class EzprezPlugin(Plugin):
         """
         if 'presentation_mode' not in st.session_state:
             st.session_state['presentation_mode'] = False
+            st.session_state['last_animation'] = None
 
         if not st.session_state['presentation_mode']:
             st.header(t("ezprez_header"))
@@ -567,7 +654,6 @@ class EzprezPlugin(Plugin):
         directories = [os.path.expanduser(dir.strip()) for dir in config.get(
             "ezprez", {}).get("ezprez_directories", "").split("\n") if dir.strip()]
 
-        # Sidebar for input and navigation
         with st.sidebar:
             st.header(t("ezprez_preparation_header"))
             input_text = st.text_area(
@@ -576,107 +662,105 @@ class EzprezPlugin(Plugin):
             col1, col2 = st.columns(2)
             with col1:
                 button(t("ezprez_preview_button"), "Ctrl+P", lambda: st.session_state.update(
-                    {'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}), hint=True)
+                    {'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}))
             with col2:
-                button(t("ezprez_launch_button"), "Ctrl+Enter", lambda: st.session_state.update({'presentation_mode': True, 'input_text': st.session_state.get(
-                    'input_text', ''), 'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}), hint=True)
+                button(t("ezprez_launch_button"), "Ctrl+Enter", lambda: st.session_state.update(
+                    {'presentation_mode': True, 'input_text': st.session_state.get('input_text', ''),
+                        'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}))
 
-            # Navigation controls in presentation mode
             if st.session_state['presentation_mode']:
                 st.header(t("ezprez_navigation_header"))
                 col1, col2 = st.columns(2)
                 with col1:
                     button(t("ezprez_previous_button"), "ArrowLeft", lambda: st.session_state.update(
-                        {'current_slide': max(0, st.session_state['current_slide'] - 1)}), hint=True)
+                        {'current_slide': max(0, st.session_state['current_slide'] - 1)}))
                 with col2:
-                    button(t("ezprez_next_button"), "ArrowRight", lambda: st.session_state.update({'current_slide': min(
-                        len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1)}), hint=True)
+                    button(t("ezprez_next_button"), "ArrowRight", lambda: st.session_state.update(
+                        {'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1)}))
 
                 col3, col4 = st.columns(2)
                 with col3:
-                    button(t("ezprez_first_button"), "Home", lambda: st.session_state.update(
-                        {'current_slide': 0}), hint=True)
+                    button(t("ezprez_first_button"), "Home",
+                           lambda: st.session_state.update({'current_slide': 0}))
                 with col4:
                     button(t("ezprez_last_button"), "End", lambda: st.session_state.update(
-                        {'current_slide': len(st.session_state['slides']) - 1}), hint=True)
+                        {'current_slide': len(st.session_state['slides']) - 1}))
 
                 col5, col6 = st.columns(2)
                 with col5:
                     button(t("ezprez_skip_button"), "ArrowDown", lambda: st.session_state.update(
-                        {'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 2)}), hint=True)
+                        {'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 2)}))
                 with col6:
                     button(t("ezprez_exit_button"), "Escape", lambda: st.session_state.update(
-                    {'presentation_mode': False}), hint=True)
+                        {'presentation_mode': False}))
 
-                # Add checkbox for green background in presentation mode
+                # New animation controls
+                st.subheader("Animation Controls")
+                button("Random Animation Next", "PageUp", lambda: st.session_state.update({
+                    'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                    'last_animation': None  # Random animation
+                }))
+                button("Rock Animation", "Ctrl+A", lambda: st.session_state.update({
+                    'last_animation': 'rock'
+                }))
+                col7, col8 = st.columns(2)
+                with col7:
+                    button("Slide Left", "Ctrl+ArrowLeft", lambda: st.session_state.update({
+                        'current_slide': max(0, st.session_state['current_slide'] - 1),
+                        'last_animation': 'left'
+                    }))
+                    button("Slide Up", "Ctrl+ArrowUp", lambda: st.session_state.update({
+                        'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                        'last_animation': 'top'
+                    }))
+                with col8:
+                    button("Slide Right", "Ctrl+ArrowRight", lambda: st.session_state.update({
+                        'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                        'last_animation': 'right'
+                    }))
+                    button("Slide Down", "Ctrl+ArrowDown", lambda: st.session_state.update({
+                        'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                        'last_animation': 'bottom'
+                    }))
+
+                # Existing presentation controls (green background, vertical center, font size)
                 green_bg = st.checkbox(
                     t("ezprez_green_bg_label"), value=False, key="green_bg")
                 if green_bg:
                     st.markdown("""
                         <style>
-                        /* Apply green background only to stMain */
-                        .stMain {
-                            background-color: #00FF00;
-                        }
-                        /* Style for Markdown elements within stMain */
+                        .stMain { background-color: #00FF00; }
                         .stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain h5, .stMain h6,
                         .stMain p, .stMain ul, .stMain ol, .stMain li, .stMain blockquote {
-                            background-color: #000000;
-                            color: #FFFFFF;
-                            padding: 10px;
-                            margin: 5px 0;
-                            display: inline-block;
+                            background-color: #000000; color: #FFFFFF; padding: 10px; margin: 5px 0; display: inline-block;
                         }
-                        .stMain ul, .stMain ol {
-                            display: block;
-                            padding: 10px 10px 10px 30px;
-                        }
-                        .stMain li {
-                            margin: 0;
-                            display: block;
-                        }
+                        .stMain ul, .stMain ol { display: block; padding: 10px 10px 10px 30px; }
+                        .stMain li { margin: 0; display: block; }
                         </style>
                     """, unsafe_allow_html=True)
-
-                # Add checkbox for vertical centering in presentation mode
                 st.checkbox(t("ezprez_vertical_center_label"),
                             value=False, key="vertical_center")
-                # Add font size slider for presentation mode
                 font_size_scale = st.slider(
-                    "Font Size Scale", min_value=1.0, max_value=6.0, value=2.0, step=0.1, key="font_size_scale")
+                    "Font Size Scale", 1.0, 6.0, 2.0, 0.1, key="font_size_scale")
 
-        # Apply font size scaling in presentation mode only to main content
+        # Apply font size scaling
         if st.session_state['presentation_mode']:
             font_size_scale = st.session_state.get('font_size_scale', 1.0)
             st.markdown(f"""
                 <style>
-                /* Target only the main content area (stMain) */
-                .stMain {{
-                    font-size: calc(1rem * {font_size_scale});
-                }}
-                /* Increase heading sizes relative to the base font size within stMain */
-                .stMain h1 {{
-                    font-size: calc(2.5rem * {font_size_scale});
-                }}
-                .stMain h2 {{
-                    font-size: calc(2rem * {font_size_scale});
-                }}
-                .stMain h3 {{
-                    font-size: calc(1.5rem * {font_size_scale});
-                }}
-                .stMain p, .stMain li {{
-                    font-size: calc(1rem * {font_size_scale});
-                }}
+                .stMain {{ font-size: calc(1rem * {font_size_scale}); }}
+                .stMain h1 {{ font-size: calc(2.5rem * {font_size_scale}); }}
+                .stMain h2 {{ font-size: calc(2rem * {font_size_scale}); }}
+                .stMain h3 {{ font-size: calc(1.5rem * {font_size_scale}); }}
+                .stMain p, .stMain li {{ font-size: calc(1rem * {font_size_scale}); }}
                 </style>
             """, unsafe_allow_html=True)
 
-        # Preview mode: Show all slides
         if not st.session_state['presentation_mode'] and 'slides' in st.session_state:
             for item in st.session_state['slides']:
                 display_item(item, directories, is_presentation=False)
                 st.markdown("---")
 
-        # Presentation mode: Show one slide at a time
         if st.session_state['presentation_mode']:
             if 'slides' not in st.session_state or not st.session_state['slides']:
                 st.warning(t("ezprez_no_content_warning"))
@@ -689,8 +773,9 @@ class EzprezPlugin(Plugin):
 
             current = st.session_state['current_slide']
             if slides:
+                animation_type = st.session_state.get('last_animation')
                 display_item(slides[current], directories,
-                             is_presentation=True)
+                             is_presentation=True, animation_type=animation_type)
 
 
 if __name__ == "__main__":
