@@ -30,6 +30,8 @@ translations["en"].update({
     "movied_generate": "Generate Video",
     "movied_model_label": "Transcription Model",
     "movied_replace_video_keep_audio": "Replace Video (Keep Original Audio)",
+    "movied_filter_media_dir": "Filter by Media Directory",
+    "movied_all_directories": "All Directories",
 })
 
 translations["fr"].update({
@@ -54,6 +56,8 @@ translations["fr"].update({
     "movied_generate": "Générer la vidéo",
     "movied_model_label": "Modèle de transcription",
     "movied_replace_video_keep_audio": "Remplacer la vidéo (Garder l'audio original)",
+    "movied_filter_media_dir": "Filtrer par répertoire de médias",
+    "movied_all_directories": "Tous les répertoires",
 })
 
 
@@ -186,6 +190,8 @@ class MoviedPlugin(Plugin):
     def list_media_files(self):
         media_files = {"images": [], "videos": []}
         for dir_path in self.media_dirs:
+            if not os.path.exists(dir_path):
+                continue
             for file in os.listdir(dir_path):
                 full_path = os.path.join(dir_path, file)
                 if file.lower().endswith((".jpg", ".png")):
@@ -210,19 +216,36 @@ class MoviedPlugin(Plugin):
                 return
 
             st.subheader("Media Selection")
-            col1, col2 = st.columns(2)  # Réduit à 2 colonnes au lieu de 3
+            col1, col2 = st.columns(2)
+
+            # Options pour le filtre de répertoires
+            media_dir_options = [t("movied_all_directories")] + self.media_dirs
+            default_dir_index = 0
 
             with col1:
                 st.write("Images for Replacement")
+                # Filtre pour les images
+                image_filter_dir = st.selectbox(
+                    t("movied_filter_media_dir"),
+                    media_dir_options,
+                    index=default_dir_index,
+                    key="image_filter_selectbox"
+                )
+                filtered_image_df = image_df if image_filter_dir == t("movied_all_directories") else image_df[
+                    image_df["Path"].str.startswith(image_filter_dir)
+                ]
                 st.dataframe(
-                    image_df[["File", "Preview"]],
+                    filtered_image_df[["File", "Preview"]],
                     column_config={"Preview": st.column_config.ImageColumn(
                         "Preview", width=image_preview_size)},
                     height=200,
                     hide_index=True
                 )
                 selected_image_path = st.selectbox(
-                    "Select an image", image_df["Path"], key="image_selectbox")
+                    "Select an image",
+                    filtered_image_df["Path"],
+                    key="image_selectbox"
+                )
                 if st.button(t("movied_replace_image"), key="replace_image_btn"):
                     if selected_image_path:
                         operation = f"replace_image {start_time} {end_time} {selected_image_path}"
@@ -232,13 +255,26 @@ class MoviedPlugin(Plugin):
 
             with col2:
                 st.write("Video Operations")
+                # Filtre pour les vidéos
+                video_filter_dir = st.selectbox(
+                    t("movied_filter_media_dir"),
+                    media_dir_options,
+                    index=default_dir_index,
+                    key="video_filter_selectbox"
+                )
+                filtered_video_df = video_df if video_filter_dir == t("movied_all_directories") else video_df[
+                    video_df["Path"].str.startswith(video_filter_dir)
+                ]
                 st.dataframe(
-                    video_df[["File"]],
+                    filtered_video_df[["File"]],
                     height=200,
                     hide_index=True
                 )
                 selected_video_path = st.selectbox(
-                    "Select a video", video_df["Path"], key="video_selectbox")
+                    "Select a video",
+                    filtered_video_df["Path"],
+                    key="video_selectbox"
+                )
 
                 # Boutons pour les opérations vidéo
                 col_video1, col_video2, col_video3 = st.columns(3)
