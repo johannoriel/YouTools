@@ -34,6 +34,7 @@ import os
 from streamlit_shortcuts import button
 from urllib.parse import unquote
 import random
+import time
 
 
 # Configure logging for debugging purposes
@@ -463,79 +464,114 @@ def display_video(filepath):
 # New function to generate animation CSS
 
 
-def generate_animation_css(animation_type):
+def generate_animation_css(animation_type, is_exit=False):
     css = "<style>\n"
 
-    # Define animation keyframes based on type
-    if animation_type == 'left':
-        css += """
-        @keyframes left {
-            0% { transform: translateX(-100%); opacity: 0; }
-            100% { transform: translateX(0); opacity: 1; }
-        }
+    if is_exit:
+        # Animations sortantes
+        if animation_type == 'left':
+            css += """
+            @keyframes exitLeft {
+                0% { transform: translateX(0); opacity: 1; }
+                100% { transform: translateX(-100%); opacity: 0; }
+            }
+            """
+        elif animation_type == 'right':
+            css += """
+            @keyframes exitRight {
+                0% { transform: translateX(0); opacity: 1; }
+                100% { transform: translateX(100%); opacity: 0; }
+            }
+            """
+        elif animation_type == 'top':
+            css += """
+            @keyframes exitTop {
+                0% { transform: translateY(0); opacity: 1; }
+                100% { transform: translateY(-100%); opacity: 0; }
+            }
+            """
+        elif animation_type == 'bottom':
+            css += """
+            @keyframes exitBottom {
+                0% { transform: translateY(0); opacity: 1; }
+                100% { transform: translateY(100%); opacity: 0; }
+            }
+            """
+        css += f"""
+        .stMain .stImage img, .stMain .stVideo, .stMain .stMarkdown > div,
+        .stMain div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
+            animation: exit{animation_type.capitalize()} 3s ease-in forwards;
+        }}
+        </style>
         """
-    elif animation_type == 'right':
-        css += """
-        @keyframes right {
-            0% { transform: translateX(100%); opacity: 0; }
-            100% { transform: translateX(0); opacity: 1; }
-        }
+    else:
+        if animation_type == 'left':
+            css += """
+            @keyframes left {
+                0% { transform: translateX(-100%); opacity: 0; }
+                100% { transform: translateX(0); opacity: 1; }
+            }
+            """
+        elif animation_type == 'right':
+            css += """
+            @keyframes right {
+                0% { transform: translateX(100%); opacity: 0; }
+                100% { transform: translateX(0); opacity: 1; }
+            }
+            """
+        elif animation_type == 'top':
+            css += """
+            @keyframes top {
+                0% { transform: translateY(-100%); opacity: 0; }
+                100% { transform: translateY(0); opacity: 1; }
+            }
+            """
+        elif animation_type == 'bottom':
+            css += """
+            @keyframes bottom {
+                0% { transform: translateY(100%); opacity: 0; }
+                100% { transform: translateY(0); opacity: 1; }
+            }
+            """
+        elif animation_type == 'zoomIn':
+            css += """
+            @keyframes zoomIn {
+                0% { transform: scale(0); opacity: 0; }
+                100% { transform: scale(1); opacity: 1; }
+            }
+            """
+        elif animation_type == 'zoomOut':
+            css += """
+            @keyframes zoomOut {
+                0% { transform: scale(1.5); opacity: 0; }
+                100% { transform: scale(1); opacity: 1; }
+            }
+            """
+        elif animation_type == 'rock':
+            css += """
+            @keyframes rock {
+                0% { transform: rotate(0deg); }
+                25% { transform: rotate(5deg); }
+                75% { transform: rotate(-5deg); }
+                100% { transform: rotate(0deg); }
+            }
+            """
+        # Apply animation to target elements with 3s duration
+        css += f"""
+        .stMain .stImage img, .stMain .stVideo, .stMain .stMarkdown > div {{
+            animation: {animation_type} 3s ease-out;
+        }}
+        .stMain div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
+            animation: {animation_type} 3s ease-out;
+        }}
+        </style>
         """
-    elif animation_type == 'top':
-        css += """
-        @keyframes top {
-            0% { transform: translateY(-100%); opacity: 0; }
-            100% { transform: translateY(0); opacity: 1; }
-        }
-        """
-    elif animation_type == 'bottom':
-        css += """
-        @keyframes bottom {
-            0% { transform: translateY(100%); opacity: 0; }
-            100% { transform: translateY(0); opacity: 1; }
-        }
-        """
-    elif animation_type == 'zoomIn':
-        css += """
-        @keyframes zoomIn {
-            0% { transform: scale(0); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-        """
-    elif animation_type == 'zoomOut':
-        css += """
-        @keyframes zoomOut {
-            0% { transform: scale(1.5); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-        """
-    elif animation_type == 'rock':
-        css += """
-        @keyframes rock {
-            0% { transform: rotate(0deg); }
-            25% { transform: rotate(5deg); }
-            75% { transform: rotate(-5deg); }
-            100% { transform: rotate(0deg); }
-        }
-        """
-
-    # Apply animation to target elements with 3s duration
-    css += f"""
-    .stMain .stImage img, .stMain .stVideo, .stMain .stMarkdown > div {{
-        animation: {animation_type} 3s ease-out;
-    }}
-    .stMain div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
-        animation: {animation_type} 3s ease-out;
-    }}
-
-    </style>
-    """
     return css
 
 # Display an item in the app (modified for vertical centering)
 
 
-def display_item(item, directories, is_presentation=False, in_group=False, animation_type=None):
+def display_item(item, directories, is_presentation=False, in_group=False, animation_type=None, is_exit=False):
     """
     Displays an item based on its type:
     - All items are wrapped in a single column with optional vertical centering in presentation mode.
@@ -547,9 +583,14 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
     - Web: Centered webpage screenshot with optional title.
     - Group: Two items in side-by-side columns, vertically centered if enabled.
     """
-    if is_presentation and animation_type:  # Only apply animation if explicitly specified
+    if is_presentation and animation_type:
         st.markdown(generate_animation_css(
-            animation_type), unsafe_allow_html=True)
+            animation_type, is_exit), unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <style>
+        </style>
+        """, unsafe_allow_html=True)
 
     vertical_center = st.session_state.get(
         'vertical_center', False) and is_presentation
@@ -559,10 +600,11 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
         col1, col2 = st.columns(2, vertical_alignment=alignment)
         with col1:
             display_item(item["items"][0], directories,
-                         is_presentation, True, animation_type)
+                         is_presentation, True, animation_type, is_exit)
         with col2:
             display_item(item["items"][1], directories,
-                         is_presentation, True, animation_type)
+                         is_presentation, True, animation_type, is_exit)
+
     else:
         # Wrap all non-group items in a single column for consistent vertical alignment
         (col,) = st.columns(1, vertical_alignment=alignment)
@@ -646,6 +688,12 @@ class EzprezPlugin(Plugin):
         """
         if 'presentation_mode' not in st.session_state:
             st.session_state['presentation_mode'] = False
+        if 'exit_animation' not in st.session_state:
+            # Stocke l'animation sortante en cours
+            st.session_state['exit_animation'] = None
+        if 'next_slide_ready' not in st.session_state:
+            # Indique si la prochaine slide est prête
+            st.session_state['next_slide_ready'] = False
 
         if not st.session_state['presentation_mode']:
             st.header(t("ezprez_header"))
@@ -705,21 +753,25 @@ class EzprezPlugin(Plugin):
                 col7, col8 = st.columns(2)
                 with col7:
                     button("Slide Left", "Ctrl+ArrowLeft", lambda: st.session_state.update({
-                        'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                        'current_animation': 'left'
+                        'exit_animation': 'left',
+                        'next_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                        'next_slide_ready': False
                     }))
                     button("Slide Up", "Ctrl+ArrowUp", lambda: st.session_state.update({
-                        'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                        'current_animation': 'top'
+                        'exit_animation': 'top',
+                        'next_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                        'next_slide_ready': False
                     }))
                 with col8:
                     button("Slide Right", "Ctrl+ArrowRight", lambda: st.session_state.update({
-                        'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                        'current_animation': 'right'
+                        'exit_animation': 'right',
+                        'next_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                        'next_slide_ready': False
                     }))
                     button("Slide Down", "Ctrl+ArrowDown", lambda: st.session_state.update({
-                        'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                        'current_animation': 'bottom'
+                        'exit_animation': 'bottom',
+                        'next_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                        'next_slide_ready': False
                     }))
 
                 # Existing presentation controls (green background, vertical center, font size)
@@ -771,7 +823,24 @@ class EzprezPlugin(Plugin):
                 st.session_state['current_slide'] = 0
 
             current = st.session_state['current_slide']
-            if slides:
+
+            if st.session_state['exit_animation'] and not st.session_state['next_slide_ready']:
+                # Afficher la slide actuelle avec l'animation sortante
+                display_item(slides[current], directories, is_presentation=True,
+                             animation_type=st.session_state['exit_animation'], is_exit=True)
+                # Simuler la fin de l'animation (immédiat dans Streamlit, pas de vrai délai)
+                st.session_state['next_slide_ready'] = True
+                time.sleep(3)
+                st.rerun()  # Forcer un rerendu pour passer à l'étape suivante
+            elif st.session_state['next_slide_ready']:
+                # Passer à la slide suivante sans animation
+                st.session_state['current_slide'] = st.session_state['next_slide']
+                st.session_state['exit_animation'] = None
+                st.session_state['next_slide_ready'] = False
+                display_item(slides[st.session_state['current_slide']],
+                             directories, is_presentation=True, animation_type=None)
+            else:
+                # Affichage normal avec animation entrante si spécifiée
                 animation_type = st.session_state.get('current_animation')
                 display_item(slides[current], directories,
                              is_presentation=True, animation_type=animation_type)
