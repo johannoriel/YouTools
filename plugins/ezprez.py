@@ -463,38 +463,34 @@ def display_video(filepath):
 # New function to generate animation CSS
 
 
-def generate_animation_css(animation_type=None):
-    if animation_type is None:
-        animation_type = random.choice(
-            ['left', 'right', 'top', 'bottom', 'zoomIn', 'zoomOut', 'rock'])
-
+def generate_animation_css(animation_type):
     css = "<style>\n"
 
     # Define animation keyframes based on type
     if animation_type == 'left':
         css += """
-        @keyframes slideInFromLeft {
+        @keyframes left {
             0% { transform: translateX(-100%); opacity: 0; }
             100% { transform: translateX(0); opacity: 1; }
         }
         """
     elif animation_type == 'right':
         css += """
-        @keyframes slideInFromRight {
+        @keyframes right {
             0% { transform: translateX(100%); opacity: 0; }
             100% { transform: translateX(0); opacity: 1; }
         }
         """
     elif animation_type == 'top':
         css += """
-        @keyframes slideInFromTop {
+        @keyframes top {
             0% { transform: translateY(-100%); opacity: 0; }
             100% { transform: translateY(0); opacity: 1; }
         }
         """
     elif animation_type == 'bottom':
         css += """
-        @keyframes slideInFromBottom {
+        @keyframes bottom {
             0% { transform: translateY(100%); opacity: 0; }
             100% { transform: translateY(0); opacity: 1; }
         }
@@ -523,11 +519,15 @@ def generate_animation_css(animation_type=None):
         }
         """
 
-    # Apply animation to target elements
+    # Apply animation to target elements with 3s duration
     css += f"""
-    .stImage img, .stVideo, .stMarkdown > div, .myTweet {{
-        animation: {animation_type if animation_type != 'rock' else 'rock'} 3s ease-out;
+    .stMain .stImage img, .stMain .stVideo, .stMain .stMarkdown > div {{
+        animation: {animation_type} 3s ease-out;
     }}
+    .stMain div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
+        animation: {animation_type} 3s ease-out;
+    }}
+
     </style>
     """
     return css
@@ -547,7 +547,7 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
     - Web: Centered webpage screenshot with optional title.
     - Group: Two items in side-by-side columns, vertically centered if enabled.
     """
-    if is_presentation:
+    if is_presentation and animation_type:  # Only apply animation if explicitly specified
         st.markdown(generate_animation_css(
             animation_type), unsafe_allow_html=True)
 
@@ -646,7 +646,6 @@ class EzprezPlugin(Plugin):
         """
         if 'presentation_mode' not in st.session_state:
             st.session_state['presentation_mode'] = False
-            st.session_state['last_animation'] = None
 
         if not st.session_state['presentation_mode']:
             st.header(t("ezprez_header"))
@@ -697,30 +696,30 @@ class EzprezPlugin(Plugin):
                 # New animation controls
                 st.subheader("Animation Controls")
                 button("Random Animation Next", "PageUp", lambda: st.session_state.update({
-                    'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                    'last_animation': None  # Random animation
+                    # 'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                    'current_animation': random.choice(['left', 'right', 'top', 'bottom', 'zoomIn', 'zoomOut'])
                 }))
                 button("Rock Animation", "Ctrl+A", lambda: st.session_state.update({
-                    'last_animation': 'rock'
+                    'current_animation': 'rock'
                 }))
                 col7, col8 = st.columns(2)
                 with col7:
                     button("Slide Left", "Ctrl+ArrowLeft", lambda: st.session_state.update({
-                        'current_slide': max(0, st.session_state['current_slide'] - 1),
-                        'last_animation': 'left'
+                        'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
+                        'current_animation': 'left'
                     }))
                     button("Slide Up", "Ctrl+ArrowUp", lambda: st.session_state.update({
                         'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                        'last_animation': 'top'
+                        'current_animation': 'top'
                     }))
                 with col8:
                     button("Slide Right", "Ctrl+ArrowRight", lambda: st.session_state.update({
                         'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                        'last_animation': 'right'
+                        'current_animation': 'right'
                     }))
                     button("Slide Down", "Ctrl+ArrowDown", lambda: st.session_state.update({
                         'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                        'last_animation': 'bottom'
+                        'current_animation': 'bottom'
                     }))
 
                 # Existing presentation controls (green background, vertical center, font size)
@@ -773,9 +772,10 @@ class EzprezPlugin(Plugin):
 
             current = st.session_state['current_slide']
             if slides:
-                animation_type = st.session_state.get('last_animation')
+                animation_type = st.session_state.get('current_animation')
                 display_item(slides[current], directories,
                              is_presentation=True, animation_type=animation_type)
+                st.session_state['current_animation'] = None
 
 
 if __name__ == "__main__":
