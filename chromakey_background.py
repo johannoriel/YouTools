@@ -125,7 +125,7 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
     final_clip_no_audio = VideoFileClip(output_path)
 
     # Ajout de la piste audio au clip vidéo
-    final_clip = final_clip_no_audio.set_audio(audio)
+    final_clip = final_clip_no_audio.with_audio(audio)
 
     # Écriture du clip final avec l'audio sur le disque, utilisant le fichier temporaire
     final_clip.write_videofile(
