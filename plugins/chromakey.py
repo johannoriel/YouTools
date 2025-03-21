@@ -30,6 +30,7 @@ translations["fr"].update({
     "chromakey_warning_message": "Veuillez sélectionner une vidéo et un fond."
 })
 
+
 class ChromakeyPlugin(Plugin):
     def get_config_fields(self):
         return {
@@ -49,7 +50,8 @@ class ChromakeyPlugin(Plugin):
         updated_config = {}
         updated_config["background_directory"] = st.text_input(
             t("chromakey_background_dir_label"),
-            value=config.get("background_directory", "/home/joriel/Vidéos/Backgrounds")
+            value=config.get("background_directory",
+                             "/home/joriel/Vidéos/Backgrounds")
         )
         updated_config["default_target_color"] = st.text_input(
             "Couleur cible par défaut (format hexadécimal)",
@@ -68,10 +70,13 @@ class ChromakeyPlugin(Plugin):
 
         original_files, trimed_files, _, _ = list_video_files(work_directory)
         video_files = original_files + trimed_files
-        background_files = [f for f in os.listdir(background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+        background_files = [f for f in os.listdir(
+            background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
 
-        selected_video = st.selectbox(t("chromakey_select_video_label"), [file for file, _, _ in video_files])
-        selected_background = st.selectbox(t("chromakey_select_background_label"), background_files)
+        selected_video = st.selectbox(t("chromakey_select_video_label"), [
+                                      file for file, _, _ in video_files])
+        selected_background = st.selectbox(
+            t("chromakey_select_background_label"), background_files)
 
         # Extraire la première image de la vidéo sélectionnée pour la prévisualisation
         video_path = os.path.join(work_directory, selected_video)
@@ -80,7 +85,8 @@ class ChromakeyPlugin(Plugin):
         if ret:
             # Convertir l'image de BGR (OpenCV) à RGB pour l'affichage dans Streamlit
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            st.image(frame_rgb, caption="Première image de la vidéo", use_column_width=True)
+            st.image(frame_rgb, caption="Première image de la vidéo",
+                     use_container_width=True)
         cap.release()
 
         # Sélecteur de couleur avec la valeur par défaut de la configuration
@@ -89,22 +95,27 @@ class ChromakeyPlugin(Plugin):
             "Choisissez la couleur du fond à remplacer",
             default_target_color  # Utiliser la couleur par défaut de la configuration
         )
-        st.write(f"Valeur hexadécimale de la couleur sélectionnée : `{target_color_rgb}`")
+        st.write(
+            f"Valeur hexadécimale de la couleur sélectionnée : `{target_color_rgb}`")
 
         # Convertir la couleur hexadécimale en RGB
-        target_color_rgb = [int(target_color_rgb.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)]
+        target_color_rgb = [int(target_color_rgb.lstrip('#')[
+                                i:i+2], 16) for i in (0, 2, 4)]
 
         if st.button(t("chromakey_apply_button")):
             if selected_video and selected_background:
-                background_path = os.path.join(background_directory, selected_background)
+                background_path = os.path.join(
+                    background_directory, selected_background)
                 result_filename = f"chroma_{selected_video.replace('outfile_', '')}"
                 result_path = os.path.join(work_directory, result_filename)
 
                 with st.spinner(t("chromakey_processing_spinner")):
                     try:
                         # Passer la couleur cible à la fonction replace_background
-                        replace_background(video_path, background_path, result_path, target_color_rgb)
-                        st.success(f"{t('chromakey_success_message')}{result_filename}")
+                        replace_background(
+                            video_path, background_path, result_path, target_color_rgb)
+                        st.success(
+                            f"{t('chromakey_success_message')}{result_filename}")
                         st.rerun()
                     except Exception as e:
                         st.error(f"{t('chromakey_error_message')}{str(e)}")
