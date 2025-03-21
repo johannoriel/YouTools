@@ -29,6 +29,7 @@ translations["en"].update({
     "movied_replace_video": "Replace with Video",
     "movied_generate": "Generate Video",
     "movied_model_label": "Transcription Model",
+    "movied_replace_video_keep_audio": "Replace Video (Keep Original Audio)",
 })
 
 translations["fr"].update({
@@ -52,6 +53,7 @@ translations["fr"].update({
     "movied_replace_video": "Remplacer par une vidéo",
     "movied_generate": "Générer la vidéo",
     "movied_model_label": "Modèle de transcription",
+    "movied_replace_video_keep_audio": "Remplacer la vidéo (Garder l'audio original)",
 })
 
 
@@ -199,8 +201,7 @@ class MoviedPlugin(Plugin):
             try:
                 image_df, video_df = self.list_media_files()
             except ValueError as e:
-                st.error(
-                    f"Error unpacking media files: {e}. Expected 2 values from list_media_files.")
+                st.error(f"Error unpacking media files: {e}")
                 return
 
             if image_df.empty and video_df.empty:
@@ -209,7 +210,7 @@ class MoviedPlugin(Plugin):
                 return
 
             st.subheader("Media Selection")
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)  # Réduit à 2 colonnes au lieu de 3
 
             with col1:
                 st.write("Images for Replacement")
@@ -227,42 +228,43 @@ class MoviedPlugin(Plugin):
                         operation = f"replace_image {start_time} {end_time} {selected_image_path}"
                         self.add_to_operations(operation)
                     else:
-                        st.warning(
-                            "Please select an image before clicking 'Replace with Image'.")
+                        st.warning("Please select an image first.")
 
             with col2:
-                st.write("Videos for Insertion")
+                st.write("Video Operations")
                 st.dataframe(
                     video_df[["File"]],
                     height=200,
                     hide_index=True
                 )
-                selected_insert_video_path = st.selectbox(
-                    "Select a video to insert", video_df["Path"], key="insert_video_selectbox")
-                if st.button(t("movied_insert_video"), key="insert_video_btn"):
-                    if selected_insert_video_path:
-                        operation = f"insert_video {start_time} {selected_insert_video_path}"
-                        self.add_to_operations(operation)
-                    else:
-                        st.warning(
-                            "Please select a video before clicking 'Insert Video'.")
+                selected_video_path = st.selectbox(
+                    "Select a video", video_df["Path"], key="video_selectbox")
 
-            with col3:
-                st.write("Videos for Replacement")
-                st.dataframe(
-                    video_df[["File"]],
-                    height=200,
-                    hide_index=True
-                )
-                selected_replace_video_path = st.selectbox(
-                    "Select a video to replace", video_df["Path"], key="replace_video_selectbox")
-                if st.button(t("movied_replace_video"), key="replace_video_btn"):
-                    if selected_replace_video_path:
-                        operation = f"replace_video {start_time} {end_time} {selected_replace_video_path}"
-                        self.add_to_operations(operation)
-                    else:
-                        st.warning(
-                            "Please select a video before clicking 'Replace with Video'.")
+                # Boutons pour les opérations vidéo
+                col_video1, col_video2, col_video3 = st.columns(3)
+                with col_video1:
+                    if st.button(t("movied_insert_video"), key="insert_video_btn"):
+                        if selected_video_path:
+                            operation = f"insert_video {start_time} {selected_video_path}"
+                            self.add_to_operations(operation)
+                        else:
+                            st.warning("Please select a video first.")
+
+                with col_video2:
+                    if st.button(t("movied_replace_video"), key="replace_video_btn"):
+                        if selected_video_path:
+                            operation = f"replace_video {start_time} {end_time} {selected_video_path}"
+                            self.add_to_operations(operation)
+                        else:
+                            st.warning("Please select a video first.")
+
+                with col_video3:
+                    if st.button(t("movied_replace_video_keep_audio"), key="replace_video_keep_audio_btn"):
+                        if selected_video_path:
+                            operation = f"replace_video_keep_audio {start_time} {end_time} {selected_video_path}"
+                            self.add_to_operations(operation)
+                        else:
+                            st.warning("Please select a video first.")
 
             operations = st.text_area(t("movied_operations"), value=st.session_state.get(
                 "operations", ""), key="operations_area")
@@ -397,6 +399,43 @@ class MoviedPlugin(Plugin):
                             subtitles_df = self.adjust_subtitles(
                                 subtitles_df, end_time, duration_change)
                             duration_offset += duration_change
+
+                        elif cmd == "replace_video_keep_audio":
+                            start_time, end_time, video_path_replace = parts[1], parts[2], " ".join(
+                                parts[3:])
+                            start_sec = self.parse_timecode(
+                                start_time) + duration_offset
+                            end_sec = self.parse_timecode(
+                                end_time) + duration_offset
+                            duration = end_sec - start_sec
+
+                            # Charger la nouvelle vidéo et récupérer l'audio original
+                            replace_clip = VideoFileClip(video_path_replace)
+                            original_audio = main_clip.subclip(
+                                start_sec, end_sec).audio
+
+                            # Ajuster la durée de la nouvelle vidéo
+                            if replace_clip.duration > duration:
+                                replace_clip = replace_clip.subclip(
+                                    0, duration)
+                            # Si plus court, on garde la durée réelle
+
+                            # Redimensionner et appliquer l'audio original
+                            replace_clip = replace_clip.resized(target_size)
+                            replace_clip = replace_clip.set_audio(
+                                original_audio)
+
+                            clips = [
+                                main_clip.subclip(0, start_sec),
+                                replace_clip,
+                                main_clip.subclip(end_sec)
+                            ]
+                            col1, _ = st.columns([1, 3])
+                            with col1:
+                                st.video(
+                                    video_path_replace, caption=f"Using video (keeping original audio): {video_path_replace}", width=100)
+                            main_clip = concatenate_videoclips(clips)
+                            # Pas d'ajustement des sous-titres car la durée reste la même
 
                 output_path = os.path.splitext(video_path)[0] + "_edited.mp4"
                 main_clip.write_videofile(
