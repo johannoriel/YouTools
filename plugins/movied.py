@@ -1,3 +1,5 @@
+from tkinter.constants import VERTICAL
+from tarfile import version
 from enum import verify
 import base64
 from global_vars import translations, t
@@ -442,7 +444,7 @@ class MoviedPlugin(Plugin):
                     for op in operations.split("\n"):
                         if not op.strip():
                             continue
-                        parts = op.split()
+                        parts = op.split(maxsplit=5)
                         cmd = parts[0]
                         st.write(f"Processing: {op}")
 
@@ -561,7 +563,7 @@ class MoviedPlugin(Plugin):
                             main_clip = concatenate_videoclips(clips)
                             # Pas d'ajustement des sous-titres car la durée reste la même
                         elif cmd == "addtext":
-                            # Pas de [1:] pour le texte
+                            # Texte complet
                             start_time, end_time, animation_type, anim_duration, text = parts[
                                 1], parts[2], parts[3], parts[4], parts[5]
                             start_sec = self.parse_timecode(
@@ -583,19 +585,22 @@ class MoviedPlugin(Plugin):
                             # Convertir les \\ en sauts de ligne pour le texte
                             text_content = text.replace("\\", "\n")
 
-                            # Créer le clip texte
+                            # Créer le clip texte en gras
                             txt_clip = TextClip(
                                 text=text_content,
                                 font=font,
                                 font_size=font_size,
                                 color="white",
                                 method="caption",
-                                # 80% de la largeur
-                                size=(int(target_size[0] * 0.5), None),
+                                # 80% de la largeur max
+                                size=(int(target_size[0] * 0.8), None),
+                                stroke_color="black",  # Contour noir pour simuler le gras
+                                stroke_width=1,  # Épaisseur du contour pour effet gras
+                                vertical_align="center"
                             ).with_duration(duration)
 
-                            # Créer une boîte noire derrière le texte (légèrement plus grande que le texte)
-                            text_padding = 20  # Marge autour du texte
+                            # Créer une boîte noire basée sur la taille du texte avec une petite marge
+                            text_padding = 10  # Marge de 10 pixels autour du texte
                             text_box = ColorClip(
                                 size=(txt_clip.w + 2 * text_padding,
                                       txt_clip.h + 2 * text_padding),
