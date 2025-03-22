@@ -40,9 +40,9 @@ def find_latest_video(directory, exclude='output.mp4'):
 
 
 # Augmentation de la tolérance pour plus de flexibilité
-def rgb_to_hsv_range(color_rgb, tolerance_hue=5, tolerance_sat=20, tolerance_val=20):
+def rgb_to_hsv_range(color_rgb, tolerance_hue=7, tolerance_sat=25, tolerance_val=25):
     """
-    Convert RGB color to HSV and define a strict range for pure green #00FF00.
+    Convert RGB color to HSV and define a range for pure green #00FF00 with slightly wider tolerances.
     """
     color_hsv = cv2.cvtColor(np.uint8([[color_rgb]]), cv2.COLOR_RGB2HSV)[0][0]
     print(f"Dominant color HSV: {color_hsv}")
@@ -59,7 +59,7 @@ def rgb_to_hsv_range(color_rgb, tolerance_hue=5, tolerance_sat=20, tolerance_val
     return lower, upper
 
 
-def suppress_color_spill(frame, mask, target_hue=60, hue_shift=40):
+def suppress_color_spill(frame, mask, target_hue=60, hue_shift=50):
     """
     Suppress green color spill by shifting the hue of affected pixels.
     """
@@ -67,7 +67,7 @@ def suppress_color_spill(frame, mask, target_hue=60, hue_shift=40):
     hue = hsv[:, :, 0]
 
     # Wider range to catch faint green tints
-    spill_mask = cv2.inRange(hue, target_hue - 20, target_hue + 20)
+    spill_mask = cv2.inRange(hue, target_hue - 25, target_hue + 25)
     spill_mask = cv2.bitwise_and(spill_mask, cv2.bitwise_not(mask))
 
     hsv[:, :, 0] = np.where(spill_mask > 0, (hue + hue_shift) % 180, hue)
@@ -79,9 +79,9 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
         print("Aucune vidéo admissible trouvée.")
         return
 
-    # Use a strict range for pure green #00FF00
+    # Use a slightly wider range to capture anti-aliased edge pixels
     lower_color, upper_color = rgb_to_hsv_range(
-        color_to_replace, tolerance_hue=5, tolerance_sat=20, tolerance_val=20
+        color_to_replace, tolerance_hue=7, tolerance_sat=25, tolerance_val=25
     )
     print(f"Color range HSV: {lower_color}, {upper_color}")
 
@@ -115,10 +115,16 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
 
         # Post-process the mask to capture green edges and clean up noise
         kernel = np.ones((3, 3), np.uint8)
-        # More aggressive dilation to capture anti-aliased green edges
-        mask = cv2.dilate(mask, kernel, iterations=2)
+        # More aggressive dilation to capture green edges, especially on the right
+        mask = cv2.dilate(mask, kernel, iterations=3)
         # Light erosion to remove small noise without shrinking too much
         mask = cv2.erode(mask, kernel, iterations=1)
+
+        # Directional dilation to target right-side edges
+        kernel_right = np.array([[0, 0, 1],
+                                 [0, 0, 1],
+                                 [0, 0, 1]], dtype=np.uint8)
+        mask = cv2.dilate(mask, kernel_right, iterations=2)
 
         # Create inverse mask
         mask_inv = cv2.bitwise_not(mask)
