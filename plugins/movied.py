@@ -583,7 +583,7 @@ class MoviedPlugin(Plugin):
                             # Convertir les \\ en sauts de ligne pour le texte
                             text_content = text.replace("\\", "\n")
 
-                            # Créer le clip texte
+                            # Créer le clip texte avec des dimensions explicites
                             txt_clip = TextClip(
                                 text=text_content,
                                 font=font,
@@ -592,30 +592,29 @@ class MoviedPlugin(Plugin):
                                 method="caption",
                                 # 80% de la largeur
                                 size=(int(target_size[0] * 1.8), None),
-                                # horizontal_align="center",
-                                vertical_align="center",
-                            )
+                            ).with_duration(duration)  # Définir la durée immédiatement
 
                             # Animation : glisser depuis la gauche pendant anim_duration_sec, puis rester fixe
                             if animation_type == "fromLeft":
-                                # Animation pendant anim_duration_sec
-                                animating_clip = txt_clip.with_position(
-                                    lambda t: (-target_size[0] + (target_size[0] * 2 * t / anim_duration_sec)
-                                               if t < anim_duration_sec else target_size[0] / 2, "center")
-                                ).with_duration(anim_duration_sec if anim_duration_sec < duration else duration)
+                                def position_function(t):
+                                    if t < anim_duration_sec:
+                                        # De hors écran à gauche (-largeur) vers le centre
+                                        x = -txt_clip.w + \
+                                            (txt_clip.w +
+                                             target_size[0] / 2) * (t / anim_duration_sec)
+                                    else:
+                                        # Centré horizontalement
+                                        x = (target_size[0] - txt_clip.w) / 2
+                                    # Centré verticalement
+                                    y = (target_size[1] - txt_clip.h) / 2
+                                    return (x, y)
 
-                                # Clip statique après l'animation
-                                if anim_duration_sec < duration:
-                                    static_clip = txt_clip.with_position(
-                                        ("center", "center")).with_duration(duration - anim_duration_sec)
-                                    txt_clip = concatenate_videoclips(
-                                        [animating_clip, static_clip])
-                                else:
-                                    txt_clip = animating_clip
+                                txt_clip = txt_clip.with_position(
+                                    position_function)
 
                             # Combiner le fond et le texte
                             animated_text_clip = CompositeVideoClip(
-                                [background, txt_clip])
+                                [background, txt_clip], size=target_size)
                             if audio_clip:
                                 animated_text_clip = animated_text_clip.with_audio(
                                     audio_clip)
