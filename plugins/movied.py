@@ -384,7 +384,7 @@ class MoviedPlugin(Plugin):
                 if text_input:
                     # Convertir les sauts de ligne en \\
                     text_command = text_input.replace("\n", "\\")
-                    operation = f"addtext {start_time} {end_time} fromLeft 1s #{text_command}"
+                    operation = f"addtext {start_time} {end_time} fromLeft 1s {text_command}"
                     self.add_to_operations(operation)
                 else:
                     st.warning("Please enter text first.")
@@ -561,9 +561,9 @@ class MoviedPlugin(Plugin):
                             main_clip = concatenate_videoclips(clips)
                             # Pas d'ajustement des sous-titres car la durée reste la même
                         elif cmd == "addtext":
-                            # Enlever le #
+                            # Pas de [1:] pour le texte
                             start_time, end_time, animation_type, anim_duration, text = parts[
-                                1], parts[2], parts[3], parts[4], parts[5][1:]
+                                1], parts[2], parts[3], parts[4], parts[5]
                             start_sec = self.parse_timecode(
                                 start_time) + duration_offset
                             end_sec = self.parse_timecode(
@@ -576,14 +576,14 @@ class MoviedPlugin(Plugin):
                             audio_clip = main_clip.subclipped(
                                 start_sec, end_sec).audio
 
-                            # Créer un fond noir
-                            background = ColorClip(
-                                size=target_size, color=(0, 0, 0), duration=duration)
+                            # Créer un fond vert pour le chromakey (#00FF00)
+                            background = ColorClip(size=target_size, color=(
+                                0, 255, 0), duration=duration)
 
                             # Convertir les \\ en sauts de ligne pour le texte
                             text_content = text.replace("\\", "\n")
 
-                            # Créer le clip texte avec des dimensions explicites
+                            # Créer le clip texte
                             txt_clip = TextClip(
                                 text=text_content,
                                 font=font,
@@ -591,17 +591,26 @@ class MoviedPlugin(Plugin):
                                 color="white",
                                 method="caption",
                                 # 80% de la largeur
-                                size=(int(target_size[0] * 1.8), None),
-                            ).with_duration(duration)  # Définir la durée immédiatement
+                                size=(int(target_size[0] * 0.5), None),
+                            ).with_duration(duration)
 
-                            # Animation : glisser depuis la gauche pendant anim_duration_sec, puis rester fixe
+                            # Créer une boîte noire derrière le texte (légèrement plus grande que le texte)
+                            text_padding = 20  # Marge autour du texte
+                            text_box = ColorClip(
+                                size=(txt_clip.w + 2 * text_padding,
+                                      txt_clip.h + 2 * text_padding),
+                                color=(0, 0, 0),
+                                duration=duration
+                            )
+
+                            # Animation : glisser depuis la gauche pendant anim_duration_sec, puis rester centré
                             if animation_type == "fromLeft":
                                 def position_function(t):
                                     if t < anim_duration_sec:
-                                        # De hors écran à gauche (-largeur) vers le centre
+                                        # De hors écran à gauche vers le centre
                                         x = -txt_clip.w + \
-                                            (txt_clip.w +
-                                             target_size[0] / 2) * (t / anim_duration_sec)
+                                            (target_size[0] / 2 + txt_clip.w /
+                                             2) * (t / anim_duration_sec)
                                     else:
                                         # Centré horizontalement
                                         x = (target_size[0] - txt_clip.w) / 2
@@ -609,12 +618,19 @@ class MoviedPlugin(Plugin):
                                     y = (target_size[1] - txt_clip.h) / 2
                                     return (x, y)
 
+                                # Appliquer la même position au texte et à la boîte noire
                                 txt_clip = txt_clip.with_position(
                                     position_function)
+                                text_box = text_box.with_position(
+                                    lambda t: (position_function(
+                                        t)[0] - text_padding, position_function(t)[1] - text_padding)
+                                )
 
-                            # Combiner le fond et le texte
+                            # Combiner le fond vert, la boîte noire et le texte
                             animated_text_clip = CompositeVideoClip(
-                                [background, txt_clip], size=target_size)
+                                [background, text_box, txt_clip],
+                                size=target_size
+                            )
                             if audio_clip:
                                 animated_text_clip = animated_text_clip.with_audio(
                                     audio_clip)
