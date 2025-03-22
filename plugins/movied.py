@@ -1,3 +1,4 @@
+from enum import verify
 import base64
 from global_vars import translations, t
 from app import Plugin
@@ -34,6 +35,11 @@ translations["en"].update({
     "movied_filter_media_dir": "Filter by Media Directory",
     "movied_all_directories": "All Directories",
     "movied_video_thumbnail": "Thumbnail",
+    "movied_font_label": "Font",
+    "movied_font_size_label": "Font Size",
+    "movied_animate_text": "Animate Text",
+    "movied_text_input": "Enter text (use \\ for line breaks)",
+    "movied_text_operations": "Text Operations",
 })
 
 translations["fr"].update({
@@ -61,6 +67,11 @@ translations["fr"].update({
     "movied_filter_media_dir": "Filtrer par répertoire de médias",
     "movied_all_directories": "Tous les répertoires",
     "movied_video_thumbnail": "Vignette",
+    "movied_font_label": "Police",
+    "movied_font_size_label": "Taille de la police",
+    "movied_animate_text": "Animer le texte",
+    "movied_text_input": "Entrez le texte (utilisez \\ pour les sauts de ligne)",
+    "movied_text_operations": "Opérations de texte",
 })
 
 
@@ -97,10 +108,22 @@ class MoviedPlugin(Plugin):
             thumbnail_size = st.selectbox(
                 "Thumbnail Size",
                 ["small", "medium", "large"],
-                index=1,  # "medium" par défaut
+                index=1,
                 key="thumbnail_size"
             )
-            return selected_model, thumbnail_size
+            font = st.selectbox(
+                t("movied_font_label"),
+                ["Arial", "Times New Roman", "Courier New",
+                    "Verdana"],  # Exemples, ajustables
+                index=0,
+                key="font_select"
+            )
+            font_size = st.slider(
+                t("movied_font_size_label"),
+                20, 100, 40, step=5,  # De 20 à 100, défaut 40
+                key="font_size_slider"
+            )
+            return selected_model, thumbnail_size, font, font_size
 
     def list_videos(self):
         video_extensions = [".mp4", ".mkv", ".avi"]
@@ -238,7 +261,7 @@ class MoviedPlugin(Plugin):
         video_df = st.session_state["media_thumbnails"]["videos"]
         return image_df, video_df
 
-    def handle_operations(self, start_time, end_time, video_path, vtt_path, thumbnail_size):
+    def handle_operations(self, start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size):
         if start_time and end_time:
             try:
                 image_df, video_df = self.list_media_files()
@@ -354,12 +377,25 @@ class MoviedPlugin(Plugin):
                         else:
                             st.warning("Please select a video first.")
 
+            st.write(t("movied_text_operations"))
+            text_input = st.text_area(
+                t("movied_text_input"), height=100, key="text_input")
+            if st.button(t("movied_animate_text"), key="animate_text_btn"):
+                if text_input:
+                    # Convertir les sauts de ligne en \\
+                    text_command = text_input.replace("\n", "\\")
+                    operation = f"addtext {start_time} {end_time} fromLeft 1s #{text_command}"
+                    self.add_to_operations(operation)
+                else:
+                    st.warning("Please enter text first.")
+
             operations = st.text_area(t("movied_operations"), value=st.session_state.get(
                 "operations", ""), key="operations_area")
             st.session_state["operations"] = operations
 
             if st.button(t("movied_generate"), key="generate_btn") and operations:
-                self.execute_operations(video_path, vtt_path, operations)
+                self.execute_operations(
+                    video_path, vtt_path, operations, font, font_size)
 
     def add_to_operations(self, operation):
         current_ops = st.session_state.get("operations", "")
@@ -392,7 +428,7 @@ class MoviedPlugin(Plugin):
                                 "End"] = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
         return subtitles_df
 
-    def execute_operations(self, video_path, vtt_path, operations):
+    def execute_operations(self, video_path, vtt_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
             try:
                 main_clip = VideoFileClip(video_path)
@@ -524,6 +560,73 @@ class MoviedPlugin(Plugin):
                                     video_path_replace)
                             main_clip = concatenate_videoclips(clips)
                             # Pas d'ajustement des sous-titres car la durée reste la même
+                        elif cmd == "addtext":
+                            # Enlever le #
+                            start_time, end_time, animation_type, anim_duration, text = parts[
+                                1], parts[2], parts[3], parts[4], parts[5][1:]
+                            start_sec = self.parse_timecode(
+                                start_time) + duration_offset
+                            end_sec = self.parse_timecode(
+                                end_time) + duration_offset
+                            duration = end_sec - start_sec
+                            # Enlever 's' et convertir en float
+                            anim_duration_sec = float(anim_duration[:-1])
+
+                            # Extraire l'audio original
+                            audio_clip = main_clip.subclipped(
+                                start_sec, end_sec).audio
+
+                            # Créer un fond noir
+                            background = ColorClip(
+                                size=target_size, color=(0, 0, 0), duration=duration)
+
+                            # Convertir les \\ en sauts de ligne pour le texte
+                            text_content = text.replace("\\", "\n")
+
+                            # Créer le clip texte
+                            txt_clip = TextClip(
+                                text=text_content,
+                                font=font,
+                                font_size=font_size,
+                                color="white",
+                                method="caption",
+                                # 80% de la largeur
+                                size=(int(target_size[0] * 1.8), None),
+                                # horizontal_align="center",
+                                vertical_align="center",
+                            )
+
+                            # Animation : glisser depuis la gauche pendant anim_duration_sec, puis rester fixe
+                            if animation_type == "fromLeft":
+                                # Animation pendant anim_duration_sec
+                                animating_clip = txt_clip.with_position(
+                                    lambda t: (-target_size[0] + (target_size[0] * 2 * t / anim_duration_sec)
+                                               if t < anim_duration_sec else target_size[0] / 2, "center")
+                                ).with_duration(anim_duration_sec if anim_duration_sec < duration else duration)
+
+                                # Clip statique après l'animation
+                                if anim_duration_sec < duration:
+                                    static_clip = txt_clip.with_position(
+                                        ("center", "center")).with_duration(duration - anim_duration_sec)
+                                    txt_clip = concatenate_videoclips(
+                                        [animating_clip, static_clip])
+                                else:
+                                    txt_clip = animating_clip
+
+                            # Combiner le fond et le texte
+                            animated_text_clip = CompositeVideoClip(
+                                [background, txt_clip])
+                            if audio_clip:
+                                animated_text_clip = animated_text_clip.with_audio(
+                                    audio_clip)
+
+                            # Remplacer la section
+                            clips = [
+                                main_clip.subclipped(0, start_sec),
+                                animated_text_clip,
+                                main_clip.subclipped(end_sec)
+                            ]
+                            main_clip = concatenate_videoclips(clips)
 
                 output_path = os.path.splitext(video_path)[0] + "_edited.mp4"
                 main_clip.write_videofile(
@@ -545,7 +648,7 @@ class MoviedPlugin(Plugin):
             "movied_media_dirs", t("movied_media_dirs_default")).split("\n")
 
         self.setup_header()
-        selected_model, thumbnail_size = self.setup_controls()
+        selected_model, thumbnail_size, font, font_size = self.setup_controls()
 
         video_df = self.list_videos()
         if video_df.empty:
@@ -562,7 +665,7 @@ class MoviedPlugin(Plugin):
             video_path = video_df.iloc[selected_video["selection"]
                                        ["rows"][0]]["Full Path"]
             self.handle_operations(
-                start_time, end_time, video_path, vtt_path, thumbnail_size)
+                start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size)
 
 
 if __name__ == "__main__":
