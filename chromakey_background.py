@@ -40,103 +40,130 @@ def find_latest_video(directory, exclude='output.mp4'):
 
 
 # Augmentation de la tolérance pour plus de flexibilité
-def rgb_to_hsv_range(color_rgb, tolerance=10):
+def rgb_to_hsv_range(color_rgb, tolerance_hue=5, tolerance_sat=20, tolerance_val=20):
+    """
+    Convert RGB color to HSV and define a strict range for pure green #00FF00.
+    """
     color_hsv = cv2.cvtColor(np.uint8([[color_rgb]]), cv2.COLOR_RGB2HSV)[0][0]
-    print(f"Dominant color HSV : {color_hsv}")
+    print(f"Dominant color HSV: {color_hsv}")
 
-    # Ajustement des plages de saturation et de valeur basé sur la couleur détectée
-    # 40 de tolérance pour la saturation
-    lower_saturation = max(0, color_hsv[1] - 40)
-    upper_saturation = min(255, color_hsv[1] + 40)
-    lower_value = max(0, color_hsv[2] - 40)  # 40 de tolérance pour la valeur
-    upper_value = min(255, color_hsv[2] + 40)
+    lower_saturation = max(0, color_hsv[1] - tolerance_sat)
+    upper_saturation = min(255, color_hsv[1] + tolerance_sat)
+    lower_value = max(0, color_hsv[2] - tolerance_val)
+    upper_value = min(255, color_hsv[2] + tolerance_val)
 
-    # Calcul des plages de teinte, saturation et valeur
-    lower = np.array([max(0, color_hsv[0] - tolerance),
+    lower = np.array([max(0, color_hsv[0] - tolerance_hue),
                      lower_saturation, lower_value])
-    upper = np.array([min(179, color_hsv[0] + tolerance),
+    upper = np.array([min(179, color_hsv[0] + tolerance_hue),
                      upper_saturation, upper_value])
     return lower, upper
 
 
-def chroma_key(foreground_path, background_path, output_path, color_to_replace=[0, 255, 0]):
+def suppress_color_spill(frame, mask, target_hue=60, hue_shift=40):
+    """
+    Suppress green color spill by shifting the hue of affected pixels.
+    """
+    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+    hue = hsv[:, :, 0]
 
+    # Wider range to catch faint green tints
+    spill_mask = cv2.inRange(hue, target_hue - 20, target_hue + 20)
+    spill_mask = cv2.bitwise_and(spill_mask, cv2.bitwise_not(mask))
+
+    hsv[:, :, 0] = np.where(spill_mask > 0, (hue + hue_shift) % 180, hue)
+    return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+
+def chroma_key(foreground_path, background_path, output_path, color_to_replace=[0, 255, 0]):
     if not foreground_path:
         print("Aucune vidéo admissible trouvée.")
         return
 
-    lower_color, upper_color = rgb_to_hsv_range(color_to_replace)
-    print(f"Color range HSV : {lower_color}, {upper_color}")
+    # Use a strict range for pure green #00FF00
+    lower_color, upper_color = rgb_to_hsv_range(
+        color_to_replace, tolerance_hue=5, tolerance_sat=20, tolerance_val=20
+    )
+    print(f"Color range HSV: {lower_color}, {upper_color}")
 
-    # Chargement des clips vidéo
+    # Load video clips
     background_clip = VideoFileClip(background_path)
     foreground_clip = VideoFileClip(foreground_path)
-
-    # Sauvegarde de la piste audio du clip de premier plan
     audio = foreground_clip.audio
 
-    # Préparation de l'itérateur pour la vidéo de fond mise en boucle
+    # Prepare background iterator
     background_iterator = iter(
         background_clip.iter_frames(fps=foreground_clip.fps))
 
-    # Configuration du codec et création de la vidéo de sortie
-    output_video = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(
-        *'mp4v'), foreground_clip.fps, foreground_clip.size)
+    # Set up output video writer
+    output_video = cv2.VideoWriter(
+        output_path, cv2.VideoWriter_fourcc(
+            *'mp4v'), foreground_clip.fps, foreground_clip.size
+    )
+
     i = 0
     m = int(foreground_clip.duration * foreground_clip.fps)
     for frame in foreground_clip.iter_frames():
         i += 1
         progress_bar(i, m)
+
+        # Convert frame to BGR for OpenCV processing
         bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
+
+        # Create the initial mask
         mask = cv2.inRange(hsv, lower_color, upper_color)
+
+        # Post-process the mask to capture green edges and clean up noise
+        kernel = np.ones((3, 3), np.uint8)
+        # More aggressive dilation to capture anti-aliased green edges
+        mask = cv2.dilate(mask, kernel, iterations=2)
+        # Light erosion to remove small noise without shrinking too much
+        mask = cv2.erode(mask, kernel, iterations=1)
+
+        # Create inverse mask
         mask_inv = cv2.bitwise_not(mask)
 
+        # Get the background frame and resize it
         try:
             background_frame = next(background_iterator)
         except StopIteration:
             background_iterator = iter(background_clip.iter_frames())
             background_frame = next(background_iterator)
-
         background_bgr_resized = cv2.resize(
-            background_frame, (bgr_frame.shape[1], bgr_frame.shape[0]))
+            background_frame, (bgr_frame.shape[1], bgr_frame.shape[0])
+        )
 
-        foreground = cv2.bitwise_and(frame, frame, mask=mask_inv)
+        # Suppress green spill on the foreground
+        frame_rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
+        frame_rgb = suppress_color_spill(frame_rgb, mask)
+
+        # Apply the mask to separate foreground and background
+        foreground = cv2.bitwise_and(
+            frame_rgb, frame_rgb, mask=mask_inv.astype(np.uint8))
         background = cv2.bitwise_and(
-            background_bgr_resized, background_bgr_resized, mask=mask)
+            background_bgr_resized, background_bgr_resized, mask=mask.astype(
+                np.uint8)
+        )
 
+        # Combine foreground and background
         combined = cv2.add(foreground, background)
-        # debug
-        # combined = cv2.bitwise_or(foreground, background)
-        # combined = foreground
-        # combined = background
-        # combined = mask
-
-        # Convertir en RGB pour la cohérence avec MoviePy
-        combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
+        combined_rgb = cv2.cvtColor(combined, cv2.COLOR_RGB2BGR)
 
         output_video.write(combined_rgb)
+
     output_video.release()
 
-    # Utilisez un fichier temporaire pour la sortie finale
+    # Add audio to the final video
     _, temp_output_path = tempfile.mkstemp(suffix='.mp4')
-
-    # Création d'un clip vidéo sans audio à partir du fichier de sortie
     final_clip_no_audio = VideoFileClip(output_path)
-
-    # Ajout de la piste audio au clip vidéo
     final_clip = final_clip_no_audio.with_audio(audio)
-
-    # Écriture du clip final avec l'audio sur le disque, utilisant le fichier temporaire
     final_clip.write_videofile(
         temp_output_path, codec="libx264", audio_codec="aac")
 
-    # Nettoyage: Fermez tous les clips pour libérer leurs ressources
+    # Clean up
     final_clip_no_audio.close()
     final_clip.close()
     audio.close()
-
-    # Remplacez la vidéo originale sans audio par la nouvelle vidéo avec audio
     os.replace(temp_output_path, output_path)
 
 
