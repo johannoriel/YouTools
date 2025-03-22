@@ -653,7 +653,6 @@ class MoviedPlugin(Plugin):
                     output_path, codec="libx264", audio_codec="aac")
                 save_vtt(vtt_path, subtitles_df, pd.DataFrame())
                 st.success(f"Video generated successfully at {output_path}")
-                st.session_state["operations"] = ""
                 st.rerun()
             except Exception as e:
                 st.error(t("movied_error").format(error=str(e)))
