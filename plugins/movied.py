@@ -94,11 +94,13 @@ class MoviedPlugin(Plugin):
         with st.expander("Options"):
             selected_model = st.selectbox(t("movied_model_label"), [
                                           "base", "medium", "turbo", "large-v3", "large-v3-turbo"], index=0)
-            image_preview_size = st.slider(
-                t("movied_image_preview_size"), 50, 300, 100, step=10)
-            video_preview_size = st.slider(
-                t("movied_video_preview_size"), 50, 300, 100, step=10)
-            return selected_model, image_preview_size, video_preview_size
+            thumbnail_size = st.selectbox(
+                "Thumbnail Size",
+                ["small", "medium", "large"],
+                index=1,  # "medium" par défaut
+                key="thumbnail_size"
+            )
+            return selected_model, thumbnail_size
 
     def list_videos(self):
         video_extensions = [".mp4", ".mkv", ".avi"]
@@ -191,35 +193,52 @@ class MoviedPlugin(Plugin):
         return None, None
 
     def list_media_files(self):
-        media_files = {"images": [], "videos": []}
-        for dir_path in self.media_dirs:
-            if not os.path.exists(dir_path):
-                continue
-            # Lister uniquement les fichiers du répertoire courant (pas récursif)
-            files = [f for f in os.listdir(
-                dir_path) if os.path.isfile(os.path.join(dir_path, f))]
-            for file in files:
-                full_path = os.path.join(dir_path, file)
-                if file.lower().endswith((".jpg", ".png")):
-                    base64_url = image_to_base64(full_path)
-                    if base64_url:
-                        media_files["images"].append({
-                            "File": file,
-                            "Path": full_path,
-                            "Preview": base64_url
-                        })
-                elif file.lower().endswith((".mp4", ".mkv", ".avi")):
-                    # Générer une vignette au début de la vidéo (0 ms)
-                    thumbnail = generate_thumbnail(full_path, 0)
-                    if thumbnail:
-                        media_files["videos"].append({
-                            "File": file,
-                            "Path": full_path,
-                            "Preview": thumbnail  # URL Base64 pour la vignette
-                        })
-        return pd.DataFrame(media_files["images"]), pd.DataFrame(media_files["videos"])
+        # Clé pour stocker les vignettes dans session_state
+        if "thumbnail_size" not in st.session_state:
+            st.session_state["thumbnail_size"] = "medium"  # Valeur par défaut
+        current_size = st.session_state["thumbnail_size"]
 
-    def handle_operations(self, start_time, end_time, video_path, vtt_path, image_preview_size, video_preview_size):
+        # Vérifier si les vignettes doivent être régénérées
+        regenerate = ("media_thumbnails" not in st.session_state or
+                      st.session_state.get("last_thumbnail_size") != current_size)
+
+        if regenerate:
+            media_files = {"images": [], "videos": []}
+            for dir_path in self.media_dirs:
+                if not os.path.exists(dir_path):
+                    continue
+                files = [f for f in os.listdir(
+                    dir_path) if os.path.isfile(os.path.join(dir_path, f))]
+                for file in files:
+                    full_path = os.path.join(dir_path, file)
+                    if file.lower().endswith((".jpg", ".png")):
+                        base64_url = image_to_base64(full_path)
+                        if base64_url:
+                            media_files["images"].append({
+                                "File": file,
+                                "Path": full_path,
+                                "Preview": base64_url
+                            })
+                    elif file.lower().endswith((".mp4", ".mkv", ".avi")):
+                        thumbnail = generate_thumbnail(full_path, 0)
+                        if thumbnail:
+                            media_files["videos"].append({
+                                "File": file,
+                                "Path": full_path,
+                                "Preview": thumbnail
+                            })
+            st.session_state["media_thumbnails"] = {
+                "images": pd.DataFrame(media_files["images"]),
+                "videos": pd.DataFrame(media_files["videos"])
+            }
+            st.session_state["last_thumbnail_size"] = current_size
+
+        # Récupérer depuis session_state
+        image_df = st.session_state["media_thumbnails"]["images"]
+        video_df = st.session_state["media_thumbnails"]["videos"]
+        return image_df, video_df
+
+    def handle_operations(self, start_time, end_time, video_path, vtt_path, thumbnail_size):
         if start_time and end_time:
             try:
                 image_df, video_df = self.list_media_files()
@@ -235,7 +254,6 @@ class MoviedPlugin(Plugin):
             st.subheader("Media Selection")
             col1, col2 = st.columns(2)
 
-            # Options pour le filtre de répertoires
             media_dir_options = [t("movied_all_directories")] + self.media_dirs
             default_dir_index = 0
 
@@ -250,25 +268,25 @@ class MoviedPlugin(Plugin):
                 filtered_image_df = image_df if image_filter_dir == t("movied_all_directories") else image_df[
                     image_df["Path"].str.startswith(image_filter_dir)
                 ]
-                st.dataframe(
+                selected_image = st.dataframe(
                     filtered_image_df[["File", "Preview"]],
                     column_config={
                         "File": st.column_config.TextColumn("Image Name"),
                         "Preview": st.column_config.ImageColumn(
                             "Preview",
                             help="Preview of the image",
-                            width="medium"
+                            width=thumbnail_size  # "small", "medium", ou "large"
                         )
                     },
                     height=200,
-                    hide_index=True
+                    hide_index=True,
+                    selection_mode="single-row",
+                    on_select="rerun",
+                    key="image_media_selector",
+                    # row_height=75, #https://github.com/streamlit/streamlit/issues/7266#event-16543333224
                 )
-                selected_image_path = st.selectbox(
-                    "Select an image",
-                    filtered_image_df["Path"],
-                    format_func=lambda x: os.path.basename(x),
-                    key="image_selectbox"
-                )
+                selected_image_path = (filtered_image_df.iloc[selected_image["selection"]["rows"][0]]["Path"]
+                                       if selected_image["selection"]["rows"] else None)
                 if st.button(t("movied_replace_image"), key="replace_image_btn"):
                     if selected_image_path:
                         operation = f"replace_image {start_time} {end_time} {selected_image_path}"
@@ -284,30 +302,32 @@ class MoviedPlugin(Plugin):
                     index=default_dir_index,
                     key="video_filter_selectbox"
                 )
-                filtered_video_df = video_df if video_filter_dir == t("movied_all_directories") else video_df[
-                    video_df["Path"].str.startswith(video_filter_dir) &
-                    (video_df["Path"].str.len() == len(
-                        os.path.join(video_filter_dir, video_df["File"])))
-                ]
-                st.dataframe(
+                if video_filter_dir == t("movied_all_directories"):
+                    filtered_video_df = video_df
+                else:
+                    expected_paths = video_df["File"].apply(
+                        lambda f: os.path.join(video_filter_dir, f))
+                    filtered_video_df = video_df[
+                        video_df["Path"].isin(expected_paths)
+                    ]
+                selected_video = st.dataframe(
                     filtered_video_df[["File", "Preview"]],
                     column_config={
                         "File": st.column_config.TextColumn("Video Name"),
                         "Preview": st.column_config.ImageColumn(
                             t("movied_video_thumbnail"),
                             help="Thumbnail of the video",
-                            width="medium"
+                            width=thumbnail_size  # "small", "medium", ou "large"
                         )
                     },
                     height=200,
-                    hide_index=True
+                    hide_index=True,
+                    selection_mode="single-row",
+                    on_select="rerun",
+                    key="video_media_selector"
                 )
-                selected_video_path = st.selectbox(
-                    "Select a video",
-                    filtered_video_df["Path"],
-                    format_func=lambda x: os.path.basename(x),
-                    key="video_selectbox"
-                )
+                selected_video_path = (filtered_video_df.iloc[selected_video["selection"]["rows"][0]]["Path"]
+                                       if selected_video["selection"]["rows"] else None)
 
                 col_video1, col_video2, col_video3 = st.columns(3)
                 with col_video1:
@@ -525,7 +545,7 @@ class MoviedPlugin(Plugin):
             "movied_media_dirs", t("movied_media_dirs_default")).split("\n")
 
         self.setup_header()
-        selected_model, image_preview_size, video_preview_size = self.setup_controls()
+        selected_model, thumbnail_size = self.setup_controls()
 
         video_df = self.list_videos()
         if video_df.empty:
@@ -542,7 +562,7 @@ class MoviedPlugin(Plugin):
             video_path = video_df.iloc[selected_video["selection"]
                                        ["rows"][0]]["Full Path"]
             self.handle_operations(
-                start_time, end_time, video_path, vtt_path, image_preview_size, video_preview_size)
+                start_time, end_time, video_path, vtt_path, thumbnail_size)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,18 @@ import ffmpeg
 import streamlit as st
 
 
+def image_to_base64(image_path):
+    """Convertit une image en URL de données Base64."""
+    try:
+        with open(image_path, "rb") as img_file:
+            encoded = base64.b64encode(img_file.read()).decode("utf-8")
+            mime_type = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+            return f"data:{mime_type};base64,{encoded}"
+    except Exception as e:
+        print(f"Erreur lors de l'encodage de {image_path}: {e}")
+        return None
+
+
 def scan_videos(directory, extensions):
     video_data = []
     for root, _, files in os.walk(directory):

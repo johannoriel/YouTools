@@ -12,3 +12,5 @@ imggen_prompt_history.json
 youtube_database.db
 youtube_database.db-journal
 tests
+bench_results.db
+config.save.json
