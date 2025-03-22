@@ -447,29 +447,29 @@ class MoviedPlugin(Plugin):
 
                             # Charger la nouvelle vidéo et récupérer l'audio original
                             replace_clip = VideoFileClip(video_path_replace)
-                            original_audio = main_clip.subclip(
+                            original_audio = main_clip.subclipped(
                                 start_sec, end_sec).audio
 
                             # Ajuster la durée de la nouvelle vidéo
                             if replace_clip.duration > duration:
-                                replace_clip = replace_clip.subclip(
+                                replace_clip = replace_clip.subclipped(
                                     0, duration)
                             # Si plus court, on garde la durée réelle
 
                             # Redimensionner et appliquer l'audio original
                             replace_clip = replace_clip.resized(target_size)
-                            replace_clip = replace_clip.set_audio(
+                            replace_clip = replace_clip.with_audio(
                                 original_audio)
 
                             clips = [
-                                main_clip.subclip(0, start_sec),
+                                main_clip.subclipped(0, start_sec),
                                 replace_clip,
-                                main_clip.subclip(end_sec)
+                                main_clip.subclipped(end_sec)
                             ]
                             col1, _ = st.columns([1, 3])
                             with col1:
                                 st.video(
-                                    video_path_replace, caption=f"Using video (keeping original audio): {video_path_replace}", width=100)
+                                    video_path_replace)
                             main_clip = concatenate_videoclips(clips)
                             # Pas d'ajustement des sous-titres car la durée reste la même
 
