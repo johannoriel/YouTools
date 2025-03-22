@@ -1,9 +1,10 @@
+import base64
 from global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import pandas as pd
 import os
-from video_utils import load_subtitles_and_chapters, save_vtt, generate_subtitles
+from video_utils import load_subtitles_and_chapters, save_vtt, generate_subtitles, image_to_base64, generate_thumbnail
 from moviepy import *
 import json
 
@@ -195,11 +196,19 @@ class MoviedPlugin(Plugin):
             for file in os.listdir(dir_path):
                 full_path = os.path.join(dir_path, file)
                 if file.lower().endswith((".jpg", ".png")):
-                    media_files["images"].append(
-                        {"File": file, "Path": full_path, "Preview": full_path})
+                    base64_url = image_to_base64(full_path)
+                    if base64_url:
+                        media_files["images"].append({
+                            "File": file,           # Nom du fichier seul
+                            "Path": full_path,      # Chemin complet pour la sélection
+                            "Preview": base64_url   # URL Base64 pour la prévisualisation
+                        })
                 elif file.lower().endswith((".mp4", ".mkv", ".avi")):
-                    media_files["videos"].append(
-                        {"File": file, "Path": full_path, "Preview": full_path})
+                    media_files["videos"].append({
+                        "File": file,
+                        "Path": full_path,
+                        "Preview": full_path
+                    })
         return pd.DataFrame(media_files["images"]), pd.DataFrame(media_files["videos"])
 
     def handle_operations(self, start_time, end_time, video_path, vtt_path, image_preview_size, video_preview_size):
@@ -236,14 +245,24 @@ class MoviedPlugin(Plugin):
                 ]
                 st.dataframe(
                     filtered_image_df[["File", "Preview"]],
-                    column_config={"Preview": st.column_config.ImageColumn(
-                        "Preview", width=image_preview_size)},
+                    column_config={
+                        "File": st.column_config.TextColumn("Image Name"),
+                        "Preview": st.column_config.ImageColumn(
+                            "Preview",
+                            help="Preview of the image",
+                            # "small" (75px), "medium" (200px), "large" (400px)
+                            width="medium"
+                        )
+                    },
                     height=200,
                     hide_index=True
                 )
                 selected_image_path = st.selectbox(
                     "Select an image",
+                    # Chemin complet pour l'opération
                     filtered_image_df["Path"],
+                    format_func=lambda x: os.path.basename(
+                        x),  # Affiche le nom du fichier
                     key="image_selectbox"
                 )
                 if st.button(t("movied_replace_image"), key="replace_image_btn"):
@@ -255,7 +274,7 @@ class MoviedPlugin(Plugin):
 
             with col2:
                 st.write("Video Operations")
-                # Filtre pour les vidéos
+                # Filtre pour les vidéos (inchangé)
                 video_filter_dir = st.selectbox(
                     t("movied_filter_media_dir"),
                     media_dir_options,
@@ -273,10 +292,11 @@ class MoviedPlugin(Plugin):
                 selected_video_path = st.selectbox(
                     "Select a video",
                     filtered_video_df["Path"],
+                    format_func=lambda x: os.path.basename(x),
                     key="video_selectbox"
                 )
 
-                # Boutons pour les opérations vidéo
+                # Boutons pour les opérations vidéo (inchangé)
                 col_video1, col_video2, col_video3 = st.columns(3)
                 with col_video1:
                     if st.button(t("movied_insert_video"), key="insert_video_btn"):
