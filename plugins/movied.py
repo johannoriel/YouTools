@@ -33,6 +33,7 @@ translations["en"].update({
     "movied_replace_video_keep_audio": "Replace Video (Keep Original Audio)",
     "movied_filter_media_dir": "Filter by Media Directory",
     "movied_all_directories": "All Directories",
+    "movied_video_thumbnail": "Thumbnail",
 })
 
 translations["fr"].update({
@@ -59,6 +60,7 @@ translations["fr"].update({
     "movied_replace_video_keep_audio": "Remplacer la vidéo (Garder l'audio original)",
     "movied_filter_media_dir": "Filtrer par répertoire de médias",
     "movied_all_directories": "Tous les répertoires",
+    "movied_video_thumbnail": "Vignette",
 })
 
 
@@ -193,22 +195,28 @@ class MoviedPlugin(Plugin):
         for dir_path in self.media_dirs:
             if not os.path.exists(dir_path):
                 continue
-            for file in os.listdir(dir_path):
+            # Lister uniquement les fichiers du répertoire courant (pas récursif)
+            files = [f for f in os.listdir(
+                dir_path) if os.path.isfile(os.path.join(dir_path, f))]
+            for file in files:
                 full_path = os.path.join(dir_path, file)
                 if file.lower().endswith((".jpg", ".png")):
                     base64_url = image_to_base64(full_path)
                     if base64_url:
                         media_files["images"].append({
-                            "File": file,           # Nom du fichier seul
-                            "Path": full_path,      # Chemin complet pour la sélection
-                            "Preview": base64_url   # URL Base64 pour la prévisualisation
+                            "File": file,
+                            "Path": full_path,
+                            "Preview": base64_url
                         })
                 elif file.lower().endswith((".mp4", ".mkv", ".avi")):
-                    media_files["videos"].append({
-                        "File": file,
-                        "Path": full_path,
-                        "Preview": full_path
-                    })
+                    # Générer une vignette au début de la vidéo (0 ms)
+                    thumbnail = generate_thumbnail(full_path, 0)
+                    if thumbnail:
+                        media_files["videos"].append({
+                            "File": file,
+                            "Path": full_path,
+                            "Preview": thumbnail  # URL Base64 pour la vignette
+                        })
         return pd.DataFrame(media_files["images"]), pd.DataFrame(media_files["videos"])
 
     def handle_operations(self, start_time, end_time, video_path, vtt_path, image_preview_size, video_preview_size):
@@ -233,7 +241,6 @@ class MoviedPlugin(Plugin):
 
             with col1:
                 st.write("Images for Replacement")
-                # Filtre pour les images
                 image_filter_dir = st.selectbox(
                     t("movied_filter_media_dir"),
                     media_dir_options,
@@ -250,7 +257,6 @@ class MoviedPlugin(Plugin):
                         "Preview": st.column_config.ImageColumn(
                             "Preview",
                             help="Preview of the image",
-                            # "small" (75px), "medium" (200px), "large" (400px)
                             width="medium"
                         )
                     },
@@ -259,10 +265,8 @@ class MoviedPlugin(Plugin):
                 )
                 selected_image_path = st.selectbox(
                     "Select an image",
-                    # Chemin complet pour l'opération
                     filtered_image_df["Path"],
-                    format_func=lambda x: os.path.basename(
-                        x),  # Affiche le nom du fichier
+                    format_func=lambda x: os.path.basename(x),
                     key="image_selectbox"
                 )
                 if st.button(t("movied_replace_image"), key="replace_image_btn"):
@@ -274,7 +278,6 @@ class MoviedPlugin(Plugin):
 
             with col2:
                 st.write("Video Operations")
-                # Filtre pour les vidéos (inchangé)
                 video_filter_dir = st.selectbox(
                     t("movied_filter_media_dir"),
                     media_dir_options,
@@ -282,10 +285,20 @@ class MoviedPlugin(Plugin):
                     key="video_filter_selectbox"
                 )
                 filtered_video_df = video_df if video_filter_dir == t("movied_all_directories") else video_df[
-                    video_df["Path"].str.startswith(video_filter_dir)
+                    video_df["Path"].str.startswith(video_filter_dir) &
+                    (video_df["Path"].str.len() == len(
+                        os.path.join(video_filter_dir, video_df["File"])))
                 ]
                 st.dataframe(
-                    filtered_video_df[["File"]],
+                    filtered_video_df[["File", "Preview"]],
+                    column_config={
+                        "File": st.column_config.TextColumn("Video Name"),
+                        "Preview": st.column_config.ImageColumn(
+                            t("movied_video_thumbnail"),
+                            help="Thumbnail of the video",
+                            width="medium"
+                        )
+                    },
                     height=200,
                     hide_index=True
                 )
@@ -296,7 +309,6 @@ class MoviedPlugin(Plugin):
                     key="video_selectbox"
                 )
 
-                # Boutons pour les opérations vidéo (inchangé)
                 col_video1, col_video2, col_video3 = st.columns(3)
                 with col_video1:
                     if st.button(t("movied_insert_video"), key="insert_video_btn"):
