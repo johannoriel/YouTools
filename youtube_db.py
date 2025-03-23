@@ -399,8 +399,8 @@ def update_video_keywords(video_id: str, keywords: List[str]):
     conn.close()
 
 
-def get_videos(filter_type: str = "title", keyword: str = "", page: int = 1, per_page: int = 100, keyword_filter: List[str] = None) -> List[Dict[str, Any]]:
-    """Récupère les vidéos avec un filtre optionnel par mots-clés."""
+def get_videos(filter_type: str = "title", keyword: str = "", page: int = 1, per_page: int = 0, keyword_filter: List[str] = None) -> List[Dict[str, Any]]:
+    """Récupère les vidéos avec un filtre optionnel par mots-clés. Si per_page = 0, renvoie toutes les vidéos."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -430,10 +430,11 @@ def get_videos(filter_type: str = "title", keyword: str = "", page: int = 1, per
     else:
         query = "SELECT * FROM videos"
 
-    # Pagination
-    offset = (page - 1) * per_page
-    query += " LIMIT ? OFFSET ?"
-    params.extend([per_page, offset])
+    # Pagination : si per_page = 0, on ne met pas de LIMIT
+    if per_page > 0:
+        offset = (page - 1) * per_page
+        query += " LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
 
     cursor.execute(query, params)
     videos = [dict(row) for row in cursor.fetchall()]
