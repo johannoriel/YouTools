@@ -7,7 +7,7 @@ import re
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptAvailable
+from youtube_transcript_api._errors import CouldNotRetrieveTranscript
 import yt_dlp
 from youtube_api import YoutubeAPI
 
@@ -68,6 +68,7 @@ translations["fr"].update({
     "recent_videos_save_transcript": "Sauver le transcript",
 })
 
+
 class RecentvideosPlugin(Plugin):
 
     def get_tabs(self):
@@ -75,14 +76,11 @@ class RecentvideosPlugin(Plugin):
 
     def get_transcript(self, video_id, language):
         try:
-            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
-        except NoTranscriptAvailable:
+            transcript = YouTubeTranscriptApi.get_transcript(
+                video_id, languages=[language])
+        except CouldNotRetrieveTranscript:
             try:
                 transcript = YouTubeTranscriptApi.get_transcript(video_id)
-            except TranscriptsDisabled:
-                return t("recent_videos_transcripts_disabled"), "N/A"
-            except NoTranscriptAvailable:
-                return t("recent_videos_no_transcript_available"), "N/A"
             except Exception as e:
                 return f"{t('recent_videos_transcript_error')}{str(e)}", "N/A"
 
@@ -117,14 +115,16 @@ class RecentvideosPlugin(Plugin):
             # Utilisation de YoutubeAPI pour récupérer toutes les vidéos
             youtube_api = YoutubeAPI(config)
             if 'all_videos' not in st.session_state:
-                st.session_state.all_videos = youtube_api.get_channel_videos(config['common']['channel_id'])
+                st.session_state.all_videos = youtube_api.get_channel_videos(
+                    config['common']['channel_id'])
 
             # Ajout d'un champ de filtre
             filter_keywords = st.text_input("Filtrer les vidéos par mots-clés")
 
             # Filtrage des vidéos en fonction des mots-clés
             if filter_keywords:
-                filtered_videos = [video for video in st.session_state.all_videos if filter_keywords.lower() in video['title'].lower()]
+                filtered_videos = [video for video in st.session_state.all_videos if filter_keywords.lower(
+                ) in video['title'].lower()]
             else:
                 filtered_videos = st.session_state.all_videos
 
@@ -144,13 +144,17 @@ class RecentvideosPlugin(Plugin):
                     st.image(video['thumbnail'])
                 with col2:
                     st.subheader(video['title'])
-                    st.markdown(f"[Voir la vidéo](https://www.youtube.com/watch?v={video['video_id']})")
-                    st.write(f"Statut : {video['status']}")  # Affichage du statut de la vidéo
+                    st.markdown(
+                        f"[Voir la vidéo](https://www.youtube.com/watch?v={video['video_id']})")
+                    # Affichage du statut de la vidéo
+                    st.write(f"Statut : {video['status']}")
                     if video['is_short']:
-                        st.write("**Short** 🎥")  # Indication que la vidéo est un Short
+                        # Indication que la vidéo est un Short
+                        st.write("**Short** 🎥")
                 with col3:
                     if st.button(t("recent_videos_transcript_button"), key=f"transcript_{video['video_id']}"):
-                        transcript, lang = self.get_transcript(video['video_id'], config['common']['language'])
+                        transcript, lang = self.get_transcript(
+                            video['video_id'], config['common']['language'])
                         st.session_state.transcript = transcript
                         st.session_state.title = video['title']
                         st.session_state.transcript_lang = lang
@@ -161,11 +165,13 @@ class RecentvideosPlugin(Plugin):
                     if st.button(t("recent_videos_download_button"), key=f"download_{video['video_id']}"):
                         work_directory = config['common']['work_directory']
                         video_url = f"https://www.youtube.com/watch?v={video['video_id']}"
-                        success, result = self.download_video(video_url, work_directory, video['title'])
+                        success, result = self.download_video(
+                            video_url, work_directory, video['title'])
                         if success:
                             st.success(t("recent_videos_download_success"))
                         else:
-                            st.error(f"{t('recent_videos_download_error')}{result}")
+                            st.error(
+                                f"{t('recent_videos_download_error')}{result}")
 
             # Afficher les boutons de pagination
             col1, col2, col3 = st.columns([1, 1, 1])
@@ -186,8 +192,10 @@ class RecentvideosPlugin(Plugin):
         # Affichage du transcript
         if st.session_state.get('show_transcript', False):
             st.header(t("recent_videos_transcript_header"))
-            st.write(f"{t('recent_videos_transcript_language')} {st.session_state.transcript_lang}")
-            st.text_area(t("recent_videos_transcript_content"), st.session_state.transcript, height=300)
+            st.write(
+                f"{t('recent_videos_transcript_language')} {st.session_state.transcript_lang}")
+            st.text_area(t("recent_videos_transcript_content"),
+                         st.session_state.transcript, height=300)
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 if st.button(t("recent_videos_copy_transcript_button")):
@@ -206,7 +214,8 @@ class RecentvideosPlugin(Plugin):
                     with open(os.path.join(work_directory, "transcript.txt"), "w", encoding="utf-8") as f:
                         f.write(st.session_state.transcript)
                     with open(os.path.join(work_directory, "url.txt"), "w", encoding="utf-8") as f:
-                        f.write(f"https://www.youtube.com/watch?v={st.session_state.current_video_id}")
+                        f.write(
+                            f"https://www.youtube.com/watch?v={st.session_state.current_video_id}")
                     st.success(t("recent_videos_save_success"))
             with col4:
                 llm_plugin = self.plugin_manager.get_plugin('llm')
@@ -228,7 +237,8 @@ class RecentvideosPlugin(Plugin):
         # Affichage de la réponse du LLM
         if st.session_state.get('show_llm_response', False):
             st.header(t("recent_videos_llm_response_header"))
-            st.text_area(t("recent_videos_llm_response_content"), st.session_state.llm_response, height=300)
+            st.text_area(t("recent_videos_llm_response_content"),
+                         st.session_state.llm_response, height=300)
             col1, col2 = st.columns(2)
             with col1:
                 if st.button(t("recent_videos_copy_llm_response_button")):
