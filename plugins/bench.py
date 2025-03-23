@@ -11,6 +11,9 @@ import random
 import re
 from bench_db import BenchDB
 import pandas as pd
+from PIL import Image, ImageDraw
+import io
+import base64
 
 try:
     from pylatexenc.latex2text import LatexNodes2Text
@@ -725,6 +728,41 @@ class BenchPlugin(Plugin):
                 if r1 != results1[-1]:
                     st.divider()
 
+    def generate_gradient_image(self, percentage, size=(50, 50)):
+        """Génère une image avec un dégradé basé sur le pourcentage (vert->blanc->rouge)"""
+        img = Image.new('RGB', size)
+        draw = ImageDraw.Draw(img)
+
+        # Définir les couleurs : vert (100%), blanc (50%), rouge (0%)
+        green = (0, 255, 0)
+        white = (255, 255, 255)
+        red = (255, 0, 0)
+
+        # Calculer la couleur en fonction du pourcentage
+        if percentage >= 50:
+            # Dégradé blanc -> vert
+            t = (percentage - 50) / 50  # Normaliser entre 0 et 1
+            r = int(white[0] + (green[0] - white[0]) * t)
+            g = int(white[1] + (green[1] - white[1]) * t)
+            b = int(white[2] + (green[2] - white[2]) * t)
+        else:
+            # Dégradé rouge -> blanc
+            t = percentage / 50  # Normaliser entre 0 et 1
+            r = int(red[0] + (white[0] - red[0]) * t)
+            g = int(red[1] + (white[1] - red[1]) * t)
+            b = int(red[2] + (white[2] - red[2]) * t)
+
+        # Remplir l'image avec la couleur calculée
+        draw.rectangle([0, 0, size[0], size[1]], fill=(r, g, b))
+
+        # Ajouter le texte du pourcentage
+        draw.text((5, 20), f"{percentage:.1f}%", fill=(0, 0, 0))
+
+        # Convertir en base64 pour l'affichage dans Streamlit
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()}"
+
     def matrix_tab(self, config):
         st.header(t("matrix_header"))
 
@@ -733,7 +771,8 @@ class BenchPlugin(Plugin):
         model_options = [self.get_server_display_name(
             s["url"], s["model"]) for s in servers if s.get("model")]
 
-        selected_model = st.selectbox(t("select_llm"), model_options)
+        selected_models = st.multiselect(t("select_llm"), model_options, default=[
+                                         model_options[0]] if model_options else [])
 
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
@@ -749,93 +788,121 @@ class BenchPlugin(Plugin):
             repeat = st.number_input(
                 t("repeat_label"), min_value=1, value=3, step=1)
 
-        if st.button(t("run_matrix_test")) and selected_model:
+        if st.button(t("run_matrix_test")) and selected_models:
             with st.spinner(t("running_matrix")):
-                server = next(s for s in servers if self.get_server_display_name(
-                    s["url"], s["model"]) == selected_model)
-
-                # Générer les séries de nombres
+                # Générer les séries de nombres (commun à tous les modèles)
                 x_series = [startx + i * step for i in range(count)]
                 y_series = [starty + i * step for i in range(count)]
 
-                # Initialiser la matrice des résultats détaillés
-                detailed_results = [[[]
-                                    for _ in range(count)] for _ in range(count)]
-                success_rates = [
-                    [0 for _ in range(count)] for _ in range(count)]
+                # Dictionnaire pour stocker les résultats par modèle
+                all_results = {}
 
-                total_tests = count * count * repeat
+                total_tests = len(selected_models) * count * count * repeat
                 progress_bar = st.progress(0.0)
                 tests_completed = 0
 
-                # Appels au LLM dans un expander collapsed
+                # Tous les appels LLM dans un seul expander collapsed
                 with st.expander("LLM Calls", expanded=False):
-                    # Exécuter les tests
-                    for r in range(repeat):
-                        for i, x in enumerate(x_series):
-                            for j, y in enumerate(y_series):
-                                expected = x * y
-                                prompt = f"{x} * {y} ="
-                                st.write(f"Calling LLM for {prompt}")
-                                raw_response, _, _, _ = self.call_llm(
-                                    url=server["url"],
-                                    api_key=server["api_key"],
-                                    model=server["model"],
-                                    prompt=prompt,
-                                    sysprompt="Return only the numerical result of the multiplication, nothing else."
-                                )
-                                st.write(f"Response: {raw_response}")
-                                try:
-                                    result = int(raw_response.strip())
-                                    is_correct = result == expected
-                                    detailed_results[i][j].append({
-                                        'expected': expected,
-                                        'obtained': result,
-                                        'correct': is_correct
-                                    })
-                                    if is_correct:
-                                        success_rates[i][j] += 1
-                                except (ValueError, AttributeError):
-                                    detailed_results[i][j].append({
-                                        'expected': expected,
-                                        'obtained': raw_response,
-                                        'correct': False
-                                    })
-                                tests_completed += 1
-                                progress_bar.progress(
-                                    tests_completed / total_tests)
+                    for model_id in selected_models:
+                        server = next(s for s in servers if self.get_server_display_name(
+                            s["url"], s["model"]) == model_id)
+                        # Initialiser les résultats pour ce modèle
+                        all_results[model_id] = {
+                            'detailed': [[[] for _ in range(count)] for _ in range(count)],
+                            'success_rates': [[0 for _ in range(count)] for _ in range(count)]
+                        }
 
-                # Calculer les pourcentages
-                for i in range(count):
-                    for j in range(count):
-                        success_rates[i][j] = (
-                            success_rates[i][j] / repeat) * 100
+                        st.write(f"Testing model: {model_id}")
+                        for r in range(repeat):
+                            for i, x in enumerate(x_series):
+                                for j, y in enumerate(y_series):
+                                    expected = x * y
+                                    prompt = f"{x} * {y} ="
+                                    st.write(f"Calling LLM for {prompt}")
+                                    raw_response, _, _, _ = self.call_llm(
+                                        url=server["url"],
+                                        api_key=server["api_key"],
+                                        model=server["model"],
+                                        prompt=prompt,
+                                        sysprompt="Return only the numerical result of the multiplication, nothing else."
+                                    )
+                                    st.write(f"Response: {raw_response}")
+                                    try:
+                                        result = int(raw_response.strip())
+                                        is_correct = result == expected
+                                        all_results[model_id]['detailed'][i][j].append({
+                                            'expected': expected,
+                                            'obtained': result,
+                                            'correct': is_correct
+                                        })
+                                        if is_correct:
+                                            all_results[model_id]['success_rates'][i][j] += 1
+                                    except (ValueError, AttributeError):
+                                        all_results[model_id]['detailed'][i][j].append({
+                                            'expected': expected,
+                                            'obtained': raw_response,
+                                            'correct': False
+                                        })
+                                    tests_completed += 1
+                                    progress_bar.progress(
+                                        tests_completed / total_tests)
 
-                # Afficher les résultats avec DataFrame
+                # Afficher les résultats pour chaque modèle
                 st.subheader(t("matrix_results"))
-                df_data = {}
-                for j, y in enumerate(y_series):
-                    df_data[str(y)] = [f"{rate:.1f}%" for rate in [
-                        success_rates[i][j] for i in range(count)]]
-                df = pd.DataFrame(df_data, index=[str(x) for x in x_series])
-                st.dataframe(df)
+                for model_id in selected_models:
+                    # Calculer les pourcentages pour ce modèle
+                    for i in range(count):
+                        for j in range(count):
+                            all_results[model_id]['success_rates'][i][j] = \
+                                (all_results[model_id]['success_rates']
+                                 [i][j] / repeat) * 100
 
-                # Afficher les détails dans un expander avec matrice multiligne
-                with st.expander("Detailed Results"):
-                    detail_df_data = {}
+                    # Générer le DataFrame principal avec images
+                    df_data = {}
                     for j, y in enumerate(y_series):
-                        column_data = []
-                        for i, x in enumerate(x_series):
-                            details = detailed_results[i][j]
-                            text = f"Expected: {details[0]['expected']}\n" + \
-                                "\n".join(
-                                    f"Obtained {k+1}: {d['obtained']}" for k, d in enumerate(details))
-                            column_data.append(text)
-                        detail_df_data[str(y)] = column_data
-                    detail_df = pd.DataFrame(detail_df_data, index=[
-                        str(x) for x in x_series])
-                    # Ajuster la hauteur des cellules pour afficher tout le texte
-                    st.dataframe(detail_df, height=200)
+                        df_data[str(y)] = [
+                            self.generate_gradient_image(
+                                all_results[model_id]['success_rates'][i][j])
+                            for i in range(count)
+                        ]
+                    df = pd.DataFrame(
+                        df_data, index=[str(x) for x in x_series])
+
+                    # Configurer les colonnes comme images
+                    column_config = {
+                        str(y): st.column_config.ImageColumn(
+                            label=str(y),
+                            width="small",
+                            help=f"Results for Y={y}"
+                        ) for y in y_series
+                    }
+
+                    # Afficher le titre et le DataFrame pour ce modèle
+                    st.write(f"Results for {model_id}")
+                    st.dataframe(
+                        df,
+                        column_config=column_config,
+                        use_container_width=True,
+                        # height=200
+                    )
+
+                    # Expander de debug spécifique à ce modèle
+                    with st.expander(f"Detailed Results for {model_id}"):
+                        detail_df_data = {}
+                        for j, y in enumerate(y_series):
+                            column_data = []
+                            for i, x in enumerate(x_series):
+                                details = all_results[model_id]['detailed'][i][j]
+                                text = f"Expected: {details[0]['expected']}\n" + \
+                                       "\n".join(
+                                           f"Obtained {k+1}: {d['obtained']}" for k, d in enumerate(details))
+                                column_data.append(text)
+                            detail_df_data[str(y)] = column_data
+                        detail_df = pd.DataFrame(detail_df_data, index=[
+                                                 str(x) for x in x_series])
+                        st.dataframe(detail_df, height=200)
+
+                    st.divider()  # Séparateur entre les modèles
 
 
 if __name__ == "__main__":
