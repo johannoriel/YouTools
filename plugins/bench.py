@@ -311,25 +311,23 @@ class BenchPlugin(Plugin):
         st.header(t("servers_list"))
 
         plugin_config = config.get(self.name, {})
+        # Initialize servers
         if 'servers' not in st.session_state:
             bench_servers = plugin_config.get("bench_servers")
             if isinstance(bench_servers, str):
-                bench_servers = ast.literal_eval(bench_servers)
-            st.session_state.servers = bench_servers
-        if 'prompts' not in st.session_state or len(st.session_state.prompts) == 0:
-            bench_prompts = plugin_config.get("bench_prompts")
-            if isinstance(bench_prompts, str):
-                bench_prompts = ast.literal_eval(bench_prompts)
-            # Initialize excluded field if not present
-            for prompt in bench_prompts:
-                if "excluded" not in prompt:
-                    prompt["excluded"] = False
-            st.session_state.prompts = bench_prompts
+                try:
+                    bench_servers = ast.literal_eval(bench_servers)
+                except (ValueError, SyntaxError):
+                    bench_servers = self.get_config_fields()[
+                        "bench_servers"]["default"]
+            st.session_state.servers = bench_servers if isinstance(
+                bench_servers, list) else self.get_config_fields()["bench_servers"]["default"]
 
-        # Initialize a cache for available models if not already present
+        # Initialize available models cache
         if 'available_models_cache' not in st.session_state:
             st.session_state.available_models_cache = {}
 
+        # Render servers (LLMs)
         for i, server in enumerate(st.session_state.servers):
             url = server.get("url", "")
             model = server.get("model", "")
@@ -345,8 +343,7 @@ class BenchPlugin(Plugin):
                     new_url = st.text_input(
                         t("url_label"), value=server.get("url", ""), key=f"url_{i}")
                 with col2:
-                    refresh_key = f"refresh_{i}"
-                    if st.button("Refresh Models", key=refresh_key):
+                    if st.button("Refresh Models", key=f"refresh_{i}"):
                         st.session_state.available_models_cache[new_url] = self.get_available_models(
                             new_url, server.get("api_key", ""))
                         st.session_state.servers[i]["url"] = new_url
@@ -356,14 +353,12 @@ class BenchPlugin(Plugin):
 
                 cache_key = f"{new_url}_{api_key}"
                 if (cache_key not in st.session_state.available_models_cache or
-                    new_url != url or
-                        api_key != server.get("api_key", "")):
+                        new_url != url or api_key != server.get("api_key", "")):
                     st.session_state.available_models_cache[cache_key] = self.get_available_models(
                         new_url, api_key)
 
                 models = st.session_state.available_models_cache.get(cache_key, [
                                                                      ""])
-
                 if len(models) == 1 and models[0] == "":
                     model = st.text_input(t("model_label"), value=server.get("model", ""),
                                           placeholder="Enter model name manually", key=f"model_{i}")
@@ -381,6 +376,7 @@ class BenchPlugin(Plugin):
                 st.session_state.servers[i] = {
                     "url": new_url, "api_key": api_key, "model": model}
 
+        # Add server buttons
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Add Ollama"):
@@ -404,16 +400,50 @@ class BenchPlugin(Plugin):
                 st.session_state.servers.append(new_server)
                 st.rerun()
 
+        # Initialize and render prompts
         st.header(t("prompts_list"))
-        if not st.session_state.prompts:
+        if 'prompts' not in st.session_state or not isinstance(st.session_state.prompts, list) or len(st.session_state.prompts) == 0:
+            bench_prompts = plugin_config.get("bench_prompts")
+            default_prompts = self.get_config_fields()[
+                "bench_prompts"]["default"]
+
+            if isinstance(bench_prompts, str):
+                try:
+                    bench_prompts = ast.literal_eval(bench_prompts)
+                except (ValueError, SyntaxError) as e:
+                    st.warning(
+                        f"Error parsing bench_prompts: {e}. Using default prompts.")
+                    bench_prompts = default_prompts
+            elif not isinstance(bench_prompts, list):
+                st.warning(
+                    f"bench_prompts is not a list: {type(bench_prompts)}. Using default prompts.")
+                bench_prompts = default_prompts
+
+            normalized_prompts = []
+            for prompt in bench_prompts if isinstance(bench_prompts, list) else default_prompts:
+                if not isinstance(prompt, dict):
+                    normalized_prompts.append(
+                        {"prompt": str(prompt), "expected": "", "excluded": False})
+                else:
+                    prompt_dict = prompt.copy()
+                    if "excluded" not in prompt_dict:
+                        prompt_dict["excluded"] = False
+                    normalized_prompts.append(prompt_dict)
+            st.session_state.prompts = normalized_prompts
+
+        if not st.session_state.prompts or not isinstance(st.session_state.prompts, list):
             st.write("No prompts defined yet.")
+            st.session_state.prompts = self.get_config_fields()[
+                "bench_prompts"]["default"]
         else:
             for i, prompt_data in enumerate(st.session_state.prompts):
-                # Ensure excluded field exists
-                if "excluded" not in prompt_data:
-                    prompt_data["excluded"] = False
+                if not isinstance(prompt_data, dict):
+                    st.warning(
+                        f"Prompt at index {i} is not a dict: {prompt_data}. Normalizing.")
+                    prompt_data = {"prompt": str(
+                        prompt_data), "expected": "", "excluded": False}
+                    st.session_state.prompts[i] = prompt_data
 
-                # Added col3 for exclude checkbox
                 col1, col2, col3 = st.columns([2, 1, 1])
                 with col1:
                     prompt = st.text_area(t("prompt_label"), value=prompt_data.get(
@@ -439,7 +469,6 @@ class BenchPlugin(Plugin):
             st.rerun()
 
         if st.button("Save Configuration"):
-            # When saving, exclude the 'excluded' field from the config to respect get_config_fields
             config_prompts = [{"prompt": p["prompt"], "expected": p["expected"]}
                               for p in st.session_state.prompts]
             config[self.name] = {
