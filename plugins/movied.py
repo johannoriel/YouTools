@@ -451,19 +451,22 @@ class MoviedPlugin(Plugin):
             try:
                 from video_utils import (replace_with_image, insert_video,
                                          replace_with_video, replace_video_keep_audio,
-                                         add_animated_text)
+                                         add_animated_text, remove_section)
 
+                # Initialisation
                 main_clip = VideoFileClip(video_path)
                 target_size = (main_clip.w, main_clip.h)
                 subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
                 duration_offset = 0
 
+                # Préparation du fond pour le texte
                 text_background = st.session_state.get(
                     "text_background_select", t("movied_green_background"))
                 use_green_background = text_background == t(
                     "movied_green_background")
 
                 with st.expander("Debug Information"):
+                    # Parcourir chaque opération
                     for op in operations.split("\n"):
                         if not op.strip():
                             continue
@@ -471,13 +474,25 @@ class MoviedPlugin(Plugin):
                         cmd = parts[0]
                         st.write(f"Processing: {op}")
 
-                        if cmd == "replace_image":
-                            start_time, end_time, image_path = parts[1], parts[2], " ".join(
-                                parts[3:])
+                        # Extraire et parser les timecodes (commun à toutes les commandes sauf insert_video qui n'a qu'un start_time)
+                        if cmd == "insert_video":
+                            start_time = parts[1]
+                            start_sec = self.parse_timecode(
+                                start_time) + duration_offset
+                            end_sec = None
+                            remaining_args = " ".join(parts[2:])
+                        else:
+                            start_time, end_time = parts[1], parts[2]
                             start_sec = self.parse_timecode(
                                 start_time) + duration_offset
                             end_sec = self.parse_timecode(
                                 end_time) + duration_offset
+                            remaining_args = " ".join(
+                                parts[3:]) if len(parts) > 3 else ""
+
+                        # Exécuter la commande correspondante
+                        if cmd == "replace_image":
+                            image_path = remaining_args
                             main_clip = replace_with_image(
                                 main_clip, start_sec, end_sec, image_path, target_size)
                             col1, _ = st.columns([1, 3])
@@ -486,10 +501,7 @@ class MoviedPlugin(Plugin):
                                     image_path, caption=f"Using image: {image_path}", width=100)
 
                         elif cmd == "insert_video":
-                            start_time, video_path_insert = parts[1], " ".join(
-                                parts[2:])
-                            start_sec = self.parse_timecode(
-                                start_time) + duration_offset
+                            video_path_insert = remaining_args
                             main_clip, duration_change = insert_video(
                                 main_clip, start_sec, video_path_insert, target_size)
                             subtitles_df = self.adjust_subtitles(
@@ -500,12 +512,7 @@ class MoviedPlugin(Plugin):
                                 st.video(video_path_insert)
 
                         elif cmd == "replace_video":
-                            start_time, end_time, video_path_replace = parts[1], parts[2], " ".join(
-                                parts[3:])
-                            start_sec = self.parse_timecode(
-                                start_time) + duration_offset
-                            end_sec = self.parse_timecode(
-                                end_time) + duration_offset
+                            video_path_replace = remaining_args
                             main_clip, duration_change = replace_with_video(
                                 main_clip, start_sec, end_sec, video_path_replace, target_size)
                             subtitles_df = self.adjust_subtitles(
@@ -517,12 +524,7 @@ class MoviedPlugin(Plugin):
                                     video_path_replace, caption=f"Using video: {video_path_replace}", width=100)
 
                         elif cmd == "replace_video_keep_audio":
-                            start_time, end_time, video_path_replace = parts[1], parts[2], " ".join(
-                                parts[3:])
-                            start_sec = self.parse_timecode(
-                                start_time) + duration_offset
-                            end_sec = self.parse_timecode(
-                                end_time) + duration_offset
+                            video_path_replace = remaining_args
                             main_clip = replace_video_keep_audio(
                                 main_clip, start_sec, end_sec, video_path_replace, target_size)
                             col1, _ = st.columns([1, 3])
@@ -530,24 +532,15 @@ class MoviedPlugin(Plugin):
                                 st.video(video_path_replace)
 
                         elif cmd == "addtext":
-                            start_time, end_time, animation_type, anim_duration, text = parts[
-                                1], parts[2], parts[3], parts[4], parts[5]
-                            start_sec = self.parse_timecode(
-                                start_time) + duration_offset
-                            end_sec = self.parse_timecode(
-                                end_time) + duration_offset
+                            animation_type, anim_duration, text = parts[3], parts[4], parts[5]
                             anim_duration_sec = float(anim_duration[:-1])
                             main_clip = add_animated_text(
                                 main_clip, start_sec, end_sec, text, animation_type,
                                 anim_duration_sec, target_size, font, font_size,
                                 use_green_background=use_green_background
                             )
-                        elif cmd == "remove_section":  # Nouvelle gestion pour la suppression
-                            start_time, end_time = parts[1], parts[2]
-                            start_sec = self.parse_timecode(
-                                start_time) + duration_offset
-                            end_sec = self.parse_timecode(
-                                end_time) + duration_offset
+
+                        elif cmd == "remove_section":
                             main_clip, duration_change = remove_section(
                                 main_clip, start_sec, end_sec)
                             subtitles_df = self.adjust_subtitles(
@@ -556,6 +549,7 @@ class MoviedPlugin(Plugin):
                             st.write(
                                 f"Section removed from {start_time} to {end_time}")
 
+                    # Sauvegarde de la vidéo éditée et des sous-titres ajustés
                     output_path = os.path.splitext(
                         video_path)[0] + "_edited.mp4"
                     main_clip.write_videofile(
