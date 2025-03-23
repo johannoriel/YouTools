@@ -245,7 +245,7 @@ class BenchPlugin(Plugin):
             return response
         return f"{response[:nstart]}\n\n[...]\n\n{response[-nend:]}"
 
-    def call_llm(self, url: str, api_key: str, model: str, prompt: str, sysprompt: str = "You are a helpful AI assistant") -> tuple:
+    def call_llm(self, url: str, api_key: str, model: str, prompt: str, sysprompt: str = "You are a helpful AI assistant", verbose: bool = False) -> tuple:
         """Custom LLM call with load balancing, returning raw response and lengths."""
         available_servers = [s for s in st.session_state.servers if s.get(
             "model") == model and s.get("url") == url]
@@ -292,14 +292,22 @@ class BenchPlugin(Plugin):
                 else:
                     raw_response = "LLM Error: Unexpected response format"
 
-                st.write(
-                    f"API raw response length for {model} at {current_url} (key attempt {attempts}): {len(raw_response)} characters")
-                converted_response = self.convert_latex_to_text(raw_response)
-                st.write(
-                    f"Length after LaTeX conversion: {len(converted_response)} characters")
-                shortened_response = self.shorten_response(converted_response)
-                st.write(
-                    f"Shortened response length: {len(shortened_response)} characters")
+                if verbose:
+                    st.write(
+                        f"API raw response length for {model} at {current_url} (key attempt {attempts}): {len(raw_response)} characters")
+                    converted_response = self.convert_latex_to_text(
+                        raw_response)
+                    st.write(
+                        f"Length after LaTeX conversion: {len(converted_response)} characters")
+                    shortened_response = self.shorten_response(
+                        converted_response)
+                    st.write(
+                        f"Shortened response length: {len(shortened_response)} characters")
+                else:
+                    converted_response = self.convert_latex_to_text(
+                        raw_response)
+                    shortened_response = self.shorten_response(
+                        converted_response)
 
                 return raw_response, len(raw_response), len(converted_response), len(shortened_response)
 
@@ -763,6 +771,27 @@ class BenchPlugin(Plugin):
         img.save(buffered, format="PNG")
         return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()}"
 
+    def extract_number_from_response(self, response):
+        """Extrait les chiffres de la dernière ligne de la réponse, gérant le LaTeX si présent"""
+        if not response or not isinstance(response, str):
+            return None
+
+        # Nettoyer les balises LaTeX de base
+        response = re.sub(r'\\\[.*?\\\]', '', response)  # Supprime \[...\]
+        response = re.sub(r'\\\((.*?)\\\)', r'\1',
+                          response)  # Supprime \(...\)
+        # Extrait contenu de \boxed
+        response = re.sub(r'\\boxed{(.*?)}', r'\1', response)
+
+        # Prendre la dernière ligne
+        lines = response.strip().split('\n')
+        last_line = lines[-1] if lines else response
+
+        # Extraire les chiffres (entiers ou décimaux)
+        numbers = re.findall(r'-?\d*\.?\d+', last_line)
+        # Retourner le dernier nombre trouvé
+        return numbers[-1] if numbers else None
+
     def matrix_tab(self, config):
         st.header(t("matrix_header"))
 
@@ -788,27 +817,25 @@ class BenchPlugin(Plugin):
             repeat = st.number_input(
                 t("repeat_label"), min_value=1, value=3, step=1)
 
+        debug_mode = st.checkbox("Debug", value=False,
+                                 help="Show detailed LLM call information")
+
         if st.button(t("run_matrix_test")) and selected_models:
             with st.spinner(t("running_matrix")):
-                # Générer les séries de nombres (commun à tous les modèles)
                 x_series = [startx + i * step for i in range(count)]
                 y_series = [starty + i * step for i in range(count)]
 
-                # Dictionnaire pour stocker les résultats par modèle
                 all_results = {}
-
                 total_tests = len(selected_models) * count * count * repeat
                 progress_bar = st.progress(0.0)
                 tests_completed = 0
 
-                # Trier les modèles : Ollama en premier (localhost:11434), puis les autres
                 sorted_models = sorted(
                     selected_models,
                     key=lambda model_id: 0 if "localhost:11434" in next(
                         s["url"] for s in servers if self.get_server_display_name(s["url"], s["model"]) == model_id) else 1
                 )
 
-                # Tous les appels LLM dans un seul expander collapsed
                 with st.expander("LLM Calls", expanded=False):
                     previous_is_ollama = False
                     for i, model_id in enumerate(sorted_models):
@@ -816,7 +843,6 @@ class BenchPlugin(Plugin):
                             s["url"], s["model"]) == model_id)
                         current_is_ollama = "localhost:11434" in server["url"]
 
-                        # Si on passe d'Ollama à un autre type de serveur, vider la mémoire
                         if i > 0 and not current_is_ollama and previous_is_ollama:
                             prev_server = next(s for s in servers if self.get_server_display_name(
                                 s["url"], s["model"]) == sorted_models[i-1])
@@ -825,7 +851,6 @@ class BenchPlugin(Plugin):
                             self.ragllm_plugin.free_llm(
                                 model=prev_server['model'])
 
-                        # Initialiser les résultats pour ce modèle
                         all_results[model_id] = {
                             'detailed': [[[] for _ in range(count)] for _ in range(count)],
                             'success_rates': [[0 for _ in range(count)] for _ in range(count)]
@@ -843,20 +868,26 @@ class BenchPlugin(Plugin):
                                         api_key=server["api_key"],
                                         model=server["model"],
                                         prompt=prompt,
-                                        sysprompt="Return only the numerical result of the multiplication, nothing else."
+                                        sysprompt="Return only the numerical result of the multiplication, nothing else.",
+                                        verbose=debug_mode  # Passer l'option debug
                                     )
                                     st.write(f"Response: {raw_response}")
+
+                                    extracted_number = self.extract_number_from_response(
+                                        raw_response)
+
                                     try:
-                                        result = int(raw_response.strip())
-                                        is_correct = result == expected
+                                        result = float(
+                                            extracted_number) if extracted_number else None
+                                        is_correct = result == expected if result is not None else False
                                         all_results[model_id]['detailed'][i][j].append({
                                             'expected': expected,
-                                            'obtained': result,
+                                            'obtained': result if result is not None else raw_response,
                                             'correct': is_correct
                                         })
                                         if is_correct:
                                             all_results[model_id]['success_rates'][i][j] += 1
-                                    except (ValueError, AttributeError):
+                                    except (ValueError, TypeError):
                                         all_results[model_id]['detailed'][i][j].append({
                                             'expected': expected,
                                             'obtained': raw_response,
@@ -868,17 +899,14 @@ class BenchPlugin(Plugin):
 
                         previous_is_ollama = current_is_ollama
 
-                # Afficher les résultats pour chaque modèle dans l'ordre trié
                 st.subheader(t("matrix_results"))
                 for model_id in sorted_models:
-                    # Calculer les pourcentages pour ce modèle
                     for i in range(count):
                         for j in range(count):
                             all_results[model_id]['success_rates'][i][j] = \
                                 (all_results[model_id]['success_rates']
                                  [i][j] / repeat) * 100
 
-                    # Générer le DataFrame principal avec images
                     df_data = {}
                     for j, y in enumerate(y_series):
                         df_data[str(y)] = [
@@ -889,7 +917,6 @@ class BenchPlugin(Plugin):
                     df = pd.DataFrame(
                         df_data, index=[str(x) for x in x_series])
 
-                    # Configurer les colonnes comme images
                     column_config = {
                         str(y): st.column_config.ImageColumn(
                             label=str(y),
@@ -898,7 +925,6 @@ class BenchPlugin(Plugin):
                         ) for y in y_series
                     }
 
-                    # Afficher le titre et le DataFrame pour ce modèle
                     st.write(f"Results for {model_id}")
                     st.dataframe(
                         df,
@@ -907,7 +933,6 @@ class BenchPlugin(Plugin):
                         height=200
                     )
 
-                    # Expander de debug spécifique à ce modèle
                     with st.expander(f"Detailed Results for {model_id}"):
                         detail_df_data = {}
                         for j, y in enumerate(y_series):
