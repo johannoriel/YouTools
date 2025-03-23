@@ -801,11 +801,30 @@ class BenchPlugin(Plugin):
                 progress_bar = st.progress(0.0)
                 tests_completed = 0
 
+                # Trier les modèles : Ollama en premier (localhost:11434), puis les autres
+                sorted_models = sorted(
+                    selected_models,
+                    key=lambda model_id: 0 if "localhost:11434" in next(
+                        s["url"] for s in servers if self.get_server_display_name(s["url"], s["model"]) == model_id) else 1
+                )
+
                 # Tous les appels LLM dans un seul expander collapsed
                 with st.expander("LLM Calls", expanded=False):
-                    for model_id in selected_models:
+                    previous_is_ollama = False
+                    for i, model_id in enumerate(sorted_models):
                         server = next(s for s in servers if self.get_server_display_name(
                             s["url"], s["model"]) == model_id)
+                        current_is_ollama = "localhost:11434" in server["url"]
+
+                        # Si on passe d'Ollama à un autre type de serveur, vider la mémoire
+                        if i > 0 and not current_is_ollama and previous_is_ollama:
+                            prev_server = next(s for s in servers if self.get_server_display_name(
+                                s["url"], s["model"]) == sorted_models[i-1])
+                            st.write(
+                                f"Transitioning from Ollama ({prev_server['model']}) to another server type. Resetting CUDA context...")
+                            self.ragllm_plugin.free_llm(
+                                model=prev_server['model'])
+
                         # Initialiser les résultats pour ce modèle
                         all_results[model_id] = {
                             'detailed': [[[] for _ in range(count)] for _ in range(count)],
@@ -847,9 +866,11 @@ class BenchPlugin(Plugin):
                                     progress_bar.progress(
                                         tests_completed / total_tests)
 
-                # Afficher les résultats pour chaque modèle
+                        previous_is_ollama = current_is_ollama
+
+                # Afficher les résultats pour chaque modèle dans l'ordre trié
                 st.subheader(t("matrix_results"))
-                for model_id in selected_models:
+                for model_id in sorted_models:
                     # Calculer les pourcentages pour ce modèle
                     for i in range(count):
                         for j in range(count):
@@ -883,7 +904,7 @@ class BenchPlugin(Plugin):
                         df,
                         column_config=column_config,
                         use_container_width=True,
-                        # height=200
+                        height=200
                     )
 
                     # Expander de debug spécifique à ce modèle
@@ -902,7 +923,7 @@ class BenchPlugin(Plugin):
                                                  str(x) for x in x_series])
                         st.dataframe(detail_df, height=200)
 
-                    st.divider()  # Séparateur entre les modèles
+                    st.divider()
 
 
 if __name__ == "__main__":
