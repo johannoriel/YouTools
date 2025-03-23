@@ -552,3 +552,14 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
         final_clip,
         main_clip.subclipped(end_sec)
     ])
+
+
+def remove_section(main_clip, start_sec, end_sec):
+    """Supprime une section de la vidéo entre start_sec et end_sec."""
+    duration_change = end_sec - start_sec
+    new_clip = concatenate_videoclips([
+        main_clip.subclipped(0, start_sec),
+        main_clip.subclipped(end_sec)
+    ])
+    # Retourne la nouvelle vidéo et la différence de durée (négative car suppression)
+    return new_clip, -duration_change
