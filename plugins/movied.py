@@ -43,6 +43,9 @@ translations["en"].update({
     "movied_animate_text": "Animate Text",
     "movied_text_input": "Enter text (use \\ for line breaks)",
     "movied_text_operations": "Text Operations",
+    "movied_text_background": "Text Background",
+    "movied_green_background": "Green Background",
+    "movied_original_video": "Original Video"
 })
 
 translations["fr"].update({
@@ -75,6 +78,9 @@ translations["fr"].update({
     "movied_animate_text": "Animer le texte",
     "movied_text_input": "Entrez le texte (utilisez \\ pour les sauts de ligne)",
     "movied_text_operations": "Opérations de texte",
+    "movied_text_background": "Fond du texte",
+    "movied_green_background": "Fond vert",
+    "movied_original_video": "Vidéo originale"
 })
 
 
@@ -116,8 +122,7 @@ class MoviedPlugin(Plugin):
             )
             font = st.selectbox(
                 t("movied_font_label"),
-                ["Arial", "Times New Roman", "Courier New",
-                    "Verdana"],  # Exemples, ajustables
+                ["Arial", "Times New Roman", "Courier New", "Verdana"],
                 index=0,
                 key="font_select"
             )
@@ -126,7 +131,13 @@ class MoviedPlugin(Plugin):
                 50, 200, 100, step=5,
                 key="font_size_slider"
             )
-            return selected_model, thumbnail_size, font, font_size
+            text_background = st.selectbox(
+                t("movied_text_background"),
+                [t("movied_green_background"), t("movied_original_video")],
+                index=0,
+                key="text_background_select"
+            )
+            return selected_model, thumbnail_size, font, font_size, text_background
 
     def list_videos(self):
         video_extensions = [".mp4", ".mkv", ".avi"]
@@ -443,6 +454,11 @@ class MoviedPlugin(Plugin):
                 subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
                 duration_offset = 0
 
+                text_background = st.session_state.get(
+                    "text_background_select", t("movied_green_background"))
+                use_green_background = text_background == t(
+                    "movied_green_background")
+
                 with st.expander("Debug Information"):
                     for op in operations.split("\n"):
                         if not op.strip():
@@ -519,7 +535,9 @@ class MoviedPlugin(Plugin):
                             anim_duration_sec = float(anim_duration[:-1])
                             main_clip = add_animated_text(
                                 main_clip, start_sec, end_sec, text, animation_type,
-                                anim_duration_sec, target_size, font, font_size)
+                                anim_duration_sec, target_size, font, font_size,
+                                use_green_background=use_green_background
+                            )
 
                     output_path = os.path.splitext(
                         video_path)[0] + "_edited.mp4"
@@ -542,7 +560,7 @@ class MoviedPlugin(Plugin):
             "movied_media_dirs", t("movied_media_dirs_default")).split("\n")
 
         self.setup_header()
-        selected_model, thumbnail_size, font, font_size = self.setup_controls()
+        selected_model, thumbnail_size, font, font_size, text_background = self.setup_controls()
 
         video_df = self.list_videos()
         if video_df.empty:

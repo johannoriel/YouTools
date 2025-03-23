@@ -488,14 +488,10 @@ def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, 
     ])
 
 
-def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_duration_sec, target_size, font, font_size):
-    """Ajoute du texte animé sur une section de la vidéo."""
+def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_duration_sec, target_size, font, font_size, use_green_background=True):
+    """Ajoute du texte animé sur une section de la vidéo, soit sur fond vert, soit en superposition."""
     duration = end_sec - start_sec
     audio_clip = main_clip.subclipped(start_sec, end_sec).audio
-
-    # Fond vert pour chromakey
-    background = ColorClip(size=target_size, color=(
-        0, 255, 0), duration=duration)
 
     # Création du texte
     text_content = text.replace("\\", "\n")
@@ -536,14 +532,23 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
                 t)[0] - text_padding, position_function(t)[1] - text_padding)
         )
 
-    # Composition
-    animated_text_clip = CompositeVideoClip(
-        [background, text_box, txt_clip], size=target_size)
+    if use_green_background:
+        # Fond vert pour chromakey
+        background = ColorClip(size=target_size, color=(
+            0, 255, 0), duration=duration)
+        final_clip = CompositeVideoClip(
+            [background, text_box, txt_clip], size=target_size)
+    else:
+        # Superposition sur la vidéo originale
+        original_segment = main_clip.subclipped(start_sec, end_sec)
+        final_clip = CompositeVideoClip(
+            [original_segment, text_box, txt_clip], size=target_size)
+
     if audio_clip:
-        animated_text_clip = animated_text_clip.with_audio(audio_clip)
+        final_clip = final_clip.with_audio(audio_clip)
 
     return concatenate_videoclips([
         main_clip.subclipped(0, start_sec),
-        animated_text_clip,
+        final_clip,
         main_clip.subclipped(end_sec)
     ])
