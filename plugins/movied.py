@@ -7,8 +7,7 @@ from app import Plugin
 import streamlit as st
 import pandas as pd
 import os
-from video_utils import load_subtitles_and_chapters, save_vtt, generate_subtitles, image_to_base64, generate_thumbnail
-from video_utils import replace_with_image, insert_video, replace_with_video, replace_video_keep_audio, add_animated_text
+from video_utils import *
 import json
 from moviepy import VideoFileClip
 
@@ -45,7 +44,8 @@ translations["en"].update({
     "movied_text_operations": "Text Operations",
     "movied_text_background": "Text Background",
     "movied_green_background": "Green Background",
-    "movied_original_video": "Original Video"
+    "movied_original_video": "Original Video",
+    "movied_remove_section": "Remove Section",
 })
 
 translations["fr"].update({
@@ -80,7 +80,8 @@ translations["fr"].update({
     "movied_text_operations": "Opérations de texte",
     "movied_text_background": "Fond du texte",
     "movied_green_background": "Fond vert",
-    "movied_original_video": "Vidéo originale"
+    "movied_original_video": "Vidéo originale",
+    "movied_remove_section": "Supprimer la section",
 })
 
 
@@ -391,6 +392,9 @@ class MoviedPlugin(Plugin):
                         else:
                             st.warning("Please select a video first.")
 
+            if st.button(t("movied_remove_section"), key="remove_section_btn"):
+                operation = f"remove_section {start_time} {end_time}"
+                self.add_to_operations(operation)
             st.write(t("movied_text_operations"))
             text_input = st.text_area(
                 t("movied_text_input"), height=100, key="text_input")
@@ -538,6 +542,19 @@ class MoviedPlugin(Plugin):
                                 anim_duration_sec, target_size, font, font_size,
                                 use_green_background=use_green_background
                             )
+                        elif cmd == "remove_section":  # Nouvelle gestion pour la suppression
+                            start_time, end_time = parts[1], parts[2]
+                            start_sec = self.parse_timecode(
+                                start_time) + duration_offset
+                            end_sec = self.parse_timecode(
+                                end_time) + duration_offset
+                            main_clip, duration_change = remove_section(
+                                main_clip, start_sec, end_sec)
+                            subtitles_df = self.adjust_subtitles(
+                                subtitles_df, start_time, duration_change)
+                            duration_offset += duration_change
+                            st.write(
+                                f"Section removed from {start_time} to {end_time}")
 
                     output_path = os.path.splitext(
                         video_path)[0] + "_edited.mp4"
