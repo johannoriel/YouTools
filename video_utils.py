@@ -7,6 +7,7 @@ import cv2
 import base64
 import ffmpeg
 import streamlit as st
+from moviepy import *
 
 
 def image_to_base64(image_path):
@@ -430,3 +431,119 @@ def parse_timecode_to_ms(timecode):
         st.error(
             f"Erreur lors de la conversion du timecode {timecode} : {str(e)}")
         return 0
+
+
+def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size):
+    """Remplace une section de la vidéo par une image."""
+    duration = end_sec - start_sec
+    audio_clip = main_clip.subclipped(start_sec, end_sec).audio
+    image_clip = ImageClip(image_path, duration=duration).resize(target_size)
+    if audio_clip:
+        image_clip = image_clip.with_audio(audio_clip)
+    return concatenate_videoclips([
+        main_clip.subclipped(0, start_sec),
+        image_clip,
+        main_clip.subclipped(end_sec)
+    ])
+
+
+def insert_video(main_clip, start_sec, video_path_insert, target_size):
+    """Insère une vidéo à une position donnée."""
+    insert_clip = VideoFileClip(video_path_insert).resize(target_size)
+    duration_change = insert_clip.duration
+    new_clip = concatenate_videoclips([
+        main_clip.subclipped(0, start_sec),
+        insert_clip,
+        main_clip.subclipped(start_sec)
+    ])
+    return new_clip, duration_change
+
+
+def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target_size):
+    """Remplace une section par une autre vidéo."""
+    replace_clip = VideoFileClip(video_path_replace).resize(target_size)
+    duration_change = replace_clip.duration - (end_sec - start_sec)
+    new_clip = concatenate_videoclips([
+        main_clip.subclipped(0, start_sec),
+        replace_clip,
+        main_clip.subclipped(end_sec)
+    ])
+    return new_clip, duration_change
+
+
+def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, target_size):
+    """Remplace une section par une vidéo en conservant l'audio original."""
+    duration = end_sec - start_sec
+    replace_clip = VideoFileClip(video_path_replace)
+    original_audio = main_clip.subclipped(start_sec, end_sec).audio
+
+    if replace_clip.duration > duration:
+        replace_clip = replace_clip.subclipped(0, duration)
+    replace_clip = replace_clip.resize(target_size).with_audio(original_audio)
+
+    return concatenate_videoclips([
+        main_clip.subclipped(0, start_sec),
+        replace_clip,
+        main_clip.subclipped(end_sec)
+    ])
+
+
+def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_duration_sec, target_size, font, font_size):
+    """Ajoute du texte animé sur une section de la vidéo."""
+    duration = end_sec - start_sec
+    audio_clip = main_clip.subclipped(start_sec, end_sec).audio
+
+    # Fond vert pour chromakey
+    background = ColorClip(size=target_size, color=(
+        0, 255, 0), duration=duration)
+
+    # Création du texte
+    text_content = text.replace("\\", "\n")
+    txt_clip = TextClip(
+        text=text_content,
+        font=font,
+        font_size=font_size,
+        color="white",
+        method="caption",
+        size=(int(target_size[0] * 0.8), None),
+        stroke_color="black",
+        stroke_width=1,
+    ).with_duration(duration)
+
+    # Boîte noire
+    text_padding = 10
+    text_box = ColorClip(
+        size=(txt_clip.w + 2 * text_padding, txt_clip.h + 2 * text_padding),
+        color=(0, 0, 0),
+        duration=duration
+    )
+
+    # Animation
+    if animation_type == "fromLeft":
+        def position_function(t):
+            if t < anim_duration_sec:
+                x = -txt_clip.w + \
+                    (target_size[0] / 2 + txt_clip.w / 2) * \
+                    (t / anim_duration_sec)
+            else:
+                x = (target_size[0] - txt_clip.w) / 2
+            y = (target_size[1] - txt_clip.h) / 2
+            return (x, y)
+
+        txt_clip = txt_clip.with_position(position_function)
+        text_box = text_box.with_position(
+            lambda t: (position_function(
+                t)[0] - text_padding, position_function(t)[1] - text_padding)
+        )
+
+    # Composition
+    animated_text_clip = CompositeVideoClip(
+        [background, text_box, txt_clip], size=target_size)
+    if audio_clip:
+        animated_text_clip = animated_text_clip.with_audio(audio_clip)
+
+    return concatenate_videoclips([
+        main_clip.subclipped(0, start_sec),
+        animated_text_clip,
+        main_clip.subclipped(end_sec)
+    ])

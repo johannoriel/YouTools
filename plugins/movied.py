@@ -8,8 +8,9 @@ import streamlit as st
 import pandas as pd
 import os
 from video_utils import load_subtitles_and_chapters, save_vtt, generate_subtitles, image_to_base64, generate_thumbnail
-from moviepy import *
+from video_utils import replace_with_image, insert_video, replace_with_video, replace_video_keep_audio, add_animated_text
 import json
+from moviepy import VideoFileClip
 
 # Translations
 translations["en"].update({
@@ -122,7 +123,7 @@ class MoviedPlugin(Plugin):
             )
             font_size = st.slider(
                 t("movied_font_size_label"),
-                20, 100, 40, step=5,  # De 20 à 100, défaut 40
+                50, 200, 100, step=5,
                 key="font_size_slider"
             )
             return selected_model, thumbnail_size, font, font_size
@@ -433,11 +434,13 @@ class MoviedPlugin(Plugin):
     def execute_operations(self, video_path, vtt_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
             try:
+                from video_utils import (replace_with_image, insert_video,
+                                         replace_with_video, replace_video_keep_audio,
+                                         add_animated_text)
+
                 main_clip = VideoFileClip(video_path)
-                # Get original video dimensions
                 target_size = (main_clip.w, main_clip.h)
                 subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
-                clips = [main_clip]
                 duration_offset = 0
 
                 with st.expander("Debug Information"):
@@ -455,49 +458,26 @@ class MoviedPlugin(Plugin):
                                 start_time) + duration_offset
                             end_sec = self.parse_timecode(
                                 end_time) + duration_offset
-                            duration = end_sec - start_sec
-                            audio_clip = main_clip.subclipped(
-                                start_time=start_sec, end_time=end_sec).audio
-                            image_clip = ImageClip(
-                                image_path, duration=duration)
-                            # Apply resize effect
-                            image_clip = image_clip.resized(target_size)
-                            if audio_clip:
-                                image_clip = image_clip.with_audio(audio_clip)
-                            clips = [
-                                main_clip.subclipped(
-                                    start_time=0, end_time=start_sec),
-                                image_clip,
-                                main_clip.subclipped(start_time=end_sec)
-                            ]
+                            main_clip = replace_with_image(
+                                main_clip, start_sec, end_sec, image_path, target_size)
                             col1, _ = st.columns([1, 3])
                             with col1:
                                 st.image(
                                     image_path, caption=f"Using image: {image_path}", width=100)
-                            main_clip = concatenate_videoclips(clips)
 
                         elif cmd == "insert_video":
                             start_time, video_path_insert = parts[1], " ".join(
                                 parts[2:])
                             start_sec = self.parse_timecode(
                                 start_time) + duration_offset
-                            insert_clip = VideoFileClip(video_path_insert)
-                            # Apply resize effect
-                            insert_clip = insert_clip.resized(target_size)
-                            duration_change = insert_clip.duration
-                            clips = [
-                                main_clip.subclipped(
-                                    start_time=0, end_time=start_sec),
-                                insert_clip,
-                                main_clip.subclipped(start_time=start_sec)
-                            ]
-                            col1, _ = st.columns([1, 3])
-                            with col1:
-                                st.video(video_path_insert)
-                            main_clip = concatenate_videoclips(clips)
+                            main_clip, duration_change = insert_video(
+                                main_clip, start_sec, video_path_insert, target_size)
                             subtitles_df = self.adjust_subtitles(
                                 subtitles_df, start_time, duration_change)
                             duration_offset += duration_change
+                            col1, _ = st.columns([1, 3])
+                            with col1:
+                                st.video(video_path_insert)
 
                         elif cmd == "replace_video":
                             start_time, end_time, video_path_replace = parts[1], parts[2], " ".join(
@@ -506,25 +486,15 @@ class MoviedPlugin(Plugin):
                                 start_time) + duration_offset
                             end_sec = self.parse_timecode(
                                 end_time) + duration_offset
-                            replace_clip = VideoFileClip(video_path_replace)
-                            # Apply resize effect
-                            replace_clip = replace_clip.resized(target_size)
-                            duration_change = replace_clip.duration - \
-                                (end_sec - start_sec)
-                            clips = [
-                                main_clip.subclipped(
-                                    start_time0, end_timestart_sec),
-                                replace_clip,
-                                main_clip.subclipped(start_time=end_sec)
-                            ]
+                            main_clip, duration_change = replace_with_video(
+                                main_clip, start_sec, end_sec, video_path_replace, target_size)
+                            subtitles_df = self.adjust_subtitles(
+                                subtitles_df, end_time, duration_change)
+                            duration_offset += duration_change
                             col1, _ = st.columns([1, 3])
                             with col1:
                                 st.video(
                                     video_path_replace, caption=f"Using video: {video_path_replace}", width=100)
-                            main_clip = concatenate_videoclips(clips)
-                            subtitles_df = self.adjust_subtitles(
-                                subtitles_df, end_time, duration_change)
-                            duration_offset += duration_change
 
                         elif cmd == "replace_video_keep_audio":
                             start_time, end_time, video_path_replace = parts[1], parts[2], " ".join(
@@ -533,127 +503,32 @@ class MoviedPlugin(Plugin):
                                 start_time) + duration_offset
                             end_sec = self.parse_timecode(
                                 end_time) + duration_offset
-                            duration = end_sec - start_sec
-
-                            # Charger la nouvelle vidéo et récupérer l'audio original
-                            replace_clip = VideoFileClip(video_path_replace)
-                            original_audio = main_clip.subclipped(
-                                start_sec, end_sec).audio
-
-                            # Ajuster la durée de la nouvelle vidéo
-                            if replace_clip.duration > duration:
-                                replace_clip = replace_clip.subclipped(
-                                    0, duration)
-                            # Si plus court, on garde la durée réelle
-
-                            # Redimensionner et appliquer l'audio original
-                            replace_clip = replace_clip.resized(target_size)
-                            replace_clip = replace_clip.with_audio(
-                                original_audio)
-
-                            clips = [
-                                main_clip.subclipped(0, start_sec),
-                                replace_clip,
-                                main_clip.subclipped(end_sec)
-                            ]
+                            main_clip = replace_video_keep_audio(
+                                main_clip, start_sec, end_sec, video_path_replace, target_size)
                             col1, _ = st.columns([1, 3])
                             with col1:
-                                st.video(
-                                    video_path_replace)
-                            main_clip = concatenate_videoclips(clips)
-                            # Pas d'ajustement des sous-titres car la durée reste la même
+                                st.video(video_path_replace)
+
                         elif cmd == "addtext":
-                            # Texte complet
                             start_time, end_time, animation_type, anim_duration, text = parts[
                                 1], parts[2], parts[3], parts[4], parts[5]
                             start_sec = self.parse_timecode(
                                 start_time) + duration_offset
                             end_sec = self.parse_timecode(
                                 end_time) + duration_offset
-                            duration = end_sec - start_sec
-                            # Enlever 's' et convertir en float
                             anim_duration_sec = float(anim_duration[:-1])
+                            main_clip = add_animated_text(
+                                main_clip, start_sec, end_sec, text, animation_type,
+                                anim_duration_sec, target_size, font, font_size)
 
-                            # Extraire l'audio original
-                            audio_clip = main_clip.subclipped(
-                                start_sec, end_sec).audio
-
-                            # Créer un fond vert pour le chromakey (#00FF00)
-                            background = ColorClip(size=target_size, color=(
-                                0, 255, 0), duration=duration)
-
-                            # Convertir les \\ en sauts de ligne pour le texte
-                            text_content = text.replace("\\", "\n")
-
-                            # Créer le clip texte en gras
-                            txt_clip = TextClip(
-                                text=text_content,
-                                font=font,
-                                font_size=font_size,
-                                color="white",
-                                method="caption",
-                                # 80% de la largeur max
-                                size=(int(target_size[0] * 0.8), None),
-                                stroke_color="black",  # Contour noir pour simuler le gras
-                                stroke_width=1,  # Épaisseur du contour pour effet gras
-                                vertical_align="center"
-                            ).with_duration(duration)
-
-                            # Créer une boîte noire basée sur la taille du texte avec une petite marge
-                            text_padding = 10  # Marge de 10 pixels autour du texte
-                            text_box = ColorClip(
-                                size=(txt_clip.w + 2 * text_padding,
-                                      txt_clip.h + 2 * text_padding),
-                                color=(0, 0, 0),
-                                duration=duration
-                            )
-
-                            # Animation : glisser depuis la gauche pendant anim_duration_sec, puis rester centré
-                            if animation_type == "fromLeft":
-                                def position_function(t):
-                                    if t < anim_duration_sec:
-                                        # De hors écran à gauche vers le centre
-                                        x = -txt_clip.w + \
-                                            (target_size[0] / 2 + txt_clip.w /
-                                             2) * (t / anim_duration_sec)
-                                    else:
-                                        # Centré horizontalement
-                                        x = (target_size[0] - txt_clip.w) / 2
-                                    # Centré verticalement
-                                    y = (target_size[1] - txt_clip.h) / 2
-                                    return (x, y)
-
-                                # Appliquer la même position au texte et à la boîte noire
-                                txt_clip = txt_clip.with_position(
-                                    position_function)
-                                text_box = text_box.with_position(
-                                    lambda t: (position_function(
-                                        t)[0] - text_padding, position_function(t)[1] - text_padding)
-                                )
-
-                            # Combiner le fond vert, la boîte noire et le texte
-                            animated_text_clip = CompositeVideoClip(
-                                [background, text_box, txt_clip],
-                                size=target_size
-                            )
-                            if audio_clip:
-                                animated_text_clip = animated_text_clip.with_audio(
-                                    audio_clip)
-
-                            # Remplacer la section
-                            clips = [
-                                main_clip.subclipped(0, start_sec),
-                                animated_text_clip,
-                                main_clip.subclipped(end_sec)
-                            ]
-                            main_clip = concatenate_videoclips(clips)
-
-                output_path = os.path.splitext(video_path)[0] + "_edited.mp4"
-                main_clip.write_videofile(
-                    output_path, codec="libx264", audio_codec="aac")
-                save_vtt(vtt_path, subtitles_df, pd.DataFrame())
-                st.success(f"Video generated successfully at {output_path}")
-                st.rerun()
+                    output_path = os.path.splitext(
+                        video_path)[0] + "_edited.mp4"
+                    main_clip.write_videofile(
+                        output_path, codec="libx264", audio_codec="aac")
+                    save_vtt(vtt_path, subtitles_df, pd.DataFrame())
+                    st.success(
+                        f"Video generated successfully at {output_path}")
+                    st.rerun()
             except Exception as e:
                 st.error(t("movied_error").format(error=str(e)))
                 raise e
