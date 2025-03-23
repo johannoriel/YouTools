@@ -10,6 +10,7 @@ import time
 import random
 import re
 from bench_db import BenchDB
+import pandas as pd
 
 try:
     from pylatexenc.latex2text import LatexNodes2Text
@@ -38,6 +39,17 @@ translations["en"].update({
     "model1_label": "Model 1",
     "model2_label": "Model 2",
     "expected_response_label": "Expected Response",
+    "matrix_tab": "Matrix Test",
+    "matrix_header": "Matrix Multiplication Test",
+    "startx_label": "Start X",
+    "starty_label": "Start Y",
+    "step_label": "Step",
+    "count_label": "Count",
+    "repeat_label": "Repeat",
+    "run_matrix_test": "Run Matrix Test",
+    "running_matrix": "Running matrix test...",
+    "matrix_results": "Matrix Results",
+    "select_llm": "Select LLM for Matrix Test",
 })
 
 translations["fr"].update({
@@ -60,6 +72,17 @@ translations["fr"].update({
     "model1_label": "Modèle 1",
     "model2_label": "Modèle 2",
     "expected_response_label": "Réponse Attendue",
+    "matrix_tab": "Test Matrice",
+    "matrix_header": "Test de Multiplication Matricielle",
+    "startx_label": "Début X",
+    "starty_label": "Début Y",
+    "step_label": "Pas",
+    "count_label": "Nombre",
+    "repeat_label": "Répétitions",
+    "run_matrix_test": "Lancer Test Matrice",
+    "running_matrix": "Exécution test matrice...",
+    "matrix_results": "Résultats Matrice",
+    "select_llm": "Sélectionner LLM pour Test Matrice",
 })
 
 
@@ -111,7 +134,8 @@ class BenchPlugin(Plugin):
         return [
             {"name": t("config_tab"), "plugin": "benchplugin"},
             {"name": t("bench_tab"), "plugin": "benchplugin"},
-            {"name": t("compare_tab"), "plugin": "benchplugin"}
+            {"name": t("compare_tab"), "plugin": "benchplugin"},
+            {"name": t("matrix_tab"), "plugin": "benchplugin"}
         ]
 
     def shorten_response(self, response: str, nstart: int = 100, nend: int = 50) -> str:
@@ -159,21 +183,17 @@ class BenchPlugin(Plugin):
         return text
 
     def run(self, config):
-        # Define the tabs
-        tab1, tab2, tab3 = st.tabs(
-            [t("config_tab"), t("bench_tab"), t("compare_tab")])
+        tab1, tab2, tab3, tab4 = st.tabs(
+            [t("config_tab"), t("bench_tab"), t("compare_tab"), t("matrix_tab")])
 
-        # Config tab
         with tab1:
             self.config_tab(config)
-
-        # Bench tab
         with tab2:
             self.bench_tab(config)
-
-        # Compare tab
         with tab3:
             self.compare_tab(config)
+        with tab4:
+            self.matrix_tab(config)
 
     def get_available_models(self, url, api_key):
         """Try to get models from both Ollama and LM Studio endpoints with better empty response handling"""
@@ -704,6 +724,118 @@ class BenchPlugin(Plugin):
 
                 if r1 != results1[-1]:
                     st.divider()
+
+    def matrix_tab(self, config):
+        st.header(t("matrix_header"))
+
+        servers = st.session_state.get("servers", config.get(
+            self.name, {}).get("bench_servers", []))
+        model_options = [self.get_server_display_name(
+            s["url"], s["model"]) for s in servers if s.get("model")]
+
+        selected_model = st.selectbox(t("select_llm"), model_options)
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            startx = st.number_input(t("startx_label"), value=3, step=1)
+        with col2:
+            starty = st.number_input(t("starty_label"), value=4, step=1)
+        with col3:
+            step = st.number_input(t("step_label"), value=7, step=1)
+        with col4:
+            count = st.number_input(
+                t("count_label"), min_value=1, value=3, step=1)
+        with col5:
+            repeat = st.number_input(
+                t("repeat_label"), min_value=1, value=3, step=1)
+
+        if st.button(t("run_matrix_test")) and selected_model:
+            with st.spinner(t("running_matrix")):
+                server = next(s for s in servers if self.get_server_display_name(
+                    s["url"], s["model"]) == selected_model)
+
+                # Générer les séries de nombres
+                x_series = [startx + i * step for i in range(count)]
+                y_series = [starty + i * step for i in range(count)]
+
+                # Initialiser la matrice des résultats détaillés
+                detailed_results = [[[]
+                                    for _ in range(count)] for _ in range(count)]
+                success_rates = [
+                    [0 for _ in range(count)] for _ in range(count)]
+
+                total_tests = count * count * repeat
+                progress_bar = st.progress(0.0)
+                tests_completed = 0
+
+                # Appels au LLM dans un expander collapsed
+                with st.expander("LLM Calls", expanded=False):
+                    # Exécuter les tests
+                    for r in range(repeat):
+                        for i, x in enumerate(x_series):
+                            for j, y in enumerate(y_series):
+                                expected = x * y
+                                prompt = f"{x} * {y} ="
+                                st.write(f"Calling LLM for {prompt}")
+                                raw_response, _, _, _ = self.call_llm(
+                                    url=server["url"],
+                                    api_key=server["api_key"],
+                                    model=server["model"],
+                                    prompt=prompt,
+                                    sysprompt="Return only the numerical result of the multiplication, nothing else."
+                                )
+                                st.write(f"Response: {raw_response}")
+                                try:
+                                    result = int(raw_response.strip())
+                                    is_correct = result == expected
+                                    detailed_results[i][j].append({
+                                        'expected': expected,
+                                        'obtained': result,
+                                        'correct': is_correct
+                                    })
+                                    if is_correct:
+                                        success_rates[i][j] += 1
+                                except (ValueError, AttributeError):
+                                    detailed_results[i][j].append({
+                                        'expected': expected,
+                                        'obtained': raw_response,
+                                        'correct': False
+                                    })
+                                tests_completed += 1
+                                progress_bar.progress(
+                                    tests_completed / total_tests)
+
+                # Calculer les pourcentages
+                for i in range(count):
+                    for j in range(count):
+                        success_rates[i][j] = (
+                            success_rates[i][j] / repeat) * 100
+
+                # Afficher les résultats avec DataFrame
+                st.subheader(t("matrix_results"))
+                df_data = {}
+                for j, y in enumerate(y_series):
+                    df_data[str(y)] = [f"{rate:.1f}%" for rate in [
+                        success_rates[i][j] for i in range(count)]]
+                df = pd.DataFrame(df_data, index=[str(x) for x in x_series])
+                st.dataframe(df)
+
+                # Afficher les détails dans un expander avec matrice multiligne
+                with st.expander("Detailed Results"):
+                    detail_df_data = {}
+                    for j, y in enumerate(y_series):
+                        column_data = []
+                        for i, x in enumerate(x_series):
+                            details = detailed_results[i][j]
+                            text = f"Expected: {details[0]['expected']}\n" + \
+                                "\n".join(
+                                    f"Obtained {k+1}: {d['obtained']}" for k, d in enumerate(details))
+                            column_data.append(text)
+                        detail_df_data[str(y)] = column_data
+                    detail_df = pd.DataFrame(detail_df_data, index=[
+                        str(x) for x in x_series])
+                    # Ajuster la hauteur des cellules pour afficher tout le texte
+                    st.dataframe(detail_df, height=200)
 
 
 if __name__ == "__main__":
