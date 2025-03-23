@@ -868,7 +868,7 @@ class BenchPlugin(Plugin):
                                         api_key=server["api_key"],
                                         model=server["model"],
                                         prompt=prompt,
-                                        sysprompt="Return only the numerical result of the multiplication, nothing else.",
+                                        sysprompt="Return only the numerical result of the multiplication, nothing else. Give the result in a single line with only the numbers.",
                                         verbose=debug_mode  # Passer l'option debug
                                     )
                                     st.write(f"Response: {raw_response}")
