@@ -4,7 +4,8 @@ import streamlit as st
 import os
 from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
-from social_api import TwitterAPI  # Utilisation de l'API Twitter depuis social_api.py
+# Utilisation de l'API Twitter depuis social_api.py
+from social_api import TwitterAPI
 import pyperclip  # Pour copier le texte en un clic
 
 # Ajout des traductions spécifiques à ce plugin
@@ -46,6 +47,7 @@ translations["fr"].update({
     "promotetwitter_error": "Erreur lors de la publication : ",
 })
 
+
 def remove_quotes(text: str) -> str:
     if text.startswith('"') and text.endswith('"'):
         return text[1:-1]
@@ -53,14 +55,15 @@ def remove_quotes(text: str) -> str:
         return text[1:-1]
     return text
 
+
 def get_tweet_url(username: str, tweet_id: str) -> str:
     return f"https://twitter.com/{username}/status/{tweet_id}"
+
 
 class PromotetwitterPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
         self._initialize_session_state()
-
 
     def get_tweet_url(self, username: str, tweet_id: str) -> str:
         return f"https://twitter.com/{username}/status/{tweet_id}"
@@ -133,7 +136,8 @@ class PromotetwitterPlugin(Plugin):
         for response in selected_responses:
             tweet_id = response['tweet_id']
             response_text = response['response']
-            twitter_api.create_tweet(response_text, in_reply_to_tweet_id=tweet_id)
+            twitter_api.create_tweet(
+                response_text, in_reply_to_tweet_id=tweet_id)
 
     def has_llm_error(self, response_text: str) -> bool:
         return "litellm.APIError" in response_text
@@ -147,21 +151,26 @@ class PromotetwitterPlugin(Plugin):
         if os.path.exists(transcript_path):
             with open(transcript_path, 'r') as f:
                 transcript = f.read()
-            st.text_area(t("promotetwitter_transcript"), transcript, height=100, disabled=True)
+            st.text_area(t("promotetwitter_transcript"), transcript,
+                         height=100, disabled=True, key="promotetwitter_transcript")
         else:
-            transcript = st.text_area(t("promotetwitter_transcript"), height=200)
+            transcript = st.text_area(
+                t("promotetwitter_transcript"), height=200, key="promotetwitter_transcript")
 
         # Load or input URL
         url_path = os.path.join(work_dir, "url.txt")
         if os.path.exists(url_path):
             with open(url_path, 'r') as f:
                 url = f.read().strip()
-            st.text_input(t("promotetwitter_url"), url, disabled=True)
+            st.text_input(t("promotetwitter_url"), url,
+                          disabled=True, key="promotetwitter_url")
         else:
-            url = st.text_input(t("promotetwitter_url"))
+            url = st.text_input(t("promotetwitter_url"),
+                                key="promotetwitter_url")
 
         # Input keywords to search
-        keywords = st.text_input(t("promotetwitter_keywords"), key="promotetwitter_keywords")
+        keywords = st.text_input(
+            t("promotetwitter_keywords"), key="promotetwitter_keywords")
         if not keywords:
             st.warning("Please enter keywords to search for tweets.")
             return
@@ -177,7 +186,8 @@ class PromotetwitterPlugin(Plugin):
         if st.button(t("promotetwitter_search")):
             with st.spinner(t("promotetwitter_searching")):
                 max_tweets = config['promotetwitter']['max_tweets']
-                st.session_state.tweets = self.search_tweets(keywords, max_tweets, api_version)
+                st.session_state.tweets = self.search_tweets(
+                    keywords, max_tweets, api_version)
 
         # Display tweets
         if st.session_state.tweets:
@@ -186,8 +196,10 @@ class PromotetwitterPlugin(Plugin):
                 st.write(f"**@{tweet['user']}**: {tweet['text']}")
 
                 # Utilisation de l'URL reconstruite si tweet['url'] est vide
-                tweet_url = tweet.get('url', get_tweet_url(tweet['user'], tweet['id']))
-                st.markdown(f"[Voir le tweet]({tweet_url})")  # Ajout du lien vers le tweet
+                tweet_url = tweet.get(
+                    'url', get_tweet_url(tweet['user'], tweet['id']))
+                # Ajout du lien vers le tweet
+                st.markdown(f"[Voir le tweet]({tweet_url})")
 
                 selected = st.checkbox(
                     f"Select Tweet {i+1}",
@@ -198,7 +210,8 @@ class PromotetwitterPlugin(Plugin):
         # Generate responses button
         if st.button(t("promotetwitter_generate_responses")) and st.session_state.selected_tweets:
             with st.spinner(t("promotetwitter_generating")):
-                selected_tweets = [i for i, selected in st.session_state.selected_tweets.items() if selected]
+                selected_tweets = [
+                    i for i, selected in st.session_state.selected_tweets.items() if selected]
                 st.session_state.generated_responses = self.generate_responses(
                     config, selected_tweets, transcript, url
                 )
@@ -218,7 +231,9 @@ class PromotetwitterPlugin(Plugin):
                 # Afficher le tweet original
                 st.write(f"**Tweet original de @{tweet_user}**:")
                 st.write(tweet_text)
-                st.markdown(f"[Voir le tweet]({self.get_tweet_url(tweet_user, tweet['id'])})")  # Lien vers le tweet
+                # Lien vers le tweet
+                st.markdown(
+                    f"[Voir le tweet]({self.get_tweet_url(tweet_user, tweet['id'])})")
 
                 # Afficher la réponse générée
                 st.write(f"**Réponse générée pour ce tweet**:")
@@ -232,7 +247,8 @@ class PromotetwitterPlugin(Plugin):
 
                 # Vérification de la longueur de la réponse
                 if len(edited_response) > 280:
-                    st.warning(f"⚠️ Cette réponse dépasse 280 caractères ({len(edited_response)} caractères). Veuillez la raccourcir.")
+                    st.warning(
+                        f"⚠️ Cette réponse dépasse 280 caractères ({len(edited_response)} caractères). Veuillez la raccourcir.")
 
                 # Vérification des erreurs LLM
                 if self.has_llm_error(edited_response):
@@ -247,7 +263,8 @@ class PromotetwitterPlugin(Plugin):
                         st.success("Réponse copiée dans le presse-papiers !")
                 with col2:
                     tweet_url = self.get_tweet_url(tweet_user, tweet['id'])
-                    st.markdown(f"[Répondre à ce tweet]({tweet_url})", unsafe_allow_html=True)
+                    st.markdown(
+                        f"[Répondre à ce tweet]({tweet_url})", unsafe_allow_html=True)
                 with col3:
                     selected = st.checkbox(
                         f"Select Response {i+1}",
@@ -273,10 +290,12 @@ class PromotetwitterPlugin(Plugin):
                                 )
                                 llm_response = RagllmPlugin("ragllm", self.plugin_manager).process_with_llm(
                                     prompt,
-                                    config.get('llm', {}).get('llm_sys_prompt', ''),
+                                    config.get('llm', {}).get(
+                                        'llm_sys_prompt', ''),
                                     tweet_text
                                 )
-                                clean_response = remove_quotes(llm_response.strip())
+                                clean_response = remove_quotes(
+                                    llm_response.strip())
                                 st.session_state.generated_responses[i]['response'] = clean_response
 
                         st.success("Réponses regénérées avec succès !")

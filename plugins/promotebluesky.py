@@ -4,7 +4,8 @@ import streamlit as st
 import os
 from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
-from social_api import BlueskyAPI  # Utilisation de l'API Bluesky depuis social_api.py
+# Utilisation de l'API Bluesky depuis social_api.py
+from social_api import BlueskyAPI
 import pyperclip  # Pour copier le texte en un clic
 
 # Ajout des traductions spécifiques à ce plugin
@@ -46,6 +47,7 @@ translations["fr"].update({
     "promotebluesky_error": "Erreur lors de la publication : ",
 })
 
+
 def remove_quotes(text: str) -> str:
     if text.startswith('"') and text.endswith('"'):
         return text[1:-1]
@@ -53,8 +55,10 @@ def remove_quotes(text: str) -> str:
         return text[1:-1]
     return text
 
+
 def get_post_url(handle: str, post_id: str) -> str:
     return f"https://bsky.app/profile/{handle}/post/{post_id}"
+
 
 class PromoteblueskyPlugin(Plugin):
     def __init__(self, name, plugin_manager):
@@ -131,8 +135,6 @@ class PromoteblueskyPlugin(Plugin):
             response_text = response['response']
             bluesky_api.create_post(response_text, in_reply_to_post_id=post_id)
 
-
-
     def run(self, config):
         st.header(t("promotebluesky_header"))
 
@@ -142,21 +144,26 @@ class PromoteblueskyPlugin(Plugin):
         if os.path.exists(transcript_path):
             with open(transcript_path, 'r') as f:
                 transcript = f.read()
-            st.text_area(t("promotebluesky_transcript"), transcript, height=100, disabled=True)
+            st.text_area(t("promotebluesky_transcript"), transcript,
+                         height=100, disabled=True, key="promotebluesky_transcript")
         else:
-            transcript = st.text_area(t("promotebluesky_transcript"), height=200)
+            transcript = st.text_area(
+                t("promotebluesky_transcript"), height=200, key="promotebluesky_transcript")
 
         # Load or input URL
         url_path = os.path.join(work_dir, "url.txt")
         if os.path.exists(url_path):
             with open(url_path, 'r') as f:
                 url = f.read().strip()
-            st.text_input(t("promotebluesky_url"), url, disabled=True)
+            st.text_input(t("promotebluesky_url"), url,
+                          disabled=True, key="promotebluesky_url")
         else:
-            url = st.text_input(t("promotebluesky_url"))
+            url = st.text_input(t("promotebluesky_url"),
+                                key="promotebluesky_url")
 
         # Input keywords to search
-        keywords = st.text_input(t("promotebluesky_keywords"), key="promotebluesky_keywords")
+        keywords = st.text_input(
+            t("promotebluesky_keywords"), key="promotebluesky_keywords")
         if not keywords:
             st.warning("Please enter keywords to search for posts.")
             return
@@ -173,11 +180,13 @@ class PromoteblueskyPlugin(Plugin):
         if st.button(t("promotebluesky_search")):
             with st.spinner(t("promotebluesky_searching")):
                 max_posts = config['promotebluesky']['max_posts']
-                st.session_state.posts = self.search_posts(keywords, max_posts, search_engine)
+                st.session_state.posts = self.search_posts(
+                    keywords, max_posts, search_engine)
 
                 # Vérification des mots-clés dans les résultats
                 if st.session_state.posts:
-                    keyword_list = [kw.strip().lower() for kw in keywords.split(" OR ")]
+                    keyword_list = [kw.strip().lower()
+                                    for kw in keywords.split(" OR ")]
                     matching_posts = 0
                     total_posts = len(st.session_state.posts)
 
@@ -186,7 +195,8 @@ class PromoteblueskyPlugin(Plugin):
                         if any(keyword in post_text for keyword in keyword_list):
                             matching_posts += 1
 
-                    match_percentage = (matching_posts / total_posts) * 100 if total_posts > 0 else 0
+                    match_percentage = (
+                        matching_posts / total_posts) * 100 if total_posts > 0 else 0
                     st.info(f"Pourcentage de posts contenant au moins un mot-clé : {match_percentage:.2f}% "
                             f"({matching_posts}/{total_posts})")
                 else:
@@ -197,7 +207,8 @@ class PromoteblueskyPlugin(Plugin):
             st.subheader(t("promotebluesky_posts"))
             for i, post in enumerate(st.session_state.posts):
                 st.write(f"**@{post['handle']}**: {post['text']}")
-                post_url = post.get('url', get_post_url(post['handle'], post['id']))
+                post_url = post.get('url', get_post_url(
+                    post['handle'], post['id']))
                 st.markdown(f"[Voir le post]({post_url})")
 
                 selected = st.checkbox(
@@ -209,7 +220,8 @@ class PromoteblueskyPlugin(Plugin):
         # Generate responses button
         if st.button(t("promotebluesky_generate_responses")) and st.session_state.selected_posts:
             with st.spinner(t("promotebluesky_generating")):
-                selected_posts = [i for i, selected in st.session_state.selected_posts.items() if selected]
+                selected_posts = [
+                    i for i, selected in st.session_state.selected_posts.items() if selected]
                 st.session_state.generated_responses = self.generate_responses(
                     config, selected_posts, transcript, url
                 )
@@ -228,7 +240,8 @@ class PromoteblueskyPlugin(Plugin):
                 st.session_state.generated_responses[i]['response'] = edited_response
 
                 if len(edited_response) > 300:
-                    st.warning(f"⚠️ Cette réponse dépasse 300 caractères ({len(edited_response)} caractères). Veuillez la raccourcir.")
+                    st.warning(
+                        f"⚠️ Cette réponse dépasse 300 caractères ({len(edited_response)} caractères). Veuillez la raccourcir.")
 
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
@@ -236,8 +249,10 @@ class PromoteblueskyPlugin(Plugin):
                         pyperclip.copy(edited_response)
                         st.success("Réponse copiée dans le presse-papiers !")
                 with col2:
-                    post_url = get_post_url(st.session_state.posts[response['post_id']]['handle'], st.session_state.posts[response['post_id']]['id'])
-                    st.markdown(f"[Répondre à ce post]({post_url})", unsafe_allow_html=True)
+                    post_url = get_post_url(
+                        st.session_state.posts[response['post_id']]['handle'], st.session_state.posts[response['post_id']]['id'])
+                    st.markdown(
+                        f"[Répondre à ce post]({post_url})", unsafe_allow_html=True)
                 with col3:
                     selected = st.checkbox(
                         f"Select Response {i+1}",
