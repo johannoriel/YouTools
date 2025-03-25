@@ -160,7 +160,7 @@ class MoviedPlugin(Plugin):
             video_df[["Video", "Has Transcript"]],
             selection_mode="single-row",
             on_select="rerun",
-            key="video_selector",
+            key="movied_selector",
             hide_index=True
         )
         return selected_video
