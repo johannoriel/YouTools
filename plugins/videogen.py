@@ -216,7 +216,12 @@ class VideogenPlugin(Plugin):
 
         video = self.pipe(**video_params)
 
-        output_path = os.path.join(output_dir, f"video_{seed}.mp4")
+        import re
+        clean_prompt = re.sub(
+            r'[^a-zA-Z0-9]', '', prompt.encode('ascii', 'ignore').decode('ascii'))
+        truncated_prompt = clean_prompt[:20]
+        output_filename = f"video_{truncated_prompt}_{seed}.mp4"
+        output_path = os.path.join(output_dir, output_filename)
         save_video(video, output_path, fps=fps, quality=quality)
         return output_path
 
