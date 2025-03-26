@@ -99,7 +99,7 @@ translations["fr"].update({
 })
 
 
-class VideoPlugin(Plugin):
+class VideocutPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.working_dir = None
