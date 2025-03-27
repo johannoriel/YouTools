@@ -558,6 +558,7 @@ def generate_animation_css(animation_type, target_column=None, is_exit=False):
 
     return css
 
+
 # Display an item in the app (modified for vertical centering)
 
 
@@ -589,7 +590,7 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
         col1, col2 = st.columns(2, vertical_alignment=alignment)
         with col1:
             if target_column == "left":
-                include_animation()
+                include_animation()  # BUG : trigger also right animation
             display_item(item["items"][0], directories,
                          is_presentation, True, animation_type, target_column, is_exit)
         with col2:
@@ -652,6 +653,24 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
                     st.error("Failed to convert URL to image")
 
 
+def estimate_markdown_size(content):
+    """Estime la taille relative du contenu Markdown."""
+    lines = content.split("\n")
+    total_weight = 0
+    for line in lines:
+        line = line.strip()
+        if line.startswith("# "):
+            total_weight += 40  # Poids pour h1
+        elif line.startswith("## "):
+            total_weight += 30  # Poids pour h2
+        elif line.startswith("### "):
+            total_weight += 20  # Poids pour h3
+        elif line:
+            # Poids pour texte (10 par "bloc" de 80 caractères)
+            total_weight += 10 * (len(line) // 80 + 1)
+    return total_weight, len(lines)
+
+
 class EzprezPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
@@ -702,7 +721,7 @@ class EzprezPlugin(Plugin):
             col1, col2 = st.columns(2)
             with col1:
                 button(t("ezprez_preview_button"), "Ctrl+P", lambda: st.session_state.update(
-                    {'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}))
+                    {'presentation_mode': False, 'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}))
             with col2:
                 button(t("ezprez_launch_button"), "Ctrl+Enter", lambda: st.session_state.update(
                     {'presentation_mode': True, 'input_text': st.session_state.get('input_text', ''),
@@ -779,21 +798,33 @@ class EzprezPlugin(Plugin):
                         <style>
                         .stMain { background-color: #00FF00; }
                         .stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain h5, .stMain h6,
-                        .stMain p, .stMain ul, .stMain ol, .stMain li, .stMain blockquote {
+                        .stMain p, .stMain ul, .stMain ol, .stMain blockquote {
                             background-color: #000000; color: #FFFFFF; padding: 10px; margin: 5px 0; display: inline-block;
                         }
                         .stMain ul, .stMain ol { display: block; padding: 10px 10px 10px 30px; }
-                        .stMain li { margin: 0; display: block; }
                         </style>
                     """, unsafe_allow_html=True)
                 st.checkbox(t("ezprez_vertical_center_label"),
                             value=False, key="vertical_center")
+                auto_scale = st.checkbox(
+                    "AutoScale", value=False, key="auto_scale")
                 font_size_scale = st.slider(
-                    "Font Size Scale", 1.0, 6.0, 2.0, 0.1, key="font_size_scale")
+                    "Font Size Scale", 1.0, 6.0, 2.0, 0.1, key="font_size_scale", disabled=auto_scale)
 
         # Apply font size scaling
         if st.session_state['presentation_mode']:
             font_size_scale = st.session_state.get('font_size_scale', 1.0)
+            slides = st.session_state.get('slides', [])
+            current = st.session_state.get('current_slide', 0)
+            if auto_scale and slides and current < len(slides) and slides[current]["type"] == "markdown":
+                weight, line_count = estimate_markdown_size(
+                    slides[current]["content"])
+                font_size_scale = max(1.0, min(4.0, 300 / max(weight, 1)))
+            if auto_scale and slides and current < len(slides) and slides[current]["type"] == "group":
+                if slides[current]["items"][0]["type"] == "markdown":
+                    weight, line_count = estimate_markdown_size(
+                        slides[current]["items"][0]["content"])
+                    font_size_scale = max(1.0, min(4.0, 250 / max(weight, 1)))
             st.markdown(f"""
                 <style>
                 .stMain {{ font-size: calc(1rem * {font_size_scale}); }}
