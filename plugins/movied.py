@@ -46,6 +46,9 @@ translations["en"].update({
     "movied_green_background": "Green Background",
     "movied_original_video": "Original Video",
     "movied_remove_section": "Remove Section",
+    "movied_reference_audio": "Reference Audio File",
+    "movied_normalize_audio": "Normalize Audio",
+    "movied_normalizing": "Normalizing audio...",
 })
 
 translations["fr"].update({
@@ -82,6 +85,9 @@ translations["fr"].update({
     "movied_green_background": "Fond vert",
     "movied_original_video": "Vidéo originale",
     "movied_remove_section": "Supprimer la section",
+    "movied_reference_audio": "Fichier Audio de Référence",
+    "movied_normalize_audio": "Normaliser le Son",
+    "movied_normalizing": "Normalisation du son en cours...",
 })
 
 
@@ -90,6 +96,7 @@ class MoviedPlugin(Plugin):
         super().__init__(name, plugin_manager)
         self.working_dir = None
         self.media_dirs = []
+        self.reference_audio_path = None
 
     def get_config_fields(self):
         return {
@@ -102,6 +109,11 @@ class MoviedPlugin(Plugin):
                 "type": "textarea",
                 "label": t("movied_media_dirs"),
                 "default": t("movied_media_dirs_default")
+            },
+            "movied_reference_audio": {  # Nouveau champ
+                "type": "text",
+                "label": t("movied_reference_audio"),
+                "default": "/path/to/sample.mp3"
             }
         }
 
@@ -171,21 +183,34 @@ class MoviedPlugin(Plugin):
             video_info = video_df.iloc[idx]
             vtt_path = os.path.splitext(video_info["Full Path"])[0] + ".vtt"
 
-            # Always display the "Generate Transcript" button
-            if st.button(t("movied_generate_transcript")):
-                with st.spinner(t("movied_processing")):
-                    try:
-                        generate_subtitles(
-                            video_info["Full Path"], selected_model)
-                        subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
-                        st.session_state["subtitles_df"] = subtitles_df
-                        st.session_state["current_vtt_path"] = vtt_path
-                        st.success(t("movied_success").format(
-                            video=os.path.basename(video_info["Full Path"])))
-                        st.rerun()
-                    except Exception as e:
-                        st.error(t("movied_error").format(error=str(e)))
-                        return None, None, None
+            # Créer deux colonnes pour les boutons
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(t("movied_generate_transcript")):
+                    with st.spinner(t("movied_processing")):
+                        try:
+                            generate_subtitles(
+                                video_info["Full Path"], selected_model)
+                            subtitles_df, _ = load_subtitles_and_chapters(
+                                vtt_path)
+                            st.session_state["subtitles_df"] = subtitles_df
+                            st.session_state["current_vtt_path"] = vtt_path
+                            st.success(t("movied_success").format(
+                                video=os.path.basename(video_info["Full Path"])))
+                            st.rerun()
+                        except Exception as e:
+                            st.error(t("movied_error").format(error=str(e)))
+                            return None, None, None
+
+            with col2:
+                if st.button(t("movied_normalize_audio")):
+                    with st.spinner(t("movied_normalizing")):
+                        try:
+                            normalize_audio(
+                                video_info["Full Path"], self.reference_audio_path)
+                            st.rerun()  # Relancer pour refléter les changements
+                        except Exception as e:
+                            st.error(t("movied_error").format(error=str(e)))
 
             # Load existing subtitles if available
             if os.path.exists(vtt_path):
@@ -582,6 +607,8 @@ class MoviedPlugin(Plugin):
             "movied_workdir", t("movied_workdir_default"))
         self.media_dirs = config.get(self.name, {}).get(
             "movied_media_dirs", t("movied_media_dirs_default")).split("\n")
+        self.reference_audio_path = config.get(self.name, {}).get(
+            "movied_reference_audio", "/path/to/sample.mp3")  # Récupérer le chemin
 
         self.setup_header()
         selected_model, thumbnail_size, font, font_size, text_background = self.setup_controls()

@@ -8,6 +8,7 @@ import base64
 import ffmpeg
 import streamlit as st
 from moviepy import *
+from pydub import AudioSegment
 
 
 def image_to_base64(image_path):
@@ -460,9 +461,17 @@ def insert_video(main_clip, start_sec, video_path_insert, target_size):
 
 
 def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target_size):
-    """Remplace une section par une autre vidéo."""
+    """Remplace une section par une autre vidéo, tronquée si elle dépasse la durée spécifiée."""
     replace_clip = VideoFileClip(video_path_replace).resized(target_size)
-    duration_change = replace_clip.duration - (end_sec - start_sec)
+    duration = end_sec - start_sec  # Durée de l'intervalle à remplacer
+
+    # Si la vidéo de remplacement est plus longue que l'intervalle, la tronquer
+    if replace_clip.duration > duration:
+        replace_clip = replace_clip.subclipped(0, duration)
+
+    # Pas de changement de durée total, car on remplace dans un intervalle fixe
+    duration_change = 0  # La durée totale de la vidéo principale reste inchangée
+
     new_clip = concatenate_videoclips([
         main_clip.subclipped(0, start_sec),
         replace_clip,
@@ -472,13 +481,16 @@ def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target
 
 
 def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, target_size):
-    """Remplace une section par une vidéo en conservant l'audio original."""
-    duration = end_sec - start_sec
+    """Remplace une section par une vidéo en conservant l'audio original, tronquée si elle dépasse la durée spécifiée."""
+    duration = end_sec - start_sec  # Durée de l'intervalle à remplacer
     replace_clip = VideoFileClip(video_path_replace)
     original_audio = main_clip.subclipped(start_sec, end_sec).audio
 
+    # Si la vidéo de remplacement est plus longue que l'intervalle, la tronquer
     if replace_clip.duration > duration:
         replace_clip = replace_clip.subclipped(0, duration)
+
+    # Redimensionner et ajouter l'audio original
     replace_clip = replace_clip.resized(target_size).with_audio(original_audio)
 
     return concatenate_videoclips([
@@ -563,3 +575,52 @@ def remove_section(main_clip, start_sec, end_sec):
     ])
     # Retourne la nouvelle vidéo et la différence de durée (négative car suppression)
     return new_clip, -duration_change
+
+
+def normalize_audio(video_path, reference_audio_path):
+    """Normalise le son d'une vidéo en utilisant un fichier audio de référence."""
+    import os
+    import streamlit as st
+
+    # Configurer le chemin vers ffmpeg (ajustez selon votre système)
+    # Vérifiez ce chemin sur votre système
+    AudioSegment.converter = "/usr/bin/ffmpeg"
+
+    try:
+        # Charger le fichier de référence
+        reference_audio = AudioSegment.from_file(reference_audio_path)
+        target_dBFS = reference_audio.dBFS  # Niveau sonore cible
+
+        # Charger l'audio de la vidéo
+        audio = AudioSegment.from_file(video_path)
+
+        # Calculer la différence de volume
+        difference = target_dBFS - audio.dBFS
+
+        # Appliquer le gain pour normaliser
+        normalized_audio = audio + difference
+
+        # Exporter l'audio normalisé temporairement
+        temp_audio_path = os.path.splitext(video_path)[0] + "_temp_audio.mp3"
+        normalized_audio.export(temp_audio_path, format="mp3")
+
+        # Renommer l'ancienne vidéo en backup
+        backup_path = os.path.splitext(video_path)[0] + "_backup.mp4"
+        if os.path.exists(backup_path):
+            os.remove(backup_path)  # Supprimer un ancien backup s'il existe
+        os.rename(video_path, backup_path)
+
+        # Recomposer la vidéo avec l'audio normalisé
+        ffmpeg_cmd = (
+            f'ffmpeg -i "{backup_path}" -i "{temp_audio_path}" '
+            f'-c:v copy -map 0:v:0 -map 1:a:0 "{video_path}" -y'
+        )
+        os.system(ffmpeg_cmd)
+
+        # Supprimer le fichier temporaire
+        os.remove(temp_audio_path)
+
+        st.success(f"Audio normalized for {os.path.basename(video_path)}!")
+    except Exception as e:
+        st.error(
+            f"Audio normalization failed for {os.path.basename(video_path)}: {str(e)}")
