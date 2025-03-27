@@ -442,9 +442,8 @@ def display_video(filepath):
 # New function to generate animation CSS
 
 
-def generate_animation_css(animation_type, is_exit=False):
+def generate_animation_css(animation_type, target_column=None, is_exit=False):
     css = "<style>\n"
-
     if is_exit:
         # Animations sortantes
         if animation_type == 'left':
@@ -475,14 +474,17 @@ def generate_animation_css(animation_type, is_exit=False):
                 100% { transform: translateY(100%); opacity: 1; }
             }
             """
+        # Par défaut, cible tout le contenu principal pour les animations sortantes
+        target_selector = ".stMain"
         css += f"""
-        .stMain .stImage img, .stMain .stVideo, .stMain .stMarkdown > div,
-        .stMain div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
+        {target_selector} .stImage img, {target_selector} .stVideo, {target_selector} .stMarkdown > div,
+        {target_selector} div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
             animation: exit{animation_type.capitalize()} 3s ease-in forwards;
         }}
         </style>
         """
     else:
+        # Animations entrantes
         if animation_type == 'left':
             css += """
             @keyframes left {
@@ -534,22 +536,32 @@ def generate_animation_css(animation_type, is_exit=False):
                 100% { transform: rotate(0deg); }
             }
             """
-        # Apply animation to target elements with 3s duration
+
+        # Déterminer le sélecteur en fonction de la colonne cible
+        if target_column == 'right':
+            target_selector = "div.stHorizontalBlock div.stColumn:nth-child(2)"
+        elif target_column == 'left':
+            target_selector = "div.stHorizontalBlock div.stColumn:nth-child(1)"
+        else:
+            target_selector = ".stMain"  # Par défaut, cible tout le contenu principal
+
+        # Appliquer l'animation aux éléments cibles
         css += f"""
-        .stMain .stImage img, .stMain .stVideo, .stMain .stMarkdown > div {{
+        {target_selector} .stImage img, {target_selector} .stVideo, {target_selector} .stMarkdown > div {{
             animation: {animation_type} 3s ease-out;
         }}
-        .stMain div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
+        {target_selector} div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
             animation: {animation_type} 3s ease-out;
         }}
         </style>
         """
+
     return css
 
 # Display an item in the app (modified for vertical centering)
 
 
-def display_item(item, directories, is_presentation=False, in_group=False, animation_type=None, is_exit=False):
+def display_item(item, directories, is_presentation=False, in_group=False, animation_type=None, target_column=None, is_exit=False):
     """
     Displays an item based on its type:
     - All items are wrapped in a single column with optional vertical centering in presentation mode.
@@ -561,15 +573,14 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
     - Web: Centered webpage screenshot with optional title.
     - Group: Two items in side-by-side columns, vertically centered if enabled.
     """
-    if is_presentation and animation_type:
-        st.markdown(generate_animation_css(
-            animation_type, is_exit), unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <style>
-        </style>
-        """, unsafe_allow_html=True)
+    def include_animation():
+        if is_presentation and animation_type:
+            st.markdown(generate_animation_css(animation_type,
+                        target_column, is_exit), unsafe_allow_html=True)
+        else:
+            st.markdown("<style></style>", unsafe_allow_html=True)
 
+    include_animation()
     vertical_center = st.session_state.get(
         'vertical_center', False) and is_presentation
     alignment = "center" if vertical_center else "top"
@@ -577,11 +588,15 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
     if item["type"] == "group":
         col1, col2 = st.columns(2, vertical_alignment=alignment)
         with col1:
+            if target_column == "left":
+                include_animation()
             display_item(item["items"][0], directories,
-                         is_presentation, True, animation_type, is_exit)
+                         is_presentation, True, animation_type, target_column, is_exit)
         with col2:
+            if target_column == "right":
+                include_animation()
             display_item(item["items"][1], directories,
-                         is_presentation, True, animation_type, is_exit)
+                         is_presentation, True, animation_type, target_column, is_exit)
 
     else:
         # Wrap all non-group items in a single column for consistent vertical alignment
@@ -722,14 +737,14 @@ class EzprezPlugin(Plugin):
                 # New animation controls
                 st.subheader("Animation Controls")
                 button("Random Animation Next", "PageUp", lambda: st.session_state.update({
-                    # 'current_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
-                    'current_animation': random.choice(['left', 'right', 'top', 'bottom', 'zoomIn', 'zoomOut'])
-                }))
-                button("Rock Animation", "Ctrl+A", lambda: st.session_state.update({
-                    'current_animation': 'rock'
+                    'current_animation': random.choice(['left', 'right', 'top', 'bottom', 'zoomIn', 'zoomOut']),
                 }))
                 col7, col8 = st.columns(2)
                 with col7:
+                    button("Rock Left", "Ctrl+A", lambda: st.session_state.update({
+                        'current_animation': 'rock',
+                        'target_column': 'left',
+                    }))
                     button("Slide Left", "Ctrl+ArrowLeft", lambda: st.session_state.update({
                         'exit_animation': 'left',
                         'next_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
@@ -741,6 +756,10 @@ class EzprezPlugin(Plugin):
                         'next_slide_ready': False
                     }))
                 with col8:
+                    button("Rock Right", "Ctrl+Z", lambda: st.session_state.update({
+                        'current_animation': 'rock',
+                        'target_column': 'right'
+                    }))
                     button("Slide Right", "Ctrl+ArrowRight", lambda: st.session_state.update({
                         'exit_animation': 'right',
                         'next_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
@@ -820,9 +839,11 @@ class EzprezPlugin(Plugin):
             else:
                 # Affichage normal avec animation entrante si spécifiée
                 animation_type = st.session_state.get('current_animation')
+                target_column = st.session_state.get('target_column')
                 display_item(slides[current], directories,
-                             is_presentation=True, animation_type=animation_type)
+                             is_presentation=True, animation_type=animation_type, target_column=target_column)
                 st.session_state['current_animation'] = None
+                st.session_state['target_column'] = None
 
 
 if __name__ == "__main__":
