@@ -480,7 +480,8 @@ class MoviedPlugin(Plugin):
                 with st.expander("Debug Information"):
                     # Parcourir chaque opération
                     for op in operations.split("\n"):
-                        if not op.strip():
+                        op_cleaned = op.split("//")[0].strip()
+                        if not op_cleaned:
                             continue
                         parts = op.split(maxsplit=5)
                         cmd = parts[0]
