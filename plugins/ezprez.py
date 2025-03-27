@@ -171,7 +171,7 @@ def process_lines(lines, directories):
     """
     Processes a list of input lines into slides based on specific rules:
     - '---' separates slides.
-    - '--' groups two items into columns within the same slide.
+    - '--' creates an empty group item to be filled later with previous and next items.
     - Empty lines around separators are ignored.
     - Empty slides are filtered out.
     - Handles multiple items returned by parse_single_line (e.g., from included files).
@@ -187,25 +187,18 @@ def process_lines(lines, directories):
 
     for line in lines:
         stripped_line = line.strip()
-
-        # Vérifier si la ligne est un commentaire sur une seule ligne
         if stripped_line.startswith("%%") and stripped_line.endswith("%%"):
             continue
-
-        # Début ou fin d'un commentaire
         if stripped_line == "%%":
             in_comment = not in_comment
             continue
-
-        # Ignorer la ligne si elle est dans un commentaire
         if not in_comment:
             filtered_lines.append(line)
 
-    # Vérifier qu'on n'est pas resté dans un commentaire non fermé
     if in_comment:
         logger.warning("Unclosed comment block detected (missing closing %%)")
 
-    # Traitement des lignes filtrées
+    # Première passe : construire la liste initiale avec des groupes vides pour '--'
     i = 0
     while i < len(filtered_lines):
         line = filtered_lines[i].strip()
@@ -222,47 +215,15 @@ def process_lines(lines, directories):
             continue
 
         # Handle column separator
-        if line == "--" and i > 0 and i + 1 < len(filtered_lines):
-            prev_item = None
+        if line == "--":
             if current_markdown and "\n".join(current_markdown).strip():
-                prev_item = {"type": "markdown",
-                             "content": "\n".join(current_markdown)}
+                result.append(
+                    {"type": "markdown", "content": "\n".join(current_markdown)})
                 current_markdown = []
-            elif result:
-                prev_item = result.pop()
-
+            result.append({"type": "group", "items": []})  # Groupe vide
             i += 1
             while i < len(filtered_lines) and not filtered_lines[i].strip():
                 i += 1
-            if i >= len(filtered_lines):
-                if prev_item:
-                    result.append(prev_item)
-                break
-
-            # Collect and parse lines for the next column individually
-            next_items = []
-            while i < len(filtered_lines) and filtered_lines[i].strip() not in ["---", "--"]:
-                if filtered_lines[i].strip():
-                    parsed = parse_single_line(
-                        filtered_lines[i], directories, linkify)
-                    if isinstance(parsed, list):
-                        next_items.extend(parsed)
-                    else:
-                        next_items.append(parsed)
-                i += 1
-
-            # If we have items for both columns, group them
-            if next_items:
-                next_item = next_items[0] if len(next_items) == 1 else {
-                    "type": "markdown", "content": "\n".join(item["content"] for item in next_items if item["type"] == "markdown")
-                } or next_items[0]  # Fallback to first item if no markdown
-                if prev_item and next_item:
-                    result.append(
-                        {"type": "group", "items": [prev_item, next_item]})
-                elif prev_item:
-                    result.append(prev_item)
-                if len(next_items) > 1:
-                    result.extend(next_items[1:])  # Add any additional items
             continue
 
         # Ignore empty lines before separators
@@ -270,17 +231,15 @@ def process_lines(lines, directories):
             i += 1
             continue
 
-        # Process individual line, which may return a single item or a list
+        # Process individual line
         items = parse_single_line(line, directories, linkify)
         if isinstance(items, list):
-            # If parse_single_line returns a list (e.g., from included file), extend result
             if current_markdown and "\n".join(current_markdown).strip():
                 result.append(
                     {"type": "markdown", "content": "\n".join(current_markdown)})
                 current_markdown = []
             result.extend(items)
         else:
-            # Handle single item as before
             if items["type"] == "markdown":
                 current_markdown.append(items["content"])
             else:
@@ -295,7 +254,26 @@ def process_lines(lines, directories):
         result.append(
             {"type": "markdown", "content": "\n".join(current_markdown)})
 
-    return result
+    # Deuxième passe : remplir les groupes vides
+    final_result = []
+    i = 0
+    while i < len(result):
+        if result[i]["type"] == "group" and not result[i]["items"]:
+            # Vérifier qu'il y a un élément avant et après
+            if i > 0 and i + 1 < len(result):
+                prev_item = final_result.pop()  # Retirer l'élément précédent
+                next_item = result[i + 1]       # Prendre l'élément suivant
+                result[i]["items"] = [prev_item, next_item]
+                final_result.append(result[i])
+                i += 2  # Sauter l'élément suivant déjà utilisé
+            else:
+                # Si pas d'éléments avant ou après, ignorer le groupe vide
+                i += 1
+        else:
+            final_result.append(result[i])
+            i += 1
+
+    return final_result
 
 
 def parse_single_line(line, directories, linkify):
