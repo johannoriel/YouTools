@@ -437,7 +437,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size):
     """Remplace une section de la vidéo par une image."""
     duration = end_sec - start_sec
     audio_clip = main_clip.subclipped(start_sec, end_sec).audio
-    image_clip = ImageClip(image_path, duration=duration).resize(target_size)
+    image_clip = ImageClip(image_path, duration=duration).resized(target_size)
     if audio_clip:
         image_clip = image_clip.with_audio(audio_clip)
     return concatenate_videoclips([
@@ -449,7 +449,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size):
 
 def insert_video(main_clip, start_sec, video_path_insert, target_size):
     """Insère une vidéo à une position donnée."""
-    insert_clip = VideoFileClip(video_path_insert).resize(target_size)
+    insert_clip = VideoFileClip(video_path_insert).resized(target_size)
     duration_change = insert_clip.duration
     new_clip = concatenate_videoclips([
         main_clip.subclipped(0, start_sec),
@@ -461,7 +461,7 @@ def insert_video(main_clip, start_sec, video_path_insert, target_size):
 
 def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target_size):
     """Remplace une section par une autre vidéo."""
-    replace_clip = VideoFileClip(video_path_replace).resize(target_size)
+    replace_clip = VideoFileClip(video_path_replace).resized(target_size)
     duration_change = replace_clip.duration - (end_sec - start_sec)
     new_clip = concatenate_videoclips([
         main_clip.subclipped(0, start_sec),
@@ -479,7 +479,7 @@ def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, 
 
     if replace_clip.duration > duration:
         replace_clip = replace_clip.subclipped(0, duration)
-    replace_clip = replace_clip.resize(target_size).with_audio(original_audio)
+    replace_clip = replace_clip.resized(target_size).with_audio(original_audio)
 
     return concatenate_videoclips([
         main_clip.subclipped(0, start_sec),
