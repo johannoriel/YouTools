@@ -297,6 +297,13 @@ class MoviedPlugin(Plugin):
 
             with col1:
                 st.write("Images for Replacement")
+                # Bouton pour rafraîchir les images
+                if st.button("Refresh Images", key="refresh_images_btn"):
+                    if "media_thumbnails" in st.session_state:
+                        # Supprime les vignettes existantes
+                        del st.session_state["media_thumbnails"]
+                    st.rerun()  # Relance pour régénérer les vignettes
+
                 image_filter_dir = st.selectbox(
                     t("movied_filter_media_dir"),
                     media_dir_options,
@@ -313,7 +320,7 @@ class MoviedPlugin(Plugin):
                         "Preview": st.column_config.ImageColumn(
                             "Preview",
                             help="Preview of the image",
-                            width=thumbnail_size  # "small", "medium", ou "large"
+                            width=thumbnail_size
                         )
                     },
                     height=200,
@@ -321,7 +328,6 @@ class MoviedPlugin(Plugin):
                     selection_mode="single-row",
                     on_select="rerun",
                     key="image_media_selector",
-                    # row_height=75, #https://github.com/streamlit/streamlit/issues/7266#event-16543333224
                 )
                 selected_image_path = (filtered_image_df.iloc[selected_image["selection"]["rows"][0]]["Path"]
                                        if selected_image["selection"]["rows"] else None)
@@ -334,6 +340,13 @@ class MoviedPlugin(Plugin):
 
             with col2:
                 st.write("Video Operations")
+                # Bouton pour rafraîchir les vidéos
+                if st.button("Refresh Videos", key="refresh_videos_btn"):
+                    if "media_thumbnails" in st.session_state:
+                        # Supprime les vignettes existantes
+                        del st.session_state["media_thumbnails"]
+                    st.rerun()  # Relance pour régénérer les vignettes
+
                 video_filter_dir = st.selectbox(
                     t("movied_filter_media_dir"),
                     media_dir_options,
@@ -355,7 +368,7 @@ class MoviedPlugin(Plugin):
                         "Preview": st.column_config.ImageColumn(
                             t("movied_video_thumbnail"),
                             help="Thumbnail of the video",
-                            width=thumbnail_size  # "small", "medium", ou "large"
+                            width=thumbnail_size
                         )
                     },
                     height=200,
@@ -400,7 +413,6 @@ class MoviedPlugin(Plugin):
                 t("movied_text_input"), height=100, key="text_input")
             if st.button(t("movied_animate_text"), key="animate_text_btn"):
                 if text_input:
-                    # Convertir les sauts de ligne en \\
                     text_command = text_input.replace("\n", "\\")
                     operation = f"addtext {start_time} {end_time} fromLeft 1s {text_command}"
                     self.add_to_operations(operation)
