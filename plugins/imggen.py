@@ -9,11 +9,13 @@ from global_vars import t, translations
 from diffusers import FluxPipeline, AutoPipelineForImage2Image
 from rembg import remove, new_session
 import json
-
 import os
+import cv2
+import numpy as np
+
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
-# Add translations for this plugin
+# Mise à jour des traductions pour inclure le nouvel onglet
 translations["en"].update({
     "generate_image": "Generate Image",
     "prompt": "Prompt",
@@ -34,7 +36,15 @@ translations["en"].update({
     "imggen_processing": "Processing...",
     "imggen_done": "Image generation done !",
     "number_of_images": "Number of Images",
+    "backremove_tab": "Background Removal",
+    "backremove_header": "Remove Background from Image",
+    "upload_image": "Upload Image",
+    "process_button": "Remove Background",
+    "backremove_processing": "Processing image...",
+    "backremove_success": "Background removed successfully!",
+    "download_button": "Download Result",
 })
+
 translations["fr"].update({
     "generate_image": "Générer une Image",
     "prompt": "Prompt",
@@ -55,6 +65,13 @@ translations["fr"].update({
     "imggen_processing": "En cours...",
     "imggen_done": "Génération d'images terminée !",
     "number_of_images": "Nombre d'Images",
+    "backremove_tab": "Suppression d'Arrière-plan",
+    "backremove_header": "Supprimer l'arrière-plan d'une image",
+    "upload_image": "Télécharger une image",
+    "process_button": "Supprimer l'arrière-plan",
+    "backremove_processing": "Traitement de l'image...",
+    "backremove_success": "Arrière-plan supprimé avec succès !",
+    "download_button": "Télécharger le résultat",
 })
 
 
@@ -64,6 +81,7 @@ class ImggenPlugin(Plugin):
         self.pipe = None
         self.prompt_history = []
         self.load_prompt_history()
+        self.result_image = None  # Pour stocker l'image sans arrière-plan
 
     def get_config_fields(self):
         return {
@@ -90,7 +108,10 @@ class ImggenPlugin(Plugin):
         }
 
     def get_tabs(self):
-        return [{"name": t("generate_image"), "plugin": "imggen"}]
+        return [
+            {"name": t("generate_image"), "plugin": "imggen"},
+            {"name": t("backremove_tab"), "plugin": "imggen"}  # Nouvel onglet
+        ]
 
     def load_prompt_history(self):
         history_file = 'imggen_prompt_history.json'
@@ -113,9 +134,20 @@ class ImggenPlugin(Plugin):
         self.save_prompt_history()
 
     def run(self, config):
+        # Sélection de l'onglet actif via Streamlit
+        tab1, tab2 = st.tabs([t("generate_image"), t("backremove_tab")])
+
+        # Onglet 1 : Génération d'image (code original)
+        with tab1:
+            self.run_generate_image(config)
+
+        # Onglet 2 : Suppression d'arrière-plan
+        with tab2:
+            self.run_background_removal(config)
+
+    def run_generate_image(self, config):
         st.header(t("generate_image"))
 
-        # Initialize session state for inputs
         if 'imggen_prompt' not in st.session_state:
             st.session_state.imggen_prompt = ""
         if 'imggen_aspect_ratio' not in st.session_state:
@@ -134,8 +166,6 @@ class ImggenPlugin(Plugin):
             st.session_state.imggen_steps = 2
         if 'imggen_style' not in st.session_state:
             st.session_state.imggen_style = ""
-        if 'imggen_prompt' not in st.session_state:
-                st.session_state.imggen_prompt = ""
 
         col1, col2 = st.columns(2)
         with col1:
@@ -145,54 +175,41 @@ class ImggenPlugin(Plugin):
                 st.session_state.imggen_use_face = True
                 st.session_state.imggen_seed = 3212316546
                 st.session_state.imggen_use_random_seed = False
-                st.session_state.immgen_style = "oil painting"
+                st.session_state.imggen_style = "oil painting"
         with col2:
             if st.button(t("thumbnail_preset")):
                 st.session_state.imggen_aspect_ratio = "16:9"
                 st.session_state.imggen_remove_background = False
                 st.session_state.imggen_use_face = False
                 st.session_state.imggen_use_random_seed = True
-                st.session_state.immgen_style = "oil painting"
+                st.session_state.imggen_style = "oil painting"
 
-        aspect_ratio = st.selectbox(
-            t("aspect_ratio"),
-            ["1:1", "4:3", "3:4", "16:9", "9:16"],
-            key="imggen_aspect_ratio"
-        )
+        aspect_ratio = st.selectbox(t("aspect_ratio"), [
+                                    "1:1", "4:3", "3:4", "16:9", "9:16"], key="imggen_aspect_ratio")
         remove_background = st.checkbox(
             t("remove_background"), key="imggen_remove_background")
         background_removal_method = st.selectbox(t("background_removal_method"), [
                                                  "ai", "color"], key="imggen_background_removal_method")
         use_random_seed = st.checkbox(
             t("random_seed"), key="imggen_use_random_seed")
-        seed = st.number_input(t("seed"), value=st.session_state.imggen_seed,
-                               key="imggen_seed", disabled=use_random_seed)
+        seed = st.number_input(
+            t("seed"), key="imggen_seed", disabled=use_random_seed)
         use_face = st.checkbox(t("use_face"), key="imggen_use_face")
         steps = st.number_input(
             t("steps"), min_value=1, value=st.session_state.imggen_steps, key="imggen_steps")
         input_image = st.file_uploader(
             t("input_image"), type=["png", "jpg", "jpeg"])
-
         styles = config['imggen']['styles'].split(',')
         style = st.selectbox(
             t("style"), [""] + [s.strip() for s in styles], key="imggen_style")
-
         multi_styles_input = st.text_input(
-                "Multiple Styles (comma-separated, e.g., photorealistic, cartoon, anime)",
-                "",
-                key="imggen_multi_styles"
-            )
-
+            "Multiple Styles (comma-separated, e.g., photorealistic, cartoon, anime)", "", key="imggen_multi_styles")
         if 'imggen_num_images' not in st.session_state:
             st.session_state.imggen_num_images = 1
-
-        num_images = st.number_input(
-            t("number_of_images"), min_value=1, value=st.session_state.imggen_num_images, key="imggen_num_images"
-        )
-
+        num_images = st.number_input(t("number_of_images"), min_value=1,
+                                     value=st.session_state.imggen_num_images, key="imggen_num_images")
         manual_seeds_input = st.text_input(
-            "Manual Seeds (comma-separated, e.g., 123, 456, 789)", "", key="imggen_manual_seeds"
-        )
+            "Manual Seeds (comma-separated, e.g., 123, 456, 789)", "", key="imggen_manual_seeds")
 
         st.subheader(t("prompt_history"))
         selected_history_prompt = st.selectbox("", [""] + self.prompt_history)
@@ -204,15 +221,11 @@ class ImggenPlugin(Plugin):
             with st.spinner(t("imggen_processing")):
                 if input_image:
                     input_image = Image.open(input_image).convert("RGB")
-
                 self.add_to_prompt_history(prompt)
-
                 sub_prompts = [p.strip()
                                for p in prompt.split('\n') if p.strip()]
                 background_prompt = ', ' + \
                     config['imggen']['background_prompt']
-
-                # Traitement des graines manuelles si fournies
                 manual_seeds = None
                 if manual_seeds_input:
                     try:
@@ -222,97 +235,126 @@ class ImggenPlugin(Plugin):
                         st.error(
                             "Invalid seed list format. Please use comma-separated integers (e.g., 123, 456, 789)")
                         return
+                multi_styles = [s.strip() for s in multi_styles_input.split(
+                    ',')] if multi_styles_input else None
+                self.generate_images(background_prompt, sub_prompts, aspect_ratio, remove_background, background_removal_method,
+                                     None if use_random_seed or num_images > 1 else seed, use_face, steps, input_image,
+                                     config['imggen']['face_prompt'], style, config['imggen']['output_dir'],
+                                     num_images, manual_seeds, multi_styles)
 
-                # Liste des styles multiples
-                multi_styles = [s.strip() for s in multi_styles_input.split(',')] if multi_styles_input else None
+    def run_background_removal(self, config):
+        st.header(t("backremove_header"))
 
-                self.generate_images(background_prompt,
-                                        sub_prompts, aspect_ratio, remove_background, background_removal_method,
-                                        None if use_random_seed or num_images > 1 else seed, use_face, steps, input_image,
-                                        config['imggen']['face_prompt'], style, config['imggen']['output_dir'],
-                                        num_images, manual_seeds, multi_styles  # Ajout de multi_styles
-                                        )
+        # Upload de l'image
+        input_image = st.file_uploader(t("upload_image"), type=[
+                                       "png", "jpg", "jpeg"], key="backremove_input")
 
+        # Sélection de la méthode de suppression
+        removal_method = st.selectbox(t("background_removal_method"), [
+                                      "ai", "color"], key="backremove_method")
+
+        # Bouton pour lancer le traitement
+        if st.button(t("process_button")) and input_image:
+            with st.spinner(t("backremove_processing")):
+                try:
+                    # Charger l'image
+                    image = Image.open(input_image).convert("RGB")
+
+                    # Supprimer l'arrière-plan
+                    if removal_method == "ai":
+                        self.result_image = self.remove_background_ai(image)
+                    else:  # color
+                        self.result_image = self.remove_green_background_improved(
+                            image)
+
+                    # Afficher le résultat
+                    st.image(self.result_image, caption="Result",
+                             use_container_width=True)
+                    st.success(t("backremove_success"))
+
+                    # Sauvegarde et option de téléchargement
+                    output_dir = os.path.expanduser(
+                        config['imggen']['output_dir'])
+                    output_path = self.save_backremove_image(
+                        self.result_image, output_dir, input_image.name)
+
+                    with open(output_path, "rb") as file:
+                        st.download_button(
+                            label=t("download_button"),
+                            data=file,
+                            file_name=f"no_bg_{input_image.name}",
+                            mime="image/png"
+                        )
+
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
+
+    # Méthodes existantes inchangées (generate_images, generate_image, etc.)
     def generate_images(self, background_prompt, prompts, aspect_ratio, remove_background, background_removal_method,
                         seed, use_face, steps, input_image, face_prompt, style, output_dir, num_images, manual_seeds=None, multi_styles=None):
-        num_columns = 3  # Nombre de colonnes dans la galerie
+        num_columns = 3
         cols = st.columns(num_columns)
-
         progress_placeholder = st.empty()
         progress_bar = progress_placeholder.progress(0)
 
         if manual_seeds:
             seeds = manual_seeds
         else:
-            seeds = [seed if seed is not None else random.randint(0, 2**32 - 1) for _ in range(num_images)]
+            seeds = [seed if seed is not None else random.randint(
+                0, 2**32 - 1) for _ in range(num_images)]
 
-        total_images = len(seeds) * len(prompts) * (len(multi_styles) if multi_styles else 1)
+        total_images = len(seeds) * len(prompts) * \
+            (len(multi_styles) if multi_styles else 1)
         image_count = 0
 
         for i, current_seed in enumerate(seeds):
-            generator = torch.Generator().manual_seed(current_seed)  # Même graine pour tous les styles
-
+            generator = torch.Generator().manual_seed(current_seed)
             for j, sub_prompt in enumerate(prompts):
                 if multi_styles:
                     styles_to_use = multi_styles
                 else:
                     styles_to_use = [style] if style else [""]
-
                 for k, current_style in enumerate(styles_to_use):
                     full_prompt = sub_prompt
                     style_suffix = f", style: {current_style}" if current_style else ""
                     full_prompt += style_suffix
-
-                    image, _ = self.generate_image(background_prompt,
-                                                   full_prompt, aspect_ratio, remove_background, background_removal_method,
-                                                   current_seed, use_face, steps, input_image, face_prompt
-                                                   )
-
+                    image, _ = self.generate_image(background_prompt, full_prompt, aspect_ratio, remove_background,
+                                                   background_removal_method, current_seed, use_face, steps, input_image, face_prompt)
                     col_idx = image_count % num_columns
                     with cols[col_idx]:
                         caption = f"Image {i+1}/{len(seeds)} \nSeed: {current_seed}\nPrompt: {sub_prompt}"
                         if current_style:
                             caption += f"\nStyle: {current_style}"
-                        st.image(image, caption=caption, use_container_width=True)
-
-                    # Passer current_style à save_image
-                    self.save_image(image, output_dir, sub_prompt, current_seed, current_style)
-
+                        st.image(image, caption=caption,
+                                 use_container_width=True)
+                    self.save_image(image, output_dir, sub_prompt,
+                                    current_seed, current_style)
                     image_count += 1
                     progress_bar.progress(image_count / total_images)
-
         progress_placeholder.empty()
         st.success(t("imggen_done"))
 
     def generate_image(self, background_prompt, prompt, aspect_ratio="1:1", remove_background=True, background_removal_method="ai", seed=None, face=True, steps=2, input_image=None, face_prompt=""):
         if seed is None:
             seed = random.randint(0, 2**32 - 1)
-        print(f"seed : {seed}")
         generator = torch.Generator().manual_seed(seed)
-
         original_prompt = prompt
         if face and input_image is None:
             prompt = face_prompt + ", " + prompt
-
         if remove_background:
             prompt += background_prompt
-
         if aspect_ratio == "1:1":
             height, width = 1024, 1024
         elif aspect_ratio == "4:3":
-            height, width = 768, 1024  # ou 1024x1366 selon la résolution souhaitée
+            height, width = 768, 1024
         elif aspect_ratio == "3:4":
-            height, width = 1024, 768  # ou 1366x1024
+            height, width = 1024, 768
         elif aspect_ratio == "16:9":
             height, width = 1080, 1920
         elif aspect_ratio == "9:16":
             height, width = 1920, 1080
         else:
-            raise ValueError("Invalid aspect ratio. Choose '1:1', '4:3', '3:4', '16:9', or '9:16'.")
-
-
-        print(f"Using prompt: {prompt}")
-
+            raise ValueError("Invalid aspect ratio.")
         if self.pipe is None:
             ckpt_id = "black-forest-labs/FLUX.1-schnell"
             if input_image:
@@ -324,62 +366,39 @@ class ImggenPlugin(Plugin):
             self.pipe.vae.enable_tiling()
             self.pipe.vae.enable_slicing()
             self.pipe.enable_sequential_cpu_offload()
-
         if input_image:
-            image = self.pipe(
-                prompt,
-                image=input_image,
-                num_inference_steps=steps,
-                guidance_scale=0.0,
-                generator=generator,
-            ).images[0]
+            image = self.pipe(prompt, image=input_image, num_inference_steps=steps,
+                              guidance_scale=0.0, generator=generator).images[0]
         else:
-            image = self.pipe(
-                prompt,
-                num_inference_steps=steps,
-                guidance_scale=0.0,
-                height=height,
-                width=width,
-                generator=generator,
-            ).images[0]
-
+            image = self.pipe(prompt, num_inference_steps=steps, guidance_scale=0.0,
+                              height=height, width=width, generator=generator).images[0]
         if remove_background:
             if background_removal_method == "color":
                 image = self.remove_green_background_improved(image)
             elif background_removal_method == "ai":
                 image = self.remove_background_ai(image, face)
-
         return image, seed
 
     @staticmethod
     def remove_green_background_improved(image):
-        import cv2
-        import numpy as np
-
         np_image = np.array(image)
         hsv_image = cv2.cvtColor(np_image, cv2.COLOR_RGB2HSV)
-
         lower_green = np.array([40, 100, 100])
         upper_green = np.array([80, 255, 255])
-
         green_mask = cv2.inRange(hsv_image, lower_green, upper_green)
         inverse_mask = cv2.bitwise_not(green_mask)
-
         alpha = inverse_mask
         rgba_image = cv2.cvtColor(np_image, cv2.COLOR_RGB2RGBA)
         rgba_image[:, :, 3] = alpha
-
         return Image.fromarray(rgba_image)
 
     @staticmethod
-    def remove_background_ai(image, is_face):
+    def remove_background_ai(image, is_face=False):
         model = "u2net_human_seg" if is_face else "u2net"
         session = new_session(model)
         result = remove(image, session=session)
-
         if result.mode != 'RGBA':
             result = result.convert('RGBA')
-
         data = result.getdata()
         new_data = []
         for item in data:
@@ -388,7 +407,6 @@ class ImggenPlugin(Plugin):
             else:
                 new_data.append(item)
         result.putdata(new_data)
-
         return result
 
     @staticmethod
@@ -397,10 +415,19 @@ class ImggenPlugin(Plugin):
         os.makedirs(output_dir, exist_ok=True)
         filename_base = "_".join(prompt.split()[:5])
         style_part = f"_{style.replace(' ', '_')}" if style else ""
-        filename = re.sub(r'[^a-zA-Z0-9_]', '', f"{filename_base}{style_part}_{seed}") + ".png"
+        filename = re.sub(r'[^a-zA-Z0-9_]', '',
+                          f"{filename_base}{style_part}_{seed}") + ".png"
         filepath = os.path.join(output_dir, filename)
         image.save(filepath)
-        print(f"Image saved to: {filepath}")
+        return filepath
+
+    @staticmethod
+    def save_backremove_image(image, output_dir, original_filename):
+        os.makedirs(output_dir, exist_ok=True)
+        filename = f"no_bg_{os.path.splitext(original_filename)[0]}.png"
+        filepath = os.path.join(output_dir, filename)
+        image.save(filepath)
+        return filepath
 
 
 def main():
@@ -410,10 +437,8 @@ def main():
                         help="The prompt for image generation")
     parser.add_argument("-i", "--input-image", type=str,
                         help="Path to input image for img2img")
-    parser.add_argument("-ar", "--aspect_ratio",
-                        choices=["1:1", "4:3", "3:4", "16:9", "9:16"],  # Ajout des nouveaux formats
-                        default="1:1",
-                        help="Aspect ratio of the image")
+    parser.add_argument("-ar", "--aspect_ratio", choices=[
+                        "1:1", "4:3", "3:4", "16:9", "9:16"], default="1:1", help="Aspect ratio of the image")
     parser.add_argument("-nb", "--no-background-removal", action="store_false",
                         dest="remove_background", help="Don't remove the background")
     parser.add_argument(
@@ -428,25 +453,18 @@ def main():
                         help="Number of steps for generation")
     parser.add_argument("-o", "--output", type=str, default="~/Images",
                         help="Output directory for saving the image")
-
     args = parser.parse_args()
     if args.random_seed:
         args.seed = None
-
     input_image = None
     if args.input_image:
         input_image = Image.open(args.input_image).convert("RGB")
-
     plugin = ImggenPlugin("imggen", None)
-    image, used_seed = plugin.generate_image(", arrière plan blanc vif uni",
-                                             args.prompt, args.aspect_ratio, args.remove_background, args.method,
-                                             args.seed, args.face, args.steps, input_image
-                                             )
+    image, used_seed = plugin.generate_image(", arrière plan blanc vif uni", args.prompt, args.aspect_ratio, args.remove_background, args.method,
+                                             args.seed, args.face, args.steps, input_image)
     print(f"Image generated with seed: {used_seed}")
-
     output_dir = os.path.expanduser(args.output)
     plugin.save_image(image, output_dir, args.prompt)
-
     plt.imshow(image)
     plt.axis('off')
     plt.show()
