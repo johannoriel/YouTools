@@ -85,6 +85,24 @@ class PexelsPlugin(Plugin):
         """Définit les onglets du plugin dans l'interface."""
         return [{"name": t("pexels_tab"), "plugin": "pexelsplugin"}]
 
+    def extract_title_from_url(self, url):
+        """Extrait le titre descriptif depuis une URL Pexels."""
+        # Exemple d'URL : "https://www.pexels.com/video/young-kids-in-a-competition-2842980/"
+        # On veut récupérer : "young-kids-in-a-competition"
+        try:
+            # Supprimer le préfixe "https://www.pexels.com/video/" ou "https://www.pexels.com/photo/"
+            if "video" in url:
+                prefix = "https://www.pexels.com/video/"
+            else:
+                prefix = "https://www.pexels.com/photo/"
+
+            # Supprimer le préfixe et le suffixe (chiffres + tiret + slash)
+            title = url.replace(prefix, "").rstrip("/").rsplit("-", 1)[0]
+            return title
+        except Exception as e:
+            # En cas d'erreur, retourner une chaîne vide ou l'ID comme fallback
+            return ""
+
     def search_pexels(self, keywords, api_key, media_type="photos", page=1, per_page=15, size=None, orientation=None, locales=None):
         """Effectue une recherche sur l'API Pexels."""
         url = "https://api.pexels.com/v1/search" if media_type == "photos" else "https://api.pexels.com/videos/search"
@@ -216,7 +234,10 @@ class PexelsPlugin(Plugin):
                             media_data = self.get_media_by_id(
                                 img["id"], api_key, "photo")
                             url = media_data["src"]["original"]
-                            filename = f"{img['id']}.jpg"
+                            # Extraire le titre depuis l'URL de la page Pexels
+                            title = self.extract_title_from_url(img["url"])
+                            # Fallback sur l'ID si le titre est vide
+                            filename = f"{title}.jpg" if title else f"{img['id']}.jpg"
                             filepath = self.download_media(
                                 url, filename, download_dir)
                             st.success(
@@ -236,7 +257,10 @@ class PexelsPlugin(Plugin):
                                 vid["id"], api_key, "video")
                             # Premier fichier disponible
                             url = media_data["video_files"][0]["link"]
-                            filename = f"{vid['id']}.mp4"
+                            # Extraire le titre depuis l'URL de la page Pexels
+                            title = self.extract_title_from_url(vid["url"])
+                            # Fallback sur l'ID si le titre est vide
+                            filename = f"{title}.mp4" if title else f"{vid['id']}.mp4"
                             filepath = self.download_media(
                                 url, filename, download_dir)
                             st.success(
