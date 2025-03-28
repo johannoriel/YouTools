@@ -520,8 +520,8 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
         # Limite la largeur à 80% de la vidéo
         size=(int(target_size[0] * 0.8), None),
         # Contour noir pour "outline"
-        stroke_color="black" if text_style == "outline" else None,
-        stroke_width=2 if text_style == "outline" else 0,  # Épaisseur du contour
+        stroke_color="#008CCF" if text_style == "outline" else None,
+        stroke_width=4 if text_style == "outline" else 0,  # Épaisseur du contour
     ).with_duration(duration)
 
     # Boîte noire (uniquement pour text_style="box")
@@ -624,8 +624,8 @@ def insert_video_with_text(main_clip, start_sec, video_path_insert, text, target
         # Limite la largeur à 80% de la vidéo
         size=(int(target_size[0] * 0.8), None),
         # Contour noir pour "outline"
-        stroke_color="blue" if text_style == "outline" else None,
-        stroke_width=2 if text_style == "outline" else 0,  # Épaisseur du contour
+        stroke_color="#008CCF" if text_style == "outline" else None,
+        stroke_width=4 if text_style == "outline" else 0,  # Épaisseur du contour
     ).with_duration(duration)
 
     # Boîte noire (uniquement pour text_style="box")

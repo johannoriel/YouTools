@@ -143,12 +143,75 @@ class MoviedPlugin(Plugin):
                 index=1,
                 key="thumbnail_size"
             )
-            font = st.selectbox(
+            try:
+                from matplotlib import font_manager
+                from fontTools.ttLib import TTFont
+                import os
+
+                # Obtenir la liste des fichiers .ttf
+                font_files = font_manager.findSystemFonts(
+                    fontpaths=None, fontext='ttf')
+
+                # Dictionnaire pour associer les noms de polices aux chemins
+                font_dict = {}
+                for font_path in font_files:
+                    try:
+                        # Charger le fichier .ttf avec fontTools
+                        font = TTFont(font_path)
+                        # Extraire le nom de la police (nameID 4 correspond au nom complet, souvent "Arial Bold")
+                        font_name = None
+                        for record in font['name'].names:
+                            if record.nameID == 4:  # nameID 4 = nom complet de la police
+                                # Gérer les encodages potentiellement problématiques
+                                try:
+                                    font_name = record.string.decode('utf-8')
+                                except UnicodeDecodeError:
+                                    font_name = record.string.decode(
+                                        'latin-1', errors='ignore')
+                                break
+                        if font_name:
+                            font_dict[font_name] = font_path
+                        else:
+                            # Si le nom n'est pas trouvé, utiliser le nom du fichier comme secours
+                            font_name = os.path.basename(font_path)
+                            font_dict[font_name] = font_path
+                    except Exception as e:
+                        print(
+                            f"Impossible de lire la police {font_path} : {str(e)}")
+                        continue
+
+                # Liste des noms de polices pour l'affichage dans la selectbox
+                font_names = sorted(font_dict.keys())
+                # Liste des chemins correspondants (sera utilisée comme valeur réelle)
+                font_paths = [font_dict[name] for name in font_names]
+
+                if not font_paths:
+                    raise ValueError("Aucune police trouvée.")
+            except Exception as e:
+                st.warning(
+                    f"Impossible de lister les polices : {str(e)}. Utilisation d'une liste par défaut.")
+                font_names = ["Arial", "Arial Bold", "Times New Roman",
+                              "Times New Roman Bold", "Courier New", "Verdana"]
+                # Dans le cas par défaut, on suppose que les noms fonctionnent directement
+                font_paths = font_names
+
+            # Trouver l'index de "Arial Bold" pour le sélectionner par défaut
+            default_index = 0
+            for i, name in enumerate(font_names):
+                if "Arial Bold" in name:
+                    default_index = i
+                    break
+
+            # Sélectionner la police (afficher le nom, mais retourner le chemin)
+            font_path = st.selectbox(
                 t("movied_font_label"),
-                ["Arial", "Times New Roman", "Courier New", "Verdana"],
-                index=0,
+                options=font_paths,  # Les valeurs sont les chemins
+                format_func=lambda x: font_names[font_paths.index(
+                    x)] if x in font_paths else x,  # Afficher les noms lisibles
+                index=default_index,  # Sélectionner "Arial Bold" par défaut
                 key="font_select"
             )
+            font = font_path  # Le chemin est directement utilisé
             font_size = st.slider(
                 t("movied_font_size_label"),
                 50, 200, 100, step=5,
@@ -485,7 +548,7 @@ class MoviedPlugin(Plugin):
                 "operations", ""), key="operations_area")
             st.session_state["operations"] = operations
 
-            if st.button(t("movied_generate"), key="generate_btn") and operations:
+            if st.button(t("movied_generate"), key="generate_btn", type="primary") and operations:
                 self.execute_operations(
                     video_path, vtt_path, operations, font, font_size)
 
