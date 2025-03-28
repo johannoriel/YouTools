@@ -10,6 +10,7 @@ import os
 from video_utils import *
 import json
 from moviepy import VideoFileClip
+from media_selector import media_selector
 
 # Translations
 translations["en"].update({
@@ -381,176 +382,139 @@ class MoviedPlugin(Plugin):
         return image_df, video_df
 
     def handle_operations(self, start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size):
-        if video_path:
-            try:
-                image_df, video_df = self.list_media_files()
-            except ValueError as e:
-                st.error(f"Error unpacking media files: {e}")
-                return
+        if not video_path:
+            st.warning("Please select a video to edit first.")
+            return
 
-            if image_df.empty and video_df.empty:
-                st.warning(
-                    "No media files found in the configured directories.")
-                return
+        st.subheader("Media Selection and Operations")
 
-            st.subheader("Media Selection")
-            col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-            media_dir_options = [t("movied_all_directories")] + self.media_dirs
-            default_dir_index = 0
+        # Directory selection
+        media_dir_options = [t("movied_all_directories")] + self.media_dirs
+        selected_dirs = col1.multiselect(
+            t("movied_filter_media_dir"),
+            options=media_dir_options,
+            default=[t("movied_all_directories")],
+            key="media_dir_select"
+        )
 
-            with col1:
-                st.write("Images for Replacement")
-                # Bouton pour rafraîchir les images
-                if st.button("Refresh Images", key="refresh_images_btn"):
-                    if "media_thumbnails" in st.session_state:
-                        # Supprime les vignettes existantes
-                        del st.session_state["media_thumbnails"]
-                    st.rerun()  # Relance pour régénérer les vignettes
+        # Determine which directories to pass to media_selector
+        if t("movied_all_directories") in selected_dirs:
+            dirs_to_scan = self.media_dirs
+        else:
+            dirs_to_scan = [d for d in selected_dirs if d != t("movied_all_directories")]
 
-                image_filter_dir = st.selectbox(
-                    t("movied_filter_media_dir"),
-                    media_dir_options,
-                    index=default_dir_index,
-                    key="image_filter_selectbox"
-                )
-                filtered_image_df = image_df if image_filter_dir == t("movied_all_directories") else image_df[
-                    image_df["Path"].str.startswith(image_filter_dir)
-                ]
-                selected_image = st.dataframe(
-                    filtered_image_df[["File", "Preview"]],
-                    column_config={
-                        "File": st.column_config.TextColumn("Image Name"),
-                        "Preview": st.column_config.ImageColumn(
-                            "Preview",
-                            help="Preview of the image",
-                            width=thumbnail_size
-                        )
-                    },
-                    height=200,
-                    hide_index=True,
-                    selection_mode="single-row",
-                    on_select="rerun",
-                    key="image_media_selector",
-                )
-                selected_image_path = (filtered_image_df.iloc[selected_image["selection"]["rows"][0]]["Path"]
-                                       if selected_image["selection"]["rows"] else None)
-                if st.button(t("movied_replace_image"), key="replace_image_btn"):
-                    if selected_image_path:
-                        operation = f"replace_image {start_time} {end_time} {selected_image_path}"
-                        self.add_to_operations(operation)
-                    else:
-                        st.warning("Please select an image first.")
+        if not dirs_to_scan:
+            st.warning("Please select at least one directory.")
+            return
 
-            with col2:
-                st.write("Video Operations")
-                # Bouton pour rafraîchir les vidéos
-                if st.button("Refresh Videos", key="refresh_videos_btn"):
-                    if "media_thumbnails" in st.session_state:
-                        # Supprime les vignettes existantes
-                        del st.session_state["media_thumbnails"]
-                    st.rerun()  # Relance pour régénérer les vignettes
+        # Extension selection
+        all_extensions = [".jpg", ".png", ".mp4", ".mkv", ".avi"]
+        selected_extensions = col2.multiselect(
+            "Filter by File Extensions",
+            options=all_extensions,
+            default=[".mp4", ".png", ".jpg"],
+            key="extension_select"
+        )
 
-                video_filter_dir = st.selectbox(
-                    t("movied_filter_media_dir"),
-                    media_dir_options,
-                    index=default_dir_index,
-                    key="video_filter_selectbox"
-                )
-                if video_filter_dir == t("movied_all_directories"):
-                    filtered_video_df = video_df
+        if not selected_extensions:
+            st.warning("Please select at least one file extension.")
+            return
+
+        # Single media selector for images and videos
+        selected_media = media_selector(
+            media_dirs=dirs_to_scan,
+            extensions=selected_extensions
+        )
+
+        # Determine media type
+        is_image = selected_media and any(selected_media.lower().endswith(ext) for ext in [".jpg", ".png"])
+        is_video = selected_media and any(selected_media.lower().endswith(ext) for ext in [".mp4", ".mkv", ".avi"])
+        has_media = bool(selected_media)
+
+        # Text input for operations that need it
+        st.write(t("movied_text_operations"))
+        text_input = st.text_input(
+            t("movied_text_input"),
+            key="text_input"
+        )
+
+        # All operations in a single row below text input
+        st.write("Available Operations:")
+        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
+
+        with col1:
+            if st.button(t("movied_replace_image"), key="replace_image_btn", disabled=not is_image):
+                if has_media:
+                    operation = f"replace_image {start_time} {end_time} {selected_media}"
+                    self.add_to_operations(operation)
                 else:
-                    expected_paths = video_df["File"].apply(
-                        lambda f: os.path.join(video_filter_dir, f))
-                    filtered_video_df = video_df[
-                        video_df["Path"].isin(expected_paths)
-                    ]
-                selected_video = st.dataframe(
-                    filtered_video_df[["File", "Preview"]],
-                    column_config={
-                        "File": st.column_config.TextColumn("Video Name"),
-                        "Preview": st.column_config.ImageColumn(
-                            t("movied_video_thumbnail"),
-                            help="Thumbnail of the video",
-                            width=thumbnail_size
-                        )
-                    },
-                    height=200,
-                    hide_index=True,
-                    selection_mode="single-row",
-                    on_select="rerun",
-                    key="video_media_selector"
-                )
-                selected_video_path = (filtered_video_df.iloc[selected_video["selection"]["rows"][0]]["Path"]
-                                       if selected_video["selection"]["rows"] else None)
+                    st.warning("Please select an image.")
 
-                col_video1, col_video2, col_video3 = st.columns(3)
-                with col_video1:
-                    if st.button(t("movied_insert_video"), key="insert_video_btn"):
-                        if selected_video_path:
-                            operation = f"insert_video {start_time} {selected_video_path}"
-                            self.add_to_operations(operation)
-                        else:
-                            st.warning("Please select a video first.")
+        with col2:
+            if st.button(t("movied_insert_video"), key="insert_video_btn", disabled=not is_video):
+                if has_media:
+                    operation = f"insert_video {start_time} {selected_media}"
+                    self.add_to_operations(operation)
+                else:
+                    st.warning("Please select a video.")
 
-                with col_video2:
-                    if st.button(t("movied_replace_video"), key="replace_video_btn"):
-                        if selected_video_path:
-                            operation = f"replace_video {start_time} {end_time} {selected_video_path}"
-                            self.add_to_operations(operation)
-                        else:
-                            st.warning("Please select a video first.")
+        with col3:
+            if st.button(t("movied_replace_video"), key="replace_video_btn", disabled=not is_video):
+                if has_media:
+                    operation = f"replace_video {start_time} {end_time} {selected_media}"
+                    self.add_to_operations(operation)
+                else:
+                    st.warning("Please select a video.")
 
-                with col_video3:
-                    if st.button(t("movied_replace_video_keep_audio"), key="replace_video_keep_audio_btn"):
-                        if selected_video_path:
-                            operation = f"replace_video_keep_audio {start_time} {end_time} {selected_video_path}"
-                            self.add_to_operations(operation)
-                        else:
-                            st.warning("Please select a video first.")
+        with col4:
+            if st.button(t("movied_replace_video_keep_audio"), key="replace_video_keep_audio_btn", disabled=not is_video):
+                if has_media:
+                    operation = f"replace_video_keep_audio {start_time} {end_time} {selected_media}"
+                    self.add_to_operations(operation)
+                else:
+                    st.warning("Please select a video.")
 
-            if st.button(t("movied_remove_section"), key="remove_section_btn"):
+        with col5:
+            if st.button(t("movied_animate_text"), key="animate_text_btn", disabled=not text_input):
+                if text_input:
+                    text_command = text_input.replace("\n", "\\")
+                    operation = f"addtext {start_time} {end_time} fromLeft 1s {text_command}"
+                    self.add_to_operations(operation)
+                else:
+                    st.warning("Please enter text first.")
+
+        with col6:
+            if st.button(t("movied_add_bottom_text"), key="add_bottom_text_btn", disabled=not text_input):
+                if text_input:
+                    text_command = text_input.replace("\n", "\\")
+                    operation = f"addBottomText {start_time} {end_time} fromLeft 1s {text_command}"
+                    self.add_to_operations(operation)
+                else:
+                    st.warning("Please enter text first.")
+
+        with col7:
+            if st.button(t("movied_insert_video_with_text"), key="insert_video_with_text_btn", disabled=not (is_video and text_input)):
+                if has_media and text_input:
+                    text_command = text_input.replace("\n", "\\")
+                    operation = f"insertVideoWithText {start_time} {selected_media} | {text_command}"
+                    self.add_to_operations(operation)
+                else:
+                    st.warning("Please select a video and enter text first.")
+
+        with col8:
+            if st.button(t("movied_remove_section"), key="remove_section_btn", disabled=not (start_time and end_time)):
                 operation = f"remove_section {start_time} {end_time}"
                 self.add_to_operations(operation)
 
-            st.write(t("movied_text_operations"))
-            text_input = st.text_area(
-                t("movied_text_input"), height=100, key="text_input")
-            col_text1, col_text2, col_text3 = st.columns(3)
-            with col_text1:
-                if st.button(t("movied_animate_text"), key="animate_text_btn"):
-                    if text_input:
-                        text_command = text_input.replace("\n", "\\")
-                        operation = f"addtext {start_time} {end_time} fromLeft 1s {text_command}"
-                        self.add_to_operations(operation)
-                    else:
-                        st.warning("Please enter text first.")
-            with col_text2:
-                if st.button(t("movied_add_bottom_text"), key="add_bottom_text_btn"):
-                    if text_input:
-                        text_command = text_input.replace("\n", "\\")
-                        operation = f"addBottomText {start_time} {end_time} fromLeft 1s {text_command}"
-                        self.add_to_operations(operation)
-                    else:
-                        st.warning("Please enter text first.")
-            with col_text3:
-                if st.button(t("movied_insert_video_with_text"), key="insert_video_with_text_btn"):
-                    if selected_video_path and st.session_state.get("text_input"):
-                        text_command = st.session_state["text_input"].replace(
-                            "\n", "\\")
-                        operation = f"insertVideoWithText {start_time} {selected_video_path} | {text_command}"
-                        self.add_to_operations(operation)
-                    else:
-                        st.warning(
-                            "Please select a video and enter text first.")
+        # Operations queue
+        operations = st.text_area(t("movied_operations"), value=st.session_state.get("operations", ""), key="operations_area")
+        st.session_state["operations"] = operations
 
-            operations = st.text_area(t("movied_operations"), value=st.session_state.get(
-                "operations", ""), key="operations_area")
-            st.session_state["operations"] = operations
-
-            if st.button(t("movied_generate"), key="generate_btn", type="primary") and operations:
-                self.execute_operations(
-                    video_path, vtt_path, operations, font, font_size)
+        # Generate button
+        if st.button(t("movied_generate"), key="generate_btn", type="primary") and operations:
+            self.execute_operations(video_path, vtt_path, operations, font, font_size)
 
     def add_to_operations(self, operation):
         current_ops = st.session_state.get("operations", "")
