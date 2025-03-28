@@ -308,7 +308,7 @@ class ImggenPlugin(Plugin):
         image_count = 0
 
         for i, current_seed in enumerate(seeds):
-            generator = torch.Generator().manual_seed(current_seed)
+            generator = torch.Generator().manual_seed(int(current_seed))
             for j, sub_prompt in enumerate(prompts):
                 if multi_styles:
                     styles_to_use = multi_styles
@@ -337,7 +337,7 @@ class ImggenPlugin(Plugin):
     def generate_image(self, background_prompt, prompt, aspect_ratio="1:1", remove_background=True, background_removal_method="ai", seed=None, face=True, steps=2, input_image=None, face_prompt=""):
         if seed is None:
             seed = random.randint(0, 2**32 - 1)
-        generator = torch.Generator().manual_seed(seed)
+        generator = torch.Generator().manual_seed(int(seed))
         original_prompt = prompt
         if face and input_image is None:
             prompt = face_prompt + ", " + prompt
