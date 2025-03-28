@@ -304,7 +304,7 @@ class MoviedPlugin(Plugin):
         return image_df, video_df
 
     def handle_operations(self, start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size):
-        if start_time and end_time:
+        if video_path:
             try:
                 image_df, video_df = self.list_media_files()
             except ValueError as e:
@@ -508,6 +508,7 @@ class MoviedPlugin(Plugin):
                 target_size = (main_clip.w, main_clip.h)
                 subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
                 duration_offset = 0
+                operation_log = []  # Liste pour stocker les opérations avec timecodes réels
 
                 # Préparation du fond pour le texte
                 text_background = st.session_state.get(
@@ -516,16 +517,17 @@ class MoviedPlugin(Plugin):
                     "movied_green_background")
 
                 with st.expander("Debug Information"):
-                    # Parcourir chaque opération
                     for op in operations.split("\n"):
+                        if not op.strip():
+                            continue
                         op_cleaned = op.split("//")[0].strip()
                         if not op_cleaned:
                             continue
-                        parts = op.split(maxsplit=5)
+                        parts = op_cleaned.split(maxsplit=5)
                         cmd = parts[0]
-                        st.write(f"Processing: {op}")
+                        st.write(f"Processing: {op_cleaned}")
 
-                        # Extraire et parser les timecodes (commun à toutes les commandes sauf insert_video qui n'a qu'un start_time)
+                        # Extraire et parser les timecodes avec offset
                         if cmd == "insert_video":
                             start_time = parts[1]
                             start_sec = self.parse_timecode(
@@ -541,15 +543,18 @@ class MoviedPlugin(Plugin):
                             remaining_args = " ".join(
                                 parts[3:]) if len(parts) > 3 else ""
 
-                        # Exécuter la commande correspondante
+                        # Formater les timecodes réels pour le log
+                        real_start = self.format_timecode(start_sec)
+                        real_end = self.format_timecode(
+                            end_sec) if end_sec else None
+
+                        # Exécuter la commande et logger
                         if cmd == "replace_image":
                             image_path = remaining_args
                             main_clip = replace_with_image(
                                 main_clip, start_sec, end_sec, image_path, target_size)
-                            col1, _ = st.columns([1, 3])
-                            with col1:
-                                st.image(
-                                    image_path, caption=f"Using image: {image_path}", width=100)
+                            operation_log.append(
+                                {"Operation": f"replace_image {image_path}", "Start": real_start, "End": real_end})
 
                         elif cmd == "insert_video":
                             video_path_insert = remaining_args
@@ -558,9 +563,8 @@ class MoviedPlugin(Plugin):
                             subtitles_df = self.adjust_subtitles(
                                 subtitles_df, start_time, duration_change)
                             duration_offset += duration_change
-                            col1, _ = st.columns([1, 3])
-                            with col1:
-                                st.video(video_path_insert)
+                            operation_log.append(
+                                {"Operation": f"insert_video {video_path_insert}", "Start": real_start, "End": None})
 
                         elif cmd == "replace_video":
                             video_path_replace = remaining_args
@@ -569,37 +573,33 @@ class MoviedPlugin(Plugin):
                             subtitles_df = self.adjust_subtitles(
                                 subtitles_df, end_time, duration_change)
                             duration_offset += duration_change
-                            col1, _ = st.columns([1, 3])
-                            with col1:
-                                st.video(
-                                    video_path_replace, caption=f"Using video: {video_path_replace}", width=100)
+                            operation_log.append(
+                                {"Operation": f"replace_video {video_path_replace}", "Start": real_start, "End": real_end})
 
                         elif cmd == "replace_video_keep_audio":
                             video_path_replace = remaining_args
                             main_clip = replace_video_keep_audio(
                                 main_clip, start_sec, end_sec, video_path_replace, target_size)
-                            col1, _ = st.columns([1, 3])
-                            with col1:
-                                st.video(video_path_replace)
+                            operation_log.append(
+                                {"Operation": f"replace_video_keep_audio {video_path_replace}", "Start": real_start, "End": real_end})
 
                         elif cmd == "addtext":
                             animation_type, anim_duration, text = parts[3], parts[4], parts[5]
                             anim_duration_sec = float(anim_duration[:-1])
-                            main_clip = add_animated_text(
-                                main_clip, start_sec, end_sec, text, animation_type,
-                                anim_duration_sec, target_size, font, font_size,
-                                use_green_background=use_green_background
-                            )
+                            main_clip = add_animated_text(main_clip, start_sec, end_sec, text, animation_type,
+                                                          anim_duration_sec, target_size, font, font_size,
+                                                          use_green_background=use_green_background, position="center")
+                            operation_log.append(
+                                {"Operation": f"addtext {animation_type} {anim_duration} {text}", "Start": real_start, "End": real_end})
 
                         elif cmd == "addBottomText":
                             animation_type, anim_duration, text = parts[3], parts[4], parts[5]
                             anim_duration_sec = float(anim_duration[:-1])
-                            main_clip = add_animated_text(
-                                main_clip, start_sec, end_sec, text, animation_type,
-                                anim_duration_sec, target_size, font, font_size,
-                                use_green_background=use_green_background,
-                                position="bottom"  # Nouvelle position
-                            )
+                            main_clip = add_animated_text(main_clip, start_sec, end_sec, text, animation_type,
+                                                          anim_duration_sec, target_size, font, font_size,
+                                                          use_green_background=use_green_background, position="bottom")
+                            operation_log.append(
+                                {"Operation": f"addBottomText {animation_type} {anim_duration} {text}", "Start": real_start, "End": real_end})
 
                         elif cmd == "remove_section":
                             main_clip, duration_change = remove_section(
@@ -607,26 +607,45 @@ class MoviedPlugin(Plugin):
                             subtitles_df = self.adjust_subtitles(
                                 subtitles_df, start_time, duration_change)
                             duration_offset += duration_change
-                            st.write(
-                                f"Section removed from {start_time} to {end_time}")
+                            operation_log.append(
+                                {"Operation": "remove_section", "Start": real_start, "End": real_end})
 
-                        else:
-                            raise ValueError(f"Invalid command: {cmd}")
+                # Sauvegarde de la vidéo éditée et des sous-titres ajustés
+                output_path = os.path.splitext(video_path)[0] + "_edited.mp4"
+                main_clip.write_videofile(
+                    output_path, codec="libx264", audio_codec="aac")
+                save_vtt(vtt_path, subtitles_df, pd.DataFrame())
+                st.success(f"Video generated successfully at {output_path}")
 
-                    # Sauvegarde de la vidéo éditée et des sous-titres ajustés
-                    output_path = os.path.splitext(
-                        video_path)[0] + "_edited.mp4"
-                    main_clip.write_videofile(
-                        output_path, codec="libx264", audio_codec="aac")
-                    save_vtt(vtt_path, subtitles_df, pd.DataFrame())
-                    st.success(
-                        f"Video generated successfully at {output_path}")
-                    st.rerun()
+                # Créer un DataFrame avec les opérations et timecodes réels
+                operations_df = pd.DataFrame(operation_log, columns=[
+                                             "Operation", "Start", "End"])
+                # Stocker dans la session
+                st.session_state["operations_log"] = operations_df
+                # Stocker le chemin de la vidéo
+                st.session_state["generated_video_path"] = output_path
+
+                # Afficher le tableau
+                st.write("Operations with Real Timecodes:")
+                st.dataframe(operations_df, hide_index=True)
+
+                # Afficher la vidéo générée
+                st.write("Generated Video:")
+                st.video(output_path)
+
+                st.rerun()
             except Exception as e:
                 st.error(t("movied_error").format(error=str(e)))
                 raise e
             finally:
                 main_clip.close()
+
+    def format_timecode(self, seconds):
+        """Formate les secondes en timecode HH:MM:SS.mmm."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
     def run(self, config):
         self.working_dir = config.get(self.name, {}).get(
@@ -634,7 +653,7 @@ class MoviedPlugin(Plugin):
         self.media_dirs = config.get(self.name, {}).get(
             "movied_media_dirs", t("movied_media_dirs_default")).split("\n")
         self.reference_audio_path = config.get(self.name, {}).get(
-            "movied_reference_audio", "/path/to/sample.mp3")  # Récupérer le chemin
+            "movied_reference_audio", "/path/to/sample.mp3")
 
         self.setup_header()
         selected_model, thumbnail_size, font, font_size, text_background = self.setup_controls()
@@ -650,11 +669,23 @@ class MoviedPlugin(Plugin):
         start_time, end_time = self.handle_section(
             selected_subtitles, subtitles_df)
 
+        # Toujours afficher les opérations, même sans sous-titres sélectionnés
         if selected_video["selection"]["rows"]:
             video_path = video_df.iloc[selected_video["selection"]
                                        ["rows"][0]]["Full Path"]
             self.handle_operations(
                 start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size)
+        else:
+            self.handle_operations(
+                None, None, None, None, thumbnail_size, font, font_size)
+
+        # Afficher les résultats stockés dans la session après un rerun
+        if "operations_log" in st.session_state:
+            st.write("Operations with Real Timecodes:")
+            st.dataframe(st.session_state["operations_log"], hide_index=True)
+        if "generated_video_path" in st.session_state:
+            st.write("Generated Video:")
+            st.video(st.session_state["generated_video_path"])
 
 
 if __name__ == "__main__":
