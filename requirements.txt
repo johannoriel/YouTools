@@ -38,3 +38,4 @@ linkify-it-py
 streamlit-shortcuts
 selenium
 stem
+streamlit-image-select
