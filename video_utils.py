@@ -500,8 +500,8 @@ def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, 
     ])
 
 
-def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_duration_sec, target_size, font, font_size, use_green_background=True):
-    """Ajoute du texte animé sur une section de la vidéo, soit sur fond vert, soit en superposition."""
+def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_duration_sec, target_size, font, font_size, use_green_background=True, position="center"):
+    """Ajoute du texte animé sur une section de la vidéo, soit sur fond vert, soit en superposition, avec position ajustable."""
     duration = end_sec - start_sec
     audio_clip = main_clip.subclipped(start_sec, end_sec).audio
 
@@ -526,7 +526,7 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
         duration=duration
     )
 
-    # Animation
+    # Animation et positionnement
     if animation_type == "fromLeft":
         def position_function(t):
             if t < anim_duration_sec:
@@ -534,8 +534,13 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
                     (target_size[0] / 2 + txt_clip.w / 2) * \
                     (t / anim_duration_sec)
             else:
-                x = (target_size[0] - txt_clip.w) / 2
-            y = (target_size[1] - txt_clip.h) / 2
+                x = (target_size[0] - txt_clip.w) / 2  # Centré horizontalement
+
+            # Ajuster la position verticale selon le paramètre 'position'
+            if position == "center":
+                y = (target_size[1] - txt_clip.h) / 2  # Milieu de l'écran
+            elif position == "bottom":
+                y = (target_size[1] - txt_clip.h) * 0.85
             return (x, y)
 
         txt_clip = txt_clip.with_position(position_function)
@@ -543,6 +548,17 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
             lambda t: (position_function(
                 t)[0] - text_padding, position_function(t)[1] - text_padding)
         )
+    else:
+        # Sans animation, position fixe
+        if position == "center":
+            x = (target_size[0] - txt_clip.w) / 2
+            y = (target_size[1] - txt_clip.h) / 2
+        elif position == "bottom":
+            x = (target_size[0] - txt_clip.w) / 2
+            y = (target_size[1] - txt_clip.h) * 0.85
+
+        txt_clip = txt_clip.with_position((x, y))
+        text_box = text_box.with_position((x - text_padding, y - text_padding))
 
     if use_green_background:
         # Fond vert pour chromakey

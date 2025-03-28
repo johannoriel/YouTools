@@ -49,6 +49,7 @@ translations["en"].update({
     "movied_reference_audio": "Reference Audio File",
     "movied_normalize_audio": "Normalize Audio",
     "movied_normalizing": "Normalizing audio...",
+    "movied_add_bottom_text": "Add Bottom Text",
 })
 
 translations["fr"].update({
@@ -88,6 +89,7 @@ translations["fr"].update({
     "movied_reference_audio": "Fichier Audio de Référence",
     "movied_normalize_audio": "Normaliser le Son",
     "movied_normalizing": "Normalisation du son en cours...",
+    "movied_add_bottom_text": "Ajouter du Texte en Bas",
 })
 
 
@@ -433,16 +435,27 @@ class MoviedPlugin(Plugin):
             if st.button(t("movied_remove_section"), key="remove_section_btn"):
                 operation = f"remove_section {start_time} {end_time}"
                 self.add_to_operations(operation)
+
             st.write(t("movied_text_operations"))
             text_input = st.text_area(
                 t("movied_text_input"), height=100, key="text_input")
-            if st.button(t("movied_animate_text"), key="animate_text_btn"):
-                if text_input:
-                    text_command = text_input.replace("\n", "\\")
-                    operation = f"addtext {start_time} {end_time} fromLeft 1s {text_command}"
-                    self.add_to_operations(operation)
-                else:
-                    st.warning("Please enter text first.")
+            col_text1, col_text2 = st.columns(2)
+            with col_text1:
+                if st.button(t("movied_animate_text"), key="animate_text_btn"):
+                    if text_input:
+                        text_command = text_input.replace("\n", "\\")
+                        operation = f"addtext {start_time} {end_time} fromLeft 1s {text_command}"
+                        self.add_to_operations(operation)
+                    else:
+                        st.warning("Please enter text first.")
+            with col_text2:
+                if st.button(t("movied_add_bottom_text"), key="add_bottom_text_btn"):
+                    if text_input:
+                        text_command = text_input.replace("\n", "\\")
+                        operation = f"addBottomText {start_time} {end_time} fromLeft 1s {text_command}"
+                        self.add_to_operations(operation)
+                    else:
+                        st.warning("Please enter text first.")
 
             operations = st.text_area(t("movied_operations"), value=st.session_state.get(
                 "operations", ""), key="operations_area")
@@ -578,6 +591,16 @@ class MoviedPlugin(Plugin):
                                 use_green_background=use_green_background
                             )
 
+                        elif cmd == "addBottomText":
+                            animation_type, anim_duration, text = parts[3], parts[4], parts[5]
+                            anim_duration_sec = float(anim_duration[:-1])
+                            main_clip = add_animated_text(
+                                main_clip, start_sec, end_sec, text, animation_type,
+                                anim_duration_sec, target_size, font, font_size,
+                                use_green_background=use_green_background,
+                                position="bottom"  # Nouvelle position
+                            )
+
                         elif cmd == "remove_section":
                             main_clip, duration_change = remove_section(
                                 main_clip, start_sec, end_sec)
@@ -586,6 +609,9 @@ class MoviedPlugin(Plugin):
                             duration_offset += duration_change
                             st.write(
                                 f"Section removed from {start_time} to {end_time}")
+
+                        else:
+                            raise ValueError(f"Invalid command: {cmd}")
 
                     # Sauvegarde de la vidéo éditée et des sous-titres ajustés
                     output_path = os.path.splitext(
