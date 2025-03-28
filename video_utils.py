@@ -502,38 +502,27 @@ def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, 
 
 # Dans video_utils.py
 
+# Dans video_utils.py
+
 def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_duration_sec, target_size, font, font_size, use_green_background=True, position="center", text_style="outline"):
     """Ajoute du texte animé sur une section de la vidéo avec style ajustable."""
     duration = end_sec - start_sec
     audio_clip = main_clip.subclipped(start_sec, end_sec).audio
 
-    # Création du texte principal (blanc)
+    # Création du texte principal (blanc avec contour si text_style="outline")
     text_content = text.replace("\\", "\n")
     txt_clip = TextClip(
-        text=text_content,
-        font=font,
+        text=text_content,  # Explicitement passer le texte
+        font=f"{font}",
         font_size=font_size,
         color="white",
         method="caption",
+        # Limite la largeur à 80% de la vidéo
         size=(int(target_size[0] * 0.8), None),
-        # Contour noir uniquement pour "box"
-        stroke_color="black" if text_style == "box" else None,
-        stroke_width=1 if text_style == "box" else 0,
+        # Contour noir pour "outline"
+        stroke_color="black" if text_style == "outline" else None,
+        stroke_width=2 if text_style == "outline" else 0,  # Épaisseur du contour
     ).with_duration(duration)
-
-    # Si style "outline", ajouter un texte noir plus gros en dessous
-    if text_style == "outline":
-        outline_clip = TextClip(
-            text=text_content,
-            font=font,
-            font_size=int(font_size * 1.2),  # 20% plus grand
-            color="black",
-            method="caption",
-            size=(int(target_size[0] * 0.8), None),
-            stroke_width=0,  # Pas de contour supplémentaire
-        ).with_duration(duration)
-        txt_clip = CompositeVideoClip(
-            [outline_clip, txt_clip], size=target_size)
 
     # Boîte noire (uniquement pour text_style="box")
     text_padding = 10
@@ -555,10 +544,14 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
                     (target_size[0] / 2 + txt_clip.w / 2) * \
                     (t / anim_duration_sec)
             else:
-                x = (target_size[0] - txt_clip.w) / 2
-            y = (target_size[1] - txt_clip.h) / \
-                2 if position == "center" else (
-                    target_size[1] - txt_clip.h) * 0.85
+                x = (target_size[0] - txt_clip.w) / 2  # Centré horizontalement
+
+            # Ajuster la position verticale selon le paramètre 'position'
+            if position == "center":
+                y = (target_size[1] - txt_clip.h) / 2  # Milieu de l'écran
+            elif position == "bottom":
+                # Position en bas, avec une marge de 20 pixels
+                y = target_size[1] - txt_clip.h - 20
             return (x, y)
 
         txt_clip = txt_clip.with_position(position_function)
@@ -568,9 +561,14 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
                     t)[0] - text_padding, position_function(t)[1] - text_padding)
             )
     else:
-        x = (target_size[0] - txt_clip.w) / 2
-        y = (target_size[1] - txt_clip.h) / \
-            2 if position == "center" else (target_size[1] - txt_clip.h) * 0.85
+        # Sans animation, position fixe
+        x = (target_size[0] - txt_clip.w) / 2  # Centré horizontalement
+        if position == "center":
+            y = (target_size[1] - txt_clip.h) / 2  # Milieu de l'écran
+        elif position == "bottom":
+            # Position en bas, avec une marge de 20 pixels
+            y = target_size[1] - txt_clip.h - 20
+
         txt_clip = txt_clip.with_position((x, y))
         if text_box:
             text_box = text_box.with_position(
@@ -580,12 +578,20 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
     if use_green_background:
         background = ColorClip(size=target_size, color=(
             0, 255, 0), duration=duration)
-        final_clip = CompositeVideoClip(
-            [background, text_box, txt_clip] if text_box else [background, txt_clip], size=target_size)
+        if text_style == "box":
+            final_clip = CompositeVideoClip(
+                [background, text_box, txt_clip], size=target_size)
+        else:
+            final_clip = CompositeVideoClip(
+                [background, txt_clip], size=target_size)
     else:
         original_segment = main_clip.subclipped(start_sec, end_sec)
-        final_clip = CompositeVideoClip(
-            [original_segment, text_box, txt_clip] if text_box else [original_segment, txt_clip], size=target_size)
+        if text_style == "box":
+            final_clip = CompositeVideoClip(
+                [original_segment, text_box, txt_clip], size=target_size)
+        else:
+            final_clip = CompositeVideoClip(
+                [original_segment, txt_clip], size=target_size)
 
     if audio_clip:
         final_clip = final_clip.with_audio(audio_clip)
@@ -596,8 +602,10 @@ def add_animated_text(main_clip, start_sec, end_sec, text, animation_type, anim_
         main_clip.subclipped(end_sec)
     ])
 
+# Dans video_utils.py
 
 # Dans video_utils.py
+
 
 def insert_video_with_text(main_clip, start_sec, video_path_insert, text, target_size, font, font_size, use_green_background=True, text_style="outline"):
     """Insère une vidéo avec du texte statique en bas, la durée du texte correspondant à celle de la vidéo insérée."""
@@ -605,32 +613,20 @@ def insert_video_with_text(main_clip, start_sec, video_path_insert, text, target
     duration = insert_clip.duration
     end_sec = start_sec + duration
 
-    # Création du texte principal (blanc)
+    # Création du texte principal (blanc avec contour si text_style="outline")
     text_content = text.replace("\\", "\n")
     txt_clip = TextClip(
         text=text_content,
-        font=font,
+        font=f"{font}",
         font_size=font_size,
         color="white",
         method="caption",
+        # Limite la largeur à 80% de la vidéo
         size=(int(target_size[0] * 0.8), None),
-        stroke_color="black" if text_style == "box" else None,
-        stroke_width=1 if text_style == "box" else 0,
+        # Contour noir pour "outline"
+        stroke_color="blue" if text_style == "outline" else None,
+        stroke_width=2 if text_style == "outline" else 0,  # Épaisseur du contour
     ).with_duration(duration)
-
-    # Si style "outline", ajouter un texte noir plus gros en dessous
-    if text_style == "outline":
-        outline_clip = TextClip(
-            text=text_content,
-            font=font,
-            font_size=int(font_size * 1.2),  # 20% plus grand
-            color="black",
-            method="caption",
-            size=(int(target_size[0] * 0.8), None),
-            stroke_width=0,
-        ).with_duration(duration)
-        txt_clip = CompositeVideoClip(
-            [outline_clip, txt_clip], size=target_size)
 
     # Boîte noire (uniquement pour text_style="box")
     text_padding = 10
@@ -645,15 +641,22 @@ def insert_video_with_text(main_clip, start_sec, video_path_insert, text, target
         text_box = None
 
     # Positionnement statique en bas
-    x = (target_size[0] - txt_clip.w) / 2
-    y = (target_size[1] - txt_clip.h) * 0.85  # Position en bas
+    x = (target_size[0] - txt_clip.w) / 2  # Centré horizontalement
+    # Position en bas, avec une marge de 20 pixels
+    y = target_size[1] - txt_clip.h - 20
+
+    # Appliquer la position au clip texte
     txt_clip = txt_clip.with_position((x, y))
     if text_box:
         text_box = text_box.with_position((x - text_padding, y - text_padding))
 
     # Composition de la vidéo insérée avec texte
-    final_insert_clip = CompositeVideoClip(
-        [insert_clip, text_box, txt_clip] if text_box else [insert_clip, txt_clip], size=target_size)
+    if text_style == "box":
+        final_insert_clip = CompositeVideoClip(
+            [insert_clip, text_box, txt_clip], size=target_size)
+    else:
+        final_insert_clip = CompositeVideoClip(
+            [insert_clip, txt_clip], size=target_size)
 
     # Concaténation avec la vidéo principale
     new_clip = concatenate_videoclips([

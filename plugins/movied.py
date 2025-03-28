@@ -520,6 +520,29 @@ class MoviedPlugin(Plugin):
                                 "End"] = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
         return subtitles_df
 
+    def alert(self):
+        notification_js = """
+        <script>
+        function sendBrowserNotification() {
+            // Demande la permission si nécessaire
+            if ("Notification" in window) {
+                Notification.requestPermission().then(function (permission) {
+                    if (permission === "granted") {
+                        new Notification("Alerte Streamlit", {
+                            body: "Génération terminée",
+                            icon: "https://streamlit.io/favicon.ico"
+                        });
+                    }
+                });
+            } else {
+                alert("Votre navigateur ne supporte pas les notifications desktop.");
+            }
+        }
+        sendBrowserNotification();
+        </script>
+        """
+        st.components.v1.html(notification_js)
+
     def execute_operations(self, video_path, vtt_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
             try:
@@ -675,6 +698,7 @@ class MoviedPlugin(Plugin):
                 raise e
             finally:
                 main_clip.close()
+                self.alert()
 
     def format_timecode(self, seconds):
         """Formate les secondes en timecode HH:MM:SS.mmm."""
@@ -718,32 +742,34 @@ class MoviedPlugin(Plugin):
         # Afficher les résultats stockés dans la session après un rerun
         if "operations_log" in st.session_state:
             st.write("Operations with Real Timecodes:")
-            st.dataframe(st.session_state["operations_log"], hide_index=True)
+            # Activer la sélection d'une ligne dans le DataFrame
+            selected_operation = st.dataframe(
+                st.session_state["operations_log"],
+                hide_index=True,
+                selection_mode="single-row",
+                on_select="rerun",
+                key="operations_log_selector"
+            )
+
+            # Si une ligne est sélectionnée, récupérer le timecode de début
+            start_time_seconds = None
+            if selected_operation["selection"]["rows"]:
+                selected_row = selected_operation["selection"]["rows"][0]
+                selected_timecode = st.session_state["operations_log"].iloc[selected_row]["Start"]
+                # Convertir le timecode (HH:MM:SS.mmm) en secondes
+                h, m, s = map(float, selected_timecode.replace(
+                    ",", ".").split(":"))
+                start_time_seconds = h * 3600 + m * 60 + s
+
         if "generated_video_path" in st.session_state:
             st.write("Generated Video:")
             _, col, _ = st.columns(3)
-            col.video(st.session_state["generated_video_path"])
-            notification_js = """
-            <script>
-            function sendBrowserNotification() {
-                // Demande la permission si nécessaire
-                if ("Notification" in window) {
-                    Notification.requestPermission().then(function (permission) {
-                        if (permission === "granted") {
-                            new Notification("Alerte Streamlit", {
-                                body: "Génération terminée",
-                                icon: "https://streamlit.io/favicon.ico"
-                            });
-                        }
-                    });
-                } else {
-                    alert("Votre navigateur ne supporte pas les notifications desktop.");
-                }
-            }
-            </script>
-            """
-            st.components.v1.html(
-                notification_js + "<script>sendBrowserNotification();</script>")
+            # Passer start_time à st.video si une ligne est sélectionnée
+            col.video(
+                st.session_state["generated_video_path"],
+                start_time=start_time_seconds if start_time_seconds is not None else 0,
+                autoplay=True,
+            )
 
 
 if __name__ == "__main__":
