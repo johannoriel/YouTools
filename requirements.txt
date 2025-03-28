@@ -1,4 +1,4 @@
-streamlit==1.41.1
+streamlit
 google-api-python-client
 python-dotenv
 youtube_transcript_api
@@ -35,3 +35,6 @@ googlesearch-python
 pylatexenc
 praw
 linkify-it-py
+streamlit-shortcuts
+selenium
+stem
