@@ -32,6 +32,12 @@ translations["en"].update({
     "illustrator_media_type": "Media Type",
     "illustrator_photos": "Photos",
     "illustrator_videos": "Videos",
+    "both": "Both",
+    "All": "All",
+    "Images": "Images",
+    "Videos": "Videos",
+    "Audio": "Audio",
+    "Filter by type": "Filter by type"
 })
 
 translations["fr"].update({
@@ -57,7 +63,13 @@ translations["fr"].update({
     "illustrator_refresh": "Rafraîchir",
     "illustrator_media_type": "Type de média",
     "illustrator_photos": "Photos",
-    "illustrator_videos": "Vidéos"
+    "illustrator_videos": "Vidéos",
+    "both": "Les deux",
+    "All": "Tous",
+    "Images": "Images",
+    "Videos": "Vidéos",
+    "Audio": "Audio",
+    "Filter by type": "Filtrer par type"
 })
 
 
@@ -147,8 +159,17 @@ class IllustratorPlugin(Plugin):
             st.info(f"Created directory: {current_dir}")
             return
 
-        media_extensions = ['.jpg', '.jpeg', '.png',
-                            '.gif', '.mp4', '.mov', '.avi', '.mp3', '.wav']
+        # Filtre par type de média
+        media_types = {
+            "All": ['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi', '.mp3', '.wav'],
+            "Images": ['.jpg', '.jpeg', '.png', '.gif'],
+            "Videos": ['.mp4', '.mov', '.avi'],
+            "Audio": ['.mp3', '.wav']
+        }
+        selected_type = st.selectbox(
+            "Filter by type", list(media_types.keys()))
+        media_extensions = media_types[selected_type]
+
         media_files = [f for f in os.listdir(current_dir) if os.path.splitext(f)[
             1].lower() in media_extensions]
 
@@ -156,23 +177,24 @@ class IllustratorPlugin(Plugin):
             st.info(t("illustrator_no_assets"))
             return
 
-        # Bouton pour tout supprimer
-        if st.button(t("illustrator_delete_all")):
-            for f in media_files:
-                self.delete_asset(os.path.join(current_dir, f))
-            st.rerun()
-
         # Affichage des assets avec option de suppression
-        for f in media_files:
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                media_path = os.path.join(current_dir, f)
-                selected = media_selector(
-                    [current_dir], media_extensions, "current", st)
-            with col2:
-                if st.button(t("illustrator_delete"), key=f"del_{f}"):
-                    if self.delete_asset(media_path):
-                        st.rerun()
+        selected = media_selector(
+            [current_dir], media_extensions, "current", st)
+
+        # Boutons de suppression et rafraîchissement sur la même ligne
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button(t("illustrator_delete_all")):
+                for f in media_files:
+                    self.delete_asset(os.path.join(current_dir, f))
+                st.rerun()
+        with col2:
+            if selected and st.button(t("illustrator_delete")):
+                if self.delete_asset(selected):
+                    st.rerun()
+        with col3:
+            if st.button(t("illustrator_refresh")):
+                st.rerun()
 
     def run_stored_assets_tab(self, config):
         """Onglet des assets stockés"""
@@ -185,10 +207,25 @@ class IllustratorPlugin(Plugin):
             st.info(f"Created directory: {stored_dir}")
             return
 
-        # Sélection du sous-répertoire
-        subdirs = self.get_subdirectories(stored_dir)
-        selected_subdir = st.selectbox(
-            "Select folder", subdirs + ["[Create New Folder]"])
+        # Filtre par type de média
+        media_types = {
+            "All": ['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi', '.mp3', '.wav'],
+            "Images": ['.jpg', '.jpeg', '.png', '.gif'],
+            "Videos": ['.mp4', '.mov', '.avi'],
+            "Audio": ['.mp3', '.wav']
+        }
+
+        # Sélection du sous-répertoire et type de média sur la même ligne
+        col1, col2 = st.columns(2)
+        with col1:
+            subdirs = self.get_subdirectories(stored_dir)
+            selected_subdir = st.selectbox(
+                "Select folder", subdirs + ["[Create New Folder]"], key="stored_folder")
+        with col2:
+            selected_type = st.selectbox(
+                "Filter by type", list(media_types.keys()), key="stored_filter")
+
+        media_extensions = media_types[selected_type]
 
         if selected_subdir == "[Create New Folder]":
             new_folder = st.text_input(t("illustrator_create_folder"))
@@ -201,8 +238,6 @@ class IllustratorPlugin(Plugin):
 
         # Affichage des médias du sous-répertoire sélectionné
         if selected_subdir:
-            media_extensions = ['.jpg', '.jpeg', '.png',
-                                '.gif', '.mp4', '.mov', '.avi', '.mp3', '.wav']
             selected_dir = os.path.join(stored_dir, selected_subdir)
             selected_media = media_selector(
                 [selected_dir], media_extensions, "stored", st)
@@ -223,9 +258,19 @@ class IllustratorPlugin(Plugin):
             "canva": config.get(self.name, {}).get("canva_api_key", "")
         }
 
-        # Sélection de l'API
-        selected_api = st.selectbox(
-            t("illustrator_search_api"), list(self.apis.keys()))
+        # Sélection de l'API et type de média sur la même ligne
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_api = st.selectbox(
+                t("illustrator_search_api"), list(self.apis.keys()), key="search_api")
+        with col2:
+            media_type = st.selectbox(
+                t("illustrator_media_type"),
+                ["photos", "videos", "both"],
+                format_func=lambda x: t(
+                    f"illustrator_{x}"),
+                key="search_media_type"
+            )
 
         if not api_keys[selected_api]:
             st.error(f"API key for {selected_api} is not configured")
@@ -236,10 +281,22 @@ class IllustratorPlugin(Plugin):
         if st.button(t("illustrator_search_button")) and keywords:
             with st.spinner("Searching..."):
                 try:
-                    results = self.apis[selected_api].search(
-                        remove_quotes(keywords),
-                        api_keys[selected_api]
-                    )
+                    results = []
+                    if media_type in ["photos", "both"]:
+                        photos = self.apis[selected_api].search(
+                            remove_quotes(keywords),
+                            api_keys[selected_api],
+                            "photos"
+                        )
+                        results.extend(photos)
+                    if media_type in ["videos", "both"]:
+                        videos = self.apis[selected_api].search(
+                            remove_quotes(keywords),
+                            api_keys[selected_api],
+                            "videos"
+                        )
+                        results.extend(videos)
+
                     # Formatage des résultats pour remote_media_selector
                     formatted_results = []
                     for item in results:
@@ -259,12 +316,13 @@ class IllustratorPlugin(Plugin):
             subdirs = self.get_subdirectories(stored_dir)
             selected_subdir = st.selectbox(
                 t("illustrator_destination_folder"),
-                subdirs + ["[Create New Folder]"]
+                subdirs + ["[Create New Folder]"],
+                key="search_destination_folder"
             )
 
             if selected_subdir == "[Create New Folder]":
                 new_folder = st.text_input(t("illustrator_create_folder"))
-                if new_folder and st.button("Create"):
+                if new_folder and st.button("Create", key="create_folder_button"):
                     new_path = os.path.join(stored_dir, new_folder)
                     os.makedirs(new_path, exist_ok=True)
                     st.success(f"Folder created: {new_path}")
