@@ -49,6 +49,11 @@ translations["en"].update({
     "directpublish_do_llm": "Use LLM to summerize",
     "directpublish_title": "Title of the video",
     "directpublish_keywords": "Keywords to add to the video (comma-separated)",
+    "directpublish_custom_thumbnail": "Use custom thumbnail",
+    "directpublish_select_thumbnail": "Select a thumbnail image",
+    "directpublish_uploading_thumbnail": "Uploading thumbnail...",
+    "directpublish_thumbnail_success": "Thumbnail successfully uploaded!",
+    "directpublish_thumbnail_error": "Error uploading thumbnail: {error}",
 })
 
 translations["fr"].update({
@@ -88,6 +93,11 @@ translations["fr"].update({
     "directpublish_do_llm": "Utiliser le LLM pour résumer",
     "directpublish_title": "Titre de la vidéo",
     "directpublish_keywords": "Mots-clés à ajouter à la vidéo (séparés par des virgules)",
+    "directpublish_custom_thumbnail": "Utiliser une miniature personnalisée",
+    "directpublish_select_thumbnail": "Sélectionner une image pour la miniature",
+    "directpublish_uploading_thumbnail": "Téléversement de la miniature...",
+    "directpublish_thumbnail_success": "Miniature téléversée avec succès !",
+    "directpublish_thumbnail_error": "Erreur lors du téléversement de la miniature : {error}",
 })
 
 
@@ -166,6 +176,20 @@ class DirectpublishPlugin(Plugin):
         do_llm = st.checkbox(t("directpublish_do_llm"), value=True)
         title = st.text_input(t("directpublish_title"))
         do_publish = st.checkbox(t("directpublish_dopublish"), value=True)
+        use_custom_thumbnail = st.checkbox(t("directpublish_custom_thumbnail"))
+        thumbnail_path = None
+        if use_custom_thumbnail:
+            thumbnail_dir = work_directory
+            thumbnail_files = [f for f in os.listdir(thumbnail_dir)
+                                if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            if thumbnail_files:
+                selected_thumbnail = st.selectbox(
+                    t("directpublish_select_thumbnail"),
+                    thumbnail_files
+                )
+                thumbnail_path = os.path.join(thumbnail_dir, selected_thumbnail)
+            else:
+                st.warning("No thumbnail images found in directory")
 
         # Sélection du fond si le remplacement du fond vert est activé
         background_video = None
@@ -313,6 +337,14 @@ class DirectpublishPlugin(Plugin):
                             "unlisted"
                         )
                         st.success(t("directpublish_notags"))
+
+                    if use_custom_thumbnail and thumbnail_path and video_id:
+                        st.text(t("directpublish_uploading_thumbnail"))
+                        if self.youtube_api.upload_thumbnail(video_id, thumbnail_path):
+                            st.success(t("directpublish_thumbnail_success"))
+                        else:
+                            st.error(t("directpublish_thumbnail_error").format(
+                                error="Check console for details"))
 
                     st.success(t("directpublish_success").format(
                         video_id=video_id))
