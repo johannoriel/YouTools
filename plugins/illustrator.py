@@ -37,7 +37,10 @@ translations["en"].update({
     "Images": "Images",
     "Videos": "Videos",
     "Audio": "Audio",
-    "Filter by type": "Filter by type"
+    "Filter by type": "Filter by type",
+    "download_to_stored": "Download to Stored Assets",
+    "download_to_current": "Download to Current Assets",
+    "download_to_both": "Download to Both",
 })
 
 translations["fr"].update({
@@ -69,7 +72,10 @@ translations["fr"].update({
     "Images": "Images",
     "Videos": "Vidéos",
     "Audio": "Audio",
-    "Filter by type": "Filtrer par type"
+    "Filter by type": "Filtrer par type",
+    "download_to_stored": "Télécharger vers Assets Stockés",
+    "download_to_current": "Télécharger vers Assets Actuels",
+    "download_to_both": "Télécharger vers les Deux",
 })
 
 
@@ -251,6 +257,8 @@ class IllustratorPlugin(Plugin):
         st.header(t("illustrator_search_tab"))
         stored_dir = self.expand_path(config.get(self.name, {}).get(
             "illustrator_stored_dir", t("illustrator_config_default_stored")))
+        current_dir = self.expand_path(config.get(self.name, {}).get(
+            "illustrator_current_dir", t("illustrator_config_default_current")))
 
         # Configuration des API
         api_keys = {
@@ -258,18 +266,16 @@ class IllustratorPlugin(Plugin):
             "canva": config.get(self.name, {}).get("canva_api_key", "")
         }
 
-        # Sélection de l'API et type de média sur la même ligne
+        # Sélection de l'API et type de média
         col1, col2 = st.columns(2)
         with col1:
             selected_api = st.selectbox(
-                t("illustrator_search_api"), list(self.apis.keys()), key="search_api")
+                t("illustrator_search_api"), list(self.apis.keys()))
         with col2:
             media_type = st.selectbox(
                 t("illustrator_media_type"),
                 ["photos", "videos", "both"],
-                format_func=lambda x: t(
-                    f"illustrator_{x}"),
-                key="search_media_type"
+                format_func=lambda x: t(f"illustrator_{x}")
             )
 
         if not api_keys[selected_api]:
@@ -297,14 +303,13 @@ class IllustratorPlugin(Plugin):
                         )
                         results.extend(videos)
 
-                    # Formatage des résultats pour remote_media_selector
                     formatted_results = []
                     for item in results:
                         formatted_results.append({
-                            'url': item['url'],  # URL de la vignette
+                            'url': item['url'],
                             'name': item.get('name', f"Media {item['id']}"),
                             'date': item.get('date', 0),
-                            'original_data': item  # Conserve toutes les données originales
+                            'original_data': item
                         })
                     st.session_state.search_results = formatted_results
                 except Exception as e:
@@ -312,39 +317,74 @@ class IllustratorPlugin(Plugin):
 
         # Affichage des résultats
         if "search_results" in st.session_state and st.session_state.search_results:
-            # Sélection du dossier de destination
+            # Sélection du dossier de destination pour stored assets
             subdirs = self.get_subdirectories(stored_dir)
             selected_subdir = st.selectbox(
                 t("illustrator_destination_folder"),
-                subdirs + ["[Create New Folder]"],
-                key="search_destination_folder"
+                subdirs + ["[Create New Folder]"]
             )
 
             if selected_subdir == "[Create New Folder]":
                 new_folder = st.text_input(t("illustrator_create_folder"))
-                if new_folder and st.button("Create", key="create_folder_button"):
+                if new_folder and st.button("Create"):
                     new_path = os.path.join(stored_dir, new_folder)
                     os.makedirs(new_path, exist_ok=True)
                     st.success(f"Folder created: {new_path}")
                     st.rerun()
                 return
 
-            # Utilisation du nouveau sélecteur pour médias distants
+            # Sélection du média
             selected_item = remote_media_selector(
                 st.session_state.search_results, "search")
 
-            # Téléchargement
-            if selected_item and selected_subdir and st.button(t("illustrator_download")):
-                dest_dir = os.path.join(stored_dir, selected_subdir)
-                try:
-                    downloaded_path = self.apis[selected_api].download(
-                        selected_item['original_data'],
-                        dest_dir
-                    )
-                    st.success(t("illustrator_download_success").format(
-                        path=downloaded_path))
-                except Exception as e:
-                    st.error(t("illustrator_error").format(error=str(e)))
+            # Boutons de téléchargement
+            if selected_item and selected_subdir:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if st.button(t("download_to_stored")):
+                        try:
+                            downloaded_path = self.apis[selected_api].download(
+                                selected_item['original_data'],
+                                os.path.join(stored_dir, selected_subdir)
+                            )
+                            st.success(f"Downloaded to stored assets: {downloaded_path}")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+
+                with col2:
+                    if st.button(t("download_to_current")):
+                        try:
+                            # Téléchargement temporaire
+                            temp_dir = os.path.join(stored_dir, "temp")
+                            os.makedirs(temp_dir, exist_ok=True)
+                            temp_path = self.apis[selected_api].download(
+                                selected_item['original_data'],
+                                temp_dir
+                            )
+                            # Copie vers current
+                            current_path = self.copy_to_current(temp_path)
+                            # Suppression du temporaire
+                            os.remove(temp_path)
+                            st.success(f"Added to current assets: {current_path}")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+
+                with col3:
+                    if st.button(t("download_to_both")):
+                        try:
+                            # Téléchargement vers stored
+                            stored_path = self.apis[selected_api].download(
+                                selected_item['original_data'],
+                                os.path.join(stored_dir, selected_subdir)
+                            )
+                            # Copie vers current
+                            current_path = self.copy_to_current(stored_path)
+                            st.success(
+                                f"Downloaded to stored assets: {stored_path}\n"
+                                f"Added to current assets: {current_path}"
+                            )
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
 
     def run(self, config):
         """Logique principale du plugin"""
