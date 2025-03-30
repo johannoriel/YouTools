@@ -154,6 +154,28 @@ class IllustratorPlugin(Plugin):
             st.error(f"Error deleting file: {str(e)}")
             return False
 
+    def show_media_preview(self, media_path_or_url):
+        """Affiche une prévisualisation du média dans une colonne centrale"""
+        st.markdown("---")
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:  # Colonne centrale pour la prévisualisation
+            st.subheader("Preview")
+            if isinstance(media_path_or_url, dict):  # Cas des résultats de recherche
+                media_url = media_path_or_url['url']
+                if media_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                    st.image(media_url)
+                elif media_url.lower().endswith(('.mp4', '.mov', '.avi')):
+                    st.video(media_url, autoplay=True)
+                elif media_url.lower().endswith(('.mp3', '.wav')):
+                    st.audio(media_url)
+            else:  # Cas des fichiers locaux
+                if media_path_or_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                    st.image(media_path_or_url)
+                elif media_path_or_url.lower().endswith(('.mp4', '.mov', '.avi')):
+                    st.video(media_path_or_url, autoplay=True)
+                elif media_path_or_url.lower().endswith(('.mp3', '.wav')):
+                    st.audio(media_path_or_url)
+
     def run_current_assets_tab(self, config):
         """Onglet des assets courants"""
         st.header(t("illustrator_current_tab"))
@@ -201,6 +223,10 @@ class IllustratorPlugin(Plugin):
         with col3:
             if st.button(t("illustrator_refresh")):
                 st.rerun()
+
+        # Prévisualisation
+        if selected:
+            self.show_media_preview(selected)
 
     def run_stored_assets_tab(self, config):
         """Onglet des assets stockés"""
@@ -251,6 +277,10 @@ class IllustratorPlugin(Plugin):
             if selected_media and st.button(t("illustrator_add_to_current")):
                 dest_path = self.copy_to_current(selected_media)
                 st.success(f"Added to current assets: {dest_path}")
+
+            # Prévisualisation
+            if selected_media:
+                self.show_media_preview(selected_media)
 
     def run_search_assets_tab(self, config):
         """Onglet de recherche de nouveaux assets"""
@@ -385,6 +415,10 @@ class IllustratorPlugin(Plugin):
                             )
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
+
+                # Prévisualisation
+                if selected_item:
+                    self.show_media_preview(selected_item)
 
     def run(self, config):
         """Logique principale du plugin"""
