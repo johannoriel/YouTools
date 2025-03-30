@@ -839,3 +839,45 @@ class YoutubeAPI:
         full_transcript = " ".join([entry['text'] for entry in transcript])
 
         return full_transcript, language
+
+    def upload_thumbnail(self, video_id: str, thumbnail_path: str) -> bool:
+        """
+        Upload a custom thumbnail for a YouTube video.
+
+        Args:
+            video_id: YouTube video ID
+            thumbnail_path: Path to the thumbnail image file
+
+        Returns:
+            bool: True if upload was successful, False otherwise
+        """
+        try:
+            # Check if file exists
+            if not os.path.exists(thumbnail_path):
+                print(f"Thumbnail file not found: {thumbnail_path}")
+                return False
+
+            # Check file size (YouTube limit is 2MB)
+            file_size = os.path.getsize(thumbnail_path)
+            if file_size > 2 * 1024 * 1024:  # 2MB
+                print(f"Thumbnail file too large: {file_size} bytes")
+                return False
+
+            with open(thumbnail_path, 'rb') as thumbnail_file:
+                request = self.youtube.thumbnails().set(
+                    videoId=video_id,
+                    media_body=thumbnail_file
+                )
+                response = request.execute()
+                self.track_quota_usage(50)
+                print(f"Thumbnail uploaded successfully for video {video_id}")
+                return True
+
+        except HttpError as e:
+            error_details = json.loads(e.content.decode())
+            error_message = error_details.get('error', {}).get('message', str(e))
+            print(f"YouTube API Error (upload_thumbnail): {error_message}")
+            return False
+        except Exception as e:
+            print(f"Error uploading thumbnail: {str(e)}")
+            return False
