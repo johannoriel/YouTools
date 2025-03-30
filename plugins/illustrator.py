@@ -425,19 +425,6 @@ class IllustratorPlugin(Plugin):
 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    if st.button(t("download_to_stored")):
-                        try:
-                            filename = f"{st.session_state.selected_item['name']}{ext}"
-                            filepath = os.path.join(stored_dir, selected_subdir, filename)
-
-                            # On réécrit le buffer dans le fichier
-                            with open(filepath, 'wb') as f:
-                                f.write(st.session_state.media_buffer.getvalue())
-                            st.success(f"Saved to stored assets: {filepath}")
-                        except Exception as e:
-                            st.error(f"Error: {str(e)}")
-
-                with col2:
                     if st.button(t("download_to_current")):
                         try:
                             current_dir = self.expand_path(self.config.get(self.name, {}).get(
@@ -450,6 +437,19 @@ class IllustratorPlugin(Plugin):
                             with open(filepath, 'wb') as f:
                                 f.write(st.session_state.media_buffer.getvalue())
                             st.success(f"Added to current assets: {filepath}")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+
+                with col2:
+                    if st.button(t("download_to_stored")):
+                        try:
+                            filename = f"{st.session_state.selected_item['name']}{ext}"
+                            filepath = os.path.join(stored_dir, selected_subdir, filename)
+
+                            # On réécrit le buffer dans le fichier
+                            with open(filepath, 'wb') as f:
+                                f.write(st.session_state.media_buffer.getvalue())
+                            st.success(f"Saved to stored assets: {filepath}")
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
 
