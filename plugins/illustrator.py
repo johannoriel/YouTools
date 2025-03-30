@@ -332,8 +332,20 @@ class IllustratorPlugin(Plugin):
             return
 
         # Recherche
-        keywords = st.text_input(t("illustrator_search_keywords"))
-        if st.button(t("illustrator_search_button")) and keywords:
+        if 'search_triggered' not in st.session_state:
+                st.session_state.search_triggered = False
+
+        def trigger_search():
+            st.session_state.search_triggered = True
+
+        keywords = st.text_input(
+            t("illustrator_search_keywords"),
+            key="search_keywords",
+            on_change=trigger_search
+        )
+
+            # Déclencher la recherche soit avec Enter soit avec le bouton
+        if (st.session_state.search_triggered or st.button(t("illustrator_search_button"))) and keywords:
             with st.spinner("Searching..."):
                 try:
                     results = []
