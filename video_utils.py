@@ -434,16 +434,75 @@ def parse_timecode_to_ms(timecode):
         return 0
 
 
-def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size):
-    """Remplace une section de la vidéo par une image."""
+def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, zoom_center=None, zoom_factor=1.05):
+    """Remplace une section de la vidéo par une image avec animation de zoom.
+
+    Args:
+        main_clip: Clip vidéo principal
+        start_sec: Début de la section à remplacer (secondes)
+        end_sec: Fin de la section à remplacer (secondes)
+        image_path: Chemin de l'image à insérer
+        target_size: Taille cible (width, height)
+        zoom_center: Tuple (x%, y%) pour le centre de zoom (0-1), None pour aléatoire
+        zoom_factor: Facteur de zoom (1.05 = zoom de 5%)
+    """
     duration = end_sec - start_sec
     audio_clip = main_clip.subclipped(start_sec, end_sec).audio
-    image_clip = ImageClip(image_path, duration=duration).resized(target_size)
+
+    # Charger l'image et créer un clip
+    img = ImageClip(image_path, duration=duration)
+
+    # Déterminer le centre de zoom (aléatoire si non spécifié)
+    if zoom_center is None:
+        zoom_x = random.uniform(0.2, 0.8)  # Éviter les bords
+        zoom_y = random.uniform(0.2, 0.8)
+    else:
+        zoom_x, zoom_y = zoom_center
+
+    # Fonction d'animation de zoom
+    def apply_zoom(t):
+        """Animation de zoom progressive sur toute la durée"""
+        progress = min(t / duration, 1.0)  # Progression normalisée 0-1
+        current_zoom = 1 + (zoom_factor - 1) * progress
+
+        # Calculer les nouvelles dimensions
+        w, h = img.size
+        new_w = int(w * current_zoom)
+        new_h = int(h * current_zoom)
+
+        # Créer une image zoomée
+        zoomed_img = img.img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        # Calculer la position pour centrer sur le point de zoom
+        crop_x = int(zoom_x * new_w - target_size[0] / 2)
+        crop_y = int(zoom_y * new_h - target_size[1] / 2)
+
+        # Ajuster pour ne pas dépasser les bords
+        crop_x = max(0, min(crop_x, new_w - target_size[0]))
+        crop_y = max(0, min(crop_y, new_h - target_size[1]))
+
+        # Rogner l'image zoomée
+        cropped_img = zoomed_img.crop((
+            crop_x,
+            crop_y,
+            crop_x + target_size[0],
+            crop_y + target_size[1]
+        ))
+
+        return cropped_img
+
+    # Créer le clip animé
+    animated_img_clip = img.fl(lambda gf, t: apply_zoom(t), apply_to=['img'])
+
+    # Redimensionner à la taille cible (au cas où)
+    animated_img_clip = animated_img_clip.resize(target_size)
+
     if audio_clip:
-        image_clip = image_clip.with_audio(audio_clip)
+        animated_img_clip = animated_img_clip.with_audio(audio_clip)
+
     return concatenate_videoclips([
         main_clip.subclipped(0, start_sec),
-        image_clip,
+        animated_img_clip,
         main_clip.subclipped(end_sec)
     ])
 
