@@ -6,6 +6,7 @@ import os
 import shutil
 from media_selector import media_selector, remote_media_selector
 from assets_api import PexelsAPI, CanvaAPI
+from io import BytesIO
 
 # Traductions
 translations["en"].update({
@@ -154,27 +155,35 @@ class IllustratorPlugin(Plugin):
             st.error(f"Error deleting file: {str(e)}")
             return False
 
-    def show_media_preview(self, media_path_or_url):
+    def show_media_preview(self, media_data, media_type=None):
         """Affiche une prévisualisation du média dans une colonne centrale"""
         st.markdown("---")
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:  # Colonne centrale pour la prévisualisation
             st.subheader("Preview")
-            if isinstance(media_path_or_url, dict):  # Cas des résultats de recherche
-                media_url = media_path_or_url['url']
-                if media_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                    st.image(media_url)
-                elif media_url.lower().endswith(('.mp4', '.mov', '.avi')):
-                    st.video(media_url, autoplay=True)
-                elif media_url.lower().endswith(('.mp3', '.wav')):
-                    st.audio(media_url)
-            else:  # Cas des fichiers locaux
-                if media_path_or_url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                    st.image(media_path_or_url)
-                elif media_path_or_url.lower().endswith(('.mp4', '.mov', '.avi')):
-                    st.video(media_path_or_url, autoplay=True)
-                elif media_path_or_url.lower().endswith(('.mp3', '.wav')):
-                    st.audio(media_path_or_url)
+
+            # Cas des BytesIO (données en mémoire)
+            if isinstance(media_data, BytesIO):
+                if media_type == 'photo':
+                    st.image(media_data)
+                elif media_type == 'video':
+                    st.video(media_data, format="video/mp4", autoplay=True)
+
+            # Cas des chemins de fichiers locaux
+            elif isinstance(media_data, str):
+                if media_data.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                    st.image(media_data)
+                elif media_data.lower().endswith(('.mp4', '.mov', '.avi')):
+                    st.video(media_data, format="video/mp4", autoplay=True)
+                elif media_data.lower().endswith(('.mp3', '.wav')):
+                    st.audio(media_data)
+
+            # Cas des résultats de recherche (dictionnaire)
+            elif isinstance(media_data, dict):
+                if media_data['original_data']['type'] == 'photo':
+                    st.image(media_data['url'])
+                else:
+                    st.video(media_data['url'], format="video/mp4", autoplay=True)
 
     def run_current_assets_tab(self, config):
         """Onglet des assets courants"""
@@ -290,6 +299,16 @@ class IllustratorPlugin(Plugin):
         current_dir = self.expand_path(config.get(self.name, {}).get(
             "illustrator_current_dir", t("illustrator_config_default_current")))
 
+        # Initialisation des variables de session
+        if 'search_results' not in st.session_state:
+            st.session_state.search_results = None
+        if 'selected_item' not in st.session_state:
+            st.session_state.selected_item = None
+        if 'media_buffer' not in st.session_state:
+            st.session_state.media_buffer = None
+        if 'media_type' not in st.session_state:
+            st.session_state.media_type = None
+
         # Configuration des API
         api_keys = {
             "pexels": config.get(self.name, {}).get("pexels_api_key", ""),
@@ -342,11 +361,15 @@ class IllustratorPlugin(Plugin):
                             'original_data': item
                         })
                     st.session_state.search_results = formatted_results
+                    # Réinitialiser la sélection quand on fait une nouvelle recherche
+                    st.session_state.selected_item = None
+                    st.session_state.media_buffer = None
+                    st.session_state.media_type = None
                 except Exception as e:
                     st.error(f"Search error: {str(e)}")
 
         # Affichage des résultats
-        if "search_results" in st.session_state and st.session_state.search_results:
+        if st.session_state.search_results:
             # Sélection du dossier de destination pour stored assets
             subdirs = self.get_subdirectories(stored_dir)
             selected_subdir = st.selectbox(
@@ -364,61 +387,95 @@ class IllustratorPlugin(Plugin):
                 return
 
             # Sélection du média
-            selected_item = remote_media_selector(
+            new_selection = remote_media_selector(
                 st.session_state.search_results, "search")
 
+            # Si la sélection a changé, réinitialiser le buffer
+            if new_selection != st.session_state.selected_item:
+                st.session_state.selected_item = new_selection
+                st.session_state.media_buffer = None
+                st.session_state.media_type = None
+
+            # Téléchargement pour prévisualisation
+            if st.session_state.selected_item and not st.session_state.media_buffer:
+                with st.spinner("Downloading for preview..."):
+                    try:
+                        buffer, media_type = self.apis[selected_api].memory_download(
+                            st.session_state.selected_item['original_data']
+                        )
+                        st.session_state.media_buffer = buffer
+                        st.session_state.media_type = media_type
+                    except Exception as e:
+                        st.error(f"Preview download error: {str(e)}")
+
+            # Prévisualisation
+            if st.session_state.media_buffer:
+                self.show_media_preview(
+                    st.session_state.media_buffer,
+                    st.session_state.media_type
+                )
+
             # Boutons de téléchargement
-            if selected_item and selected_subdir:
+            if st.session_state.selected_item and selected_subdir and st.session_state.media_buffer:
+                media_type = st.session_state.selected_item['original_data']['type']
+                ext = '.mp4' if media_type == 'video' else '.jpg'
+
+                st.markdown("---")
+                st.subheader("Save Options")
+
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     if st.button(t("download_to_stored")):
                         try:
-                            downloaded_path = self.apis[selected_api].download(
-                                selected_item['original_data'],
-                                os.path.join(stored_dir, selected_subdir)
-                            )
-                            st.success(f"Downloaded to stored assets: {downloaded_path}")
+                            filename = f"{st.session_state.selected_item['name']}{ext}"
+                            filepath = os.path.join(stored_dir, selected_subdir, filename)
+
+                            # On réécrit le buffer dans le fichier
+                            with open(filepath, 'wb') as f:
+                                f.write(st.session_state.media_buffer.getvalue())
+                            st.success(f"Saved to stored assets: {filepath}")
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
 
                 with col2:
                     if st.button(t("download_to_current")):
                         try:
-                            # Téléchargement temporaire
-                            temp_dir = os.path.join(stored_dir, "temp")
-                            os.makedirs(temp_dir, exist_ok=True)
-                            temp_path = self.apis[selected_api].download(
-                                selected_item['original_data'],
-                                temp_dir
-                            )
-                            # Copie vers current
-                            current_path = self.copy_to_current(temp_path)
-                            # Suppression du temporaire
-                            os.remove(temp_path)
-                            st.success(f"Added to current assets: {current_path}")
+                            current_dir = self.expand_path(self.config.get(self.name, {}).get(
+                                "illustrator_current_dir", t("illustrator_config_default_current")))
+                            os.makedirs(current_dir, exist_ok=True)
+
+                            filename = f"{st.session_state.selected_item['name']}{ext}"
+                            filepath = os.path.join(current_dir, filename)
+
+                            with open(filepath, 'wb') as f:
+                                f.write(st.session_state.media_buffer.getvalue())
+                            st.success(f"Added to current assets: {filepath}")
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
 
                 with col3:
                     if st.button(t("download_to_both")):
                         try:
-                            # Téléchargement vers stored
-                            stored_path = self.apis[selected_api].download(
-                                selected_item['original_data'],
-                                os.path.join(stored_dir, selected_subdir)
-                            )
-                            # Copie vers current
-                            current_path = self.copy_to_current(stored_path)
+                            # Save to stored
+                            filename = f"{st.session_state.selected_item['name']}{ext}"
+                            stored_path = os.path.join(stored_dir, selected_subdir, filename)
+                            with open(stored_path, 'wb') as f:
+                                f.write(st.session_state.media_buffer.getvalue())
+
+                            # Save to current
+                            current_dir = self.expand_path(self.config.get(self.name, {}).get(
+                                "illustrator_current_dir", t("illustrator_config_default_current")))
+                            os.makedirs(current_dir, exist_ok=True)
+                            current_path = os.path.join(current_dir, filename)
+                            with open(current_path, 'wb') as f:
+                                f.write(st.session_state.media_buffer.getvalue())
+
                             st.success(
-                                f"Downloaded to stored assets: {stored_path}\n"
+                                f"Saved to stored assets: {stored_path}\n"
                                 f"Added to current assets: {current_path}"
                             )
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
-
-                # Prévisualisation
-                if selected_item:
-                    self.show_media_preview(selected_item)
 
     def run(self, config):
         """Logique principale du plugin"""

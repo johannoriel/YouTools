@@ -91,6 +91,17 @@ class PexelsAPI:
             return filepath
         raise Exception(f"Download failed: {response.status_code}")
 
+    def memory_download(self, media_info: Dict) -> tuple:
+        """Télécharge un média en mémoire sans écrire sur le disque"""
+        url = media_info["original_url"]
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            file_data = BytesIO()
+            for chunk in response.iter_content(chunk_size=8192):
+                file_data.write(chunk)
+            file_data.seek(0)  # Rewind to start of file
+            return file_data, media_info["type"]
+        raise Exception(f"Download failed: {response.status_code}")
 
 class CanvaAPI:
     def search(self, keywords: str, api_key: str) -> List[Dict]:
