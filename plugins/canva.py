@@ -9,6 +9,7 @@ import secrets
 from urllib.parse import urlencode
 import json
 from plugins.common import remove_quotes
+import time
 
 # Ajout des traductions pour le plugin Canva
 translations["en"].update({
@@ -154,19 +155,35 @@ class CanvaPlugin(Plugin):
         with open(self.TOKEN_FILE, "w") as f:
             json.dump(token_data, f)
 
-    def load_token(self):
-        if os.path.exists(self.TOKEN_FILE):
+    def load_token(self, config):
+        if not os.path.exists(self.TOKEN_FILE):
+            return None
+
+        try:
             with open(self.TOKEN_FILE, "r") as f:
-                return json.load(f)
-        return None
+                token_data = json.load(f)
+
+            # Vérifier si le token est expiré
+            if token_data.get("expires_at", 0) < time.time():
+                st.warning("Token expired, attempting refresh...")
+                if "refresh_token" in token_data:
+                    new_token = self.refresh_token(token_data["refresh_token"], config)
+                    if new_token:
+                        return new_token
+                return None
+
+            return token_data
+        except Exception as e:
+            st.error(f"Error loading token: {str(e)}")
+            return None
 
     def get_auth_url(self, code_challenge, config):
         auth_url = "https://www.canva.com/api/oauth/authorize"
         params = {
-            "client_id": config.get("canva_client_id", ""),
+            "client_id": self.getconfig("canva_client_id"),
             "response_type": "code",
             "scope": "design:content:read folder:read asset:read design:meta:read",
-            "redirect_uri": config.get("canva_redirect_uri", t("canva_default_redirect")),
+            "redirect_uri": self.get_config("canva_redirect_uri"),
             "code_challenge": code_challenge,
             "code_challenge_method": "S256"
         }
@@ -176,42 +193,76 @@ class CanvaPlugin(Plugin):
         token_url = "https://api.canva.com/rest/v1/oauth/token"
         payload = {
             "grant_type": "authorization_code",
-            "client_id": config.get("canva_client_id", ""),
-            "client_secret": config.get("canva_client_secret", ""),
-            "redirect_uri": config.get("canva_redirect_uri", t("canva_default_redirect")),
+            "client_id": self.get_config("canva_client_id"),
+            "client_secret": self.get_config("canva_client_secret"),
+            "redirect_uri": self.get_config("canva_redirect_uri"),
             "code": code,
             "code_verifier": code_verifier
         }
         response = requests.post(token_url, data=payload)
         if response.status_code == 200:
-            return response.json()
+            token_data = response.json()
+            # Ajouter le timestamp d'expiration
+            token_data["expires_at"] = time.time() + token_data.get("expires_in", 3600) - 300  # 5 minutes de marge
+            return token_data
         else:
             st.error(t("canva_export_error").format(error=response.text))
             return None
 
     def refresh_token(self, refresh_token, config):
+        if not refresh_token:
+            st.error("No refresh token available")
+            return None
+
         token_url = "https://api.canva.com/rest/v1/oauth/token"
         payload = {
             "grant_type": "refresh_token",
-            "client_id": config.get("canva_client_id", ""),
-            "client_secret": config.get("canva_client_secret", ""),
+            "client_id": self.get_config("canva_client_id"),
+            "client_secret": self.get_config("canva_client_secret"),
             "refresh_token": refresh_token
         }
-        response = requests.post(token_url, data=payload)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(t("canva_export_error").format(error=response.text))
+
+        try:
+            response = requests.post(token_url, data=payload)
+            if response.status_code == 200:
+                token_data = response.json()
+                token_data["expires_at"] = time.time() + token_data.get("expires_in", 3600) - 300
+                token_data["refresh_token"] = refresh_token  # Canva ne renvoie pas toujours un nouveau refresh_token
+                self.save_token(token_data)
+                st.success("Token refreshed successfully!")
+                return token_data
+            else:
+                error_msg = f"Refresh failed ({response.status_code}): {response.text}"
+                st.error(error_msg)
+                # Si le refresh token est invalide, supprimer le token
+                if response.status_code in [400, 401]:
+                    if os.path.exists(self.TOKEN_FILE):
+                        os.remove(self.TOKEN_FILE)
+                return None
+        except Exception as e:
+            st.error(f"Refresh token error: {str(e)}")
             return None
 
     def list_designs(self, token):
+        if not token:
+            st.error("No access token provided")
+            return None
+
         url = "https://api.canva.com/rest/v1/designs"
         headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(t("canva_export_error").format(error=f"{response.status_code}"))
+
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 401:
+                st.error("Unauthorized - Token may be invalid or expired")
+                return None
+            else:
+                st.error(f"API Error ({response.status_code}): {response.text}")
+                return None
+        except Exception as e:
+            st.error(f"Network error: {str(e)}")
             return None
 
     def create_export_job(self, token, design_id, format_type="jpg", quality=80, pages="1"):
@@ -230,6 +281,7 @@ class CanvaPlugin(Plugin):
             return response.json()["job"]["id"]
         else:
             st.error(t("canva_export_error").format(error=response.text))
+            raise Exception("Canva create export job failed")
             return None
 
     def check_export_status(self, token, job_id):
@@ -241,13 +293,13 @@ class CanvaPlugin(Plugin):
             return job_data["status"], job_data.get("urls")
         else:
             st.error(t("canva_export_error").format(error=response.text))
+            raise Exception("Canva check export status failed")
             return None, None
 
     def download_export(self, url, design_name, format_type, config):
         response = requests.get(url)
         if response.status_code == 200:
-            download_dir = os.path.expanduser(config.get(self.name, {}).get(
-                "illustrator_current_dir","~/Vidéos"))
+            download_dir = os.path.expanduser(self.get_config("canva_download_dir"))
             os.makedirs(download_dir, exist_ok=True)
             filename = f"{design_name.replace(' ', '_')}.{format_type}"
             filepath = os.path.join(download_dir, filename)
@@ -256,10 +308,10 @@ class CanvaPlugin(Plugin):
             return filepath
         else:
             st.error(t("canva_download_error"))
+            raise Exception("Canva download export failed")
             return None
 
     def run(self, config):
-        """Logique principale du plugin."""
         st.header(t("canva_header"))
 
         # Initialisation des états dans session_state
@@ -276,63 +328,71 @@ class CanvaPlugin(Plugin):
 
         # Onglet Designs
         with tab1:
-            token_data = self.load_token()
+            token_data = self.load_token(config)
             if not token_data or "access_token" not in token_data:
                 st.warning(t("canva_warning_login"))
             else:
-                designs = self.list_designs(token_data["access_token"])
-                if designs and "items" in designs:
-                    st.write(f"### {t('canva_your_designs')}")
-                    for item in designs["items"]:
-                        col1, col2 = st.columns([1, 3])
-                        with col1:
-                            if "thumbnail" in item and "url" in item["thumbnail"]:
-                                st.image(item["thumbnail"]["url"], width=100)
-                        with col2:
-                            st.write(f"**Nom**: {item.get('title', 'Sans nom')}")
-                            st.write(f"**ID**: {item['id']}")
-                            if st.button(t("canva_export"), key=item["id"]):
-                                st.session_state.export_in_progress = item["id"]
+                try:
+                    designs = self.list_designs(token_data["access_token"])
+                    if designs and "items" in designs:
+                        st.write(f"### {t('canva_your_designs')}")
+                        for item in designs["items"]:
+                            col1, col2 = st.columns([1, 3])
+                            with col1:
+                                if "thumbnail" in item and "url" in item["thumbnail"]:
+                                    st.image(item["thumbnail"]["url"], width=100)
+                            with col2:
+                                st.write(f"**Nom**: {item.get('title', 'Sans nom')}")
+                                st.write(f"**ID**: {item['id']}")
+                                if st.button(t("canva_export"), key=item["id"]):
+                                    st.session_state.export_in_progress = item["id"]
 
-                            if st.session_state.export_in_progress == item["id"]:
-                                format_type = st.selectbox(
-                                    t("canva_export_format"),
-                                    ["jpg", "png", "pdf"],
-                                    index=0,
-                                    key=f"format_{item['id']}"
-                                )
-                                quality = 80
-                                if format_type == "jpg":
-                                    quality = st.slider(
-                                        t("canva_jpg_quality"),
-                                        0, 100, 80,
-                                        key=f"quality_{item['id']}"
+                                if st.session_state.export_in_progress == item["id"]:
+                                    format_type = st.selectbox(
+                                        t("canva_export_format"),
+                                        ["jpg", "png", "pdf"],
+                                        index=0,
+                                        key=f"format_{item['id']}"
                                     )
-                                pages = st.text_input(
-                                    t("canva_export_pages"),
-                                    value="1",
-                                    key=f"pages_{item['id']}"
-                                )
-                                if st.button(t("canva_confirm_export"), key=f"confirm_{item['id']}"):
-                                    with st.spinner(t("canva_export_in_progress")):
-                                        job_id = self.create_export_job(
-                                            token_data["access_token"],
-                                            item["id"],
-                                            format_type,
-                                            quality,
-                                            pages
+                                    quality = 80
+                                    if format_type == "jpg":
+                                        quality = st.slider(
+                                            t("canva_jpg_quality"),
+                                            0, 100, 80,
+                                            key=f"quality_{item['id']}"
                                         )
-                                        if job_id:
-                                            st.session_state.job_ids.append(job_id)
-                                            st.success(t("canva_export_created").format(job_id=job_id))
-                                            st.write(t("canva_follow_job"))
-                                            st.session_state.export_in_progress = None
-                else:
-                    st.warning(t("canva_no_designs"))
+                                    pages = st.text_input(
+                                        t("canva_export_pages"),
+                                        value="1",
+                                        key=f"pages_{item['id']}"
+                                    )
+                                    if st.button(t("canva_confirm_export"), key=f"confirm_{item['id']}"):
+                                        with st.spinner(t("canva_export_in_progress")):
+                                            job_id = self.create_export_job(
+                                                token_data["access_token"],
+                                                item["id"],
+                                                format_type,
+                                                quality,
+                                                pages
+                                            )
+                                            if job_id:
+                                                st.session_state.job_ids.append(job_id)
+                                                st.success(t("canva_export_created").format(job_id=job_id))
+                                                st.write(t("canva_follow_job"))
+                                                st.session_state.export_in_progress = None
+                    else:
+                        st.warning(t("canva_no_designs"))
+                except Exception as e:
+                    st.error(f"Erreur: {str(e)}")
+                    if "refresh_token" in token_data:
+                        st.info("Tentative de rafraîchissement du token...")
+                        new_token = self.refresh_token(token_data["refresh_token"], config)
+                        if new_token:
+                            st.rerun()  # Recharger la page avec le nouveau token
 
         # Onglet Jobs
         with tab2:
-            token_data = self.load_token()
+            token_data = self.load_token(config)
             if not token_data or "access_token" not in token_data:
                 st.warning(t("canva_warning_login"))
             else:
@@ -373,39 +433,49 @@ class CanvaPlugin(Plugin):
 
         # Onglet Connexion
         with tab3:
-            token_data = self.load_token()
+            token_data = self.load_token(config)
+
             if token_data and "access_token" in token_data:
-                st.success(t("canva_token_loaded"))
+                expires_at = token_data.get("expires_at", 0)
+                expires_in = max(0, int(expires_at - time.time()))
+
+                st.success(f"Authentifié (expire dans {expires_in//60} minutes)")
+                st.write(f"Client ID: {self.get_config('canva_client_id')}")
+                st.write(f"Redirect URI: {self.get_config('canva_redirect_uri')}")
+
                 if st.button(t("canva_logout")):
                     if os.path.exists(self.TOKEN_FILE):
                         os.remove(self.TOKEN_FILE)
-                        st.session_state.access_token = None
-                        st.success(t("canva_token_deleted"))
+                    st.session_state.clear()
+                    st.rerun()
+
+                if "refresh_token" in token_data:
+                    if st.button(t("canva_refresh_token")):
+                        with st.spinner("Refreshing token..."):
+                            new_token = self.refresh_token(token_data["refresh_token"], config)
+                            if new_token:
+                                st.rerun()
             else:
                 query_params = st.query_params
-                auth_code = query_params["code"] if "code" in query_params else None
+                auth_code = query_params.get("code")
 
                 if not auth_code:
                     code_verifier, code_challenge = self.generate_pkce_pair()
                     self.save_code_verifier(code_verifier)
                     auth_url = self.get_auth_url(code_challenge, config)
+
+                    st.write("### Configuration OAuth")
+                    st.write(f"Client ID: {self.get_config('canva_client_id')}")
+                    st.write(f"Redirect URI: {self.get_config('canva_redirect_uri')}")
+
                     st.markdown(f"[{t('canva_login_prompt')}]({auth_url})")
                     st.write(t("canva_login_instruction"))
                 else:
                     code_verifier = self.load_code_verifier()
                     if code_verifier:
-                        token_data = self.exchange_code_for_token(auth_code, code_verifier, config)
-                        if token_data:
-                            self.save_token(token_data)
-                            st.session_state.access_token = token_data["access_token"]
-                            st.success(t("canva_login_success"))
-                            st.query_params.clear()
-                            self.clear_code_verifier()
-
-                if token_data and "refresh_token" in token_data:
-                    if st.button(t("canva_refresh_token")):
-                        new_token_data = self.refresh_token(token_data["refresh_token"], config)
-                        if new_token_data:
-                            self.save_token(new_token_data)
-                            st.session_state.access_token = new_token_data["access_token"]
-                            st.success(t("canva_token_refreshed"))
+                        with st.spinner("Authenticating..."):
+                            token_data = self.exchange_code_for_token(auth_code, code_verifier, config)
+                            if token_data:
+                                self.save_token(token_data)
+                                st.query_params.clear()
+                                st.rerun()
