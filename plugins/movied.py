@@ -381,6 +381,17 @@ class MoviedPlugin(Plugin):
         video_df = st.session_state["media_thumbnails"]["videos"]
         return image_df, video_df
 
+    def show_media_preview(self, media_path):
+        """Affiche une prévisualisation du média dans une colonne centrale (1/3 de la largeur)."""
+        st.markdown("---")
+        col1, col2, col3 = st.columns([1, 1, 1])  # 3 colonnes égales
+        with col2:  # Colonne centrale pour la prévisualisation
+            st.subheader("Preview")
+            if media_path.lower().endswith(('.jpg', '.png')):
+                st.image(media_path, use_container_width=True)  # Ajuste à la largeur de la colonne
+            elif media_path.lower().endswith(('.mp4', '.mkv', '.avi')):
+                st.video(media_path, format="video/mp4", autoplay=True)
+
     def handle_operations(self, start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size):
         if not video_path:
             st.warning("Please select a video to edit first.")
@@ -425,8 +436,13 @@ class MoviedPlugin(Plugin):
         # Single media selector for images and videos
         selected_media = media_selector(
             media_dirs=dirs_to_scan,
-            extensions=selected_extensions
+            extensions=selected_extensions,
+            suffix="movied"
         )
+
+        # Prévisualisation si un média est sélectionné
+        if selected_media:
+            self.show_media_preview(selected_media)
 
         # Determine media type
         is_image = selected_media and any(selected_media.lower().endswith(ext) for ext in [".jpg", ".png"])
