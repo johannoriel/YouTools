@@ -10,6 +10,7 @@ from chromakey_background import replace_background
 import os
 import requests
 from plugins.common import yt_categories
+from youtube_api import YoutubeAPI
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -340,7 +341,8 @@ class DirectpublishPlugin(Plugin):
 
                     if use_custom_thumbnail and thumbnail_path and video_id:
                         st.text(t("directpublish_uploading_thumbnail"))
-                        if self.youtube_api.upload_thumbnail(video_id, thumbnail_path):
+                        yt = YoutubeAPI(config)
+                        if yt.upload_thumbnail(video_id, thumbnail_path):
                             st.success(t("directpublish_thumbnail_success"))
                         else:
                             st.error(t("directpublish_thumbnail_error").format(

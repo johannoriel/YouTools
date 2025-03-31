@@ -7,6 +7,9 @@ from langdetect import detect
 from googleapiclient.errors import HttpError
 import json
 import streamlit as st
+import os
+from googleapiclient.http import MediaIoBaseUpload
+import io
 
 # Liste des statistiques avancées (peut être modifiée sans restructurer le reste)
 ADVANCED_STATS = [
@@ -863,10 +866,20 @@ class YoutubeAPI:
                 print(f"Thumbnail file too large: {file_size} bytes")
                 return False
 
+            # Determine MIME type based on file extension
+            file_extension = os.path.splitext(thumbnail_path)[1].lower()
+            mime_type = 'image/jpeg' if file_extension in ('.jpg', '.jpeg') else 'image/png'
+
             with open(thumbnail_path, 'rb') as thumbnail_file:
+                media = MediaIoBaseUpload(
+                    io.BytesIO(thumbnail_file.read()),
+                    mimetype=mime_type,
+                    resumable=True
+                )
+
                 request = self.youtube.thumbnails().set(
                     videoId=video_id,
-                    media_body=thumbnail_file
+                    media_body=media
                 )
                 response = request.execute()
                 self.track_quota_usage(50)
