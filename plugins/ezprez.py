@@ -798,7 +798,7 @@ class EzprezPlugin(Plugin):
                         <style>
                         .stMain { background-color: #00FF00; }
                         .stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain h5, .stMain h6,
-                        .stMain p, .stMain ul, .stMain ol, .stMain blockquote {
+                        .stMain p, .stMain ul, .stMain ol, .stMain blockquote, .stMain table {
                             background-color: #000000; color: #FFFFFF; padding: 10px; margin: 5px 0; display: inline-block;
                         }
                         .stMain ul, .stMain ol { display: block; padding: 10px 10px 10px 30px; }
@@ -831,7 +831,7 @@ class EzprezPlugin(Plugin):
                 .stMain h1 {{ font-size: calc(2.5rem * {font_size_scale}); }}
                 .stMain h2 {{ font-size: calc(2rem * {font_size_scale}); }}
                 .stMain h3 {{ font-size: calc(1.5rem * {font_size_scale}); }}
-                .stMain p, .stMain li {{ font-size: calc(1rem * {font_size_scale}); }}
+                .stMain p, .stMain li, .stMain td {{ font-size: calc(1rem * {font_size_scale}); }}
                 </style>
             """, unsafe_allow_html=True)
 
