@@ -53,6 +53,9 @@ translations["en"].update({
     "video_delete_chapter_continuous": "Delete Chapter",
     "video_delete_chapter_discontinuous": "Discontinuous Delete",
     "video_create_chapter": "Create Chapter",
+    "video_directory_selector": "Directory Selection",
+    "video_directory_all": "All directories (recursive)",
+    "video_directory_select": "Select directories",
 })
 
 translations["fr"].update({
@@ -96,6 +99,9 @@ translations["fr"].update({
     "video_delete_chapter_continuous": "Supprimer le chapitre",
     "video_delete_chapter_discontinuous": "Supprimer discontinue",
     "video_create_chapter": "Créer un chapitre",
+    "video_directory_selector": "Sélection de répertoires",
+    "video_directory_all": "Tous les répertoires (récursif)",
+    "video_directory_select": "Sélectionner des répertoires",
 })
 
 
@@ -644,7 +650,40 @@ class VideocutPlugin(Plugin):
         self.setup_header()
         selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos, show_end_columns = self.setup_controls()
 
-        video_df = scan_videos(self.working_dir, selected_extensions)
+        # Nouveau sélecteur de répertoires
+        st.sidebar.markdown(f"**{t('video_directory_selector')}**")
+        dir_mode = st.sidebar.radio(
+            "",
+            [t("video_directory_all"), t("video_directory_select")],
+            label_visibility="collapsed"
+        )
+
+        if dir_mode == t("video_directory_all"):
+            # Mode récursif - tous les répertoires
+            video_df = scan_videos(self.working_dir, selected_extensions, recursive=True)
+        else:
+            # Mode sélection manuelle
+            immediate_subdirs = [d for d in os.listdir(self.working_dir)
+                               if os.path.isdir(os.path.join(self.working_dir, d))]
+            selected = st.sidebar.multiselect(
+                "Select directories to include",
+                immediate_subdirs,
+                default=immediate_subdirs[0] if immediate_subdirs else None
+            )
+
+            if not selected:
+                st.warning("Please select at least one directory")
+                return
+
+            # Scanner chaque répertoire sélectionné en mode non-récursif
+            video_dfs = []
+            for subdir in selected:
+                dir_path = os.path.join(self.working_dir, subdir)
+                video_df = scan_videos(dir_path, selected_extensions, recursive=False)
+                video_dfs.append(video_df)
+
+            video_df = pd.concat(video_dfs).reset_index(drop=True)
+
         if video_df.empty:
             st.write("No videos found with the selected extensions.")
             return
@@ -652,10 +691,9 @@ class VideocutPlugin(Plugin):
         col1, col2, selected_videos = self.display_videos(video_df)
         self.handle_video_actions(
             col1, selected_videos, video_df, selected_model, config)
-        self.handle_chapters(col1, selected_videos, video_df,
-                             show_end_columns)  # Passer show_end_columns
+        self.handle_chapters(col1, selected_videos, video_df, show_end_columns)
         self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails,
-                              refresh_thumbnails, mute_videos, show_end_columns)  # Passer show_end_columns
+                             refresh_thumbnails, mute_videos, show_end_columns)
 
 
 if __name__ == "__main__":

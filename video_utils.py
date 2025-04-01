@@ -25,26 +25,42 @@ def image_to_base64(image_path):
         return None
 
 
-def scan_videos(directory, extensions):
+def scan_videos(directory, extensions, recursive=True):
+    def process_video_file(file_path, root_dir):
+        """Sous-fonction pour traiter un fichier vidéo individuel"""
+        vtt_path = os.path.splitext(file_path)[0] + ".vtt"
+        has_subtitles = os.path.exists(vtt_path)
+        relative_dir = os.path.relpath(os.path.dirname(file_path), root_dir)
+
+        cap = cv2.VideoCapture(file_path)
+        duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS) if cap.isOpened() else 0
+        cap.release()
+
+        return {
+            "Video": os.path.basename(file_path),
+            "Directory": relative_dir if relative_dir != "." else "",
+            "Duration": f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}",
+            "Has Subtitles": has_subtitles,
+            "Full Path": file_path
+        }
+
     video_data = []
-    for root, _, files in os.walk(directory):
-        for file in files:
+
+    if recursive:
+        # Mode récursif
+        for root, _, files in os.walk(directory):
+            for file in files:
+                if any(file.lower().endswith(ext) for ext in extensions):
+                    video_path = os.path.join(root, file)
+                    video_data.append(process_video_file(video_path, directory))
+    else:
+        # Mode non-récursif
+        for file in os.listdir(directory):
             if any(file.lower().endswith(ext) for ext in extensions):
-                video_path = os.path.join(root, file)
-                vtt_path = os.path.splitext(video_path)[0] + ".vtt"
-                has_subtitles = os.path.exists(vtt_path)
-                relative_dir = os.path.relpath(root, directory)
-                cap = cv2.VideoCapture(video_path)
-                duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / \
-                    cap.get(cv2.CAP_PROP_FPS) if cap.isOpened() else 0
-                cap.release()
-                video_data.append({
-                    "Video": file,
-                    "Directory": relative_dir if relative_dir != "." else "",
-                    "Duration": f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}",
-                    "Has Subtitles": has_subtitles,
-                    "Full Path": video_path
-                })
+                video_path = os.path.join(directory, file)
+                if os.path.isfile(video_path):  # Vérification supplémentaire
+                    video_data.append(process_video_file(video_path, directory))
+
     return pd.DataFrame(video_data)
 
 
