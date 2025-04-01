@@ -600,11 +600,12 @@ class IllustratorPlugin(Plugin):
                         start_seconds = youtube_api._timecode_to_seconds(start_time)
                         end_seconds = youtube_api._timecode_to_seconds(end_time)
 
-                        # Validation
+                        # Validation et ajustement des timecodes
+                        if end_seconds == 0 or end_seconds > total_duration:
+                            end_seconds = total_duration
+
                         if start_seconds >= end_seconds:
                             st.error("Le temps de fin doit être après le temps de début")
-                        elif end_seconds > total_duration:
-                            st.error(f"Le temps de fin ne peut pas dépasser la durée totale ({self._format_duration(total_duration)})")
                         else:
                             with st.spinner("Processing video..."):
                                 try:
@@ -619,16 +620,18 @@ class IllustratorPlugin(Plugin):
                                         start_seconds,
                                         end_seconds
                                     )
-                                    st.success("Video segment processed!")
+                                    st.success(f"Video segment processed! ({youtube_api._format_duration(end_seconds - start_seconds)})")
                                 except Exception as e:
                                     st.error(f"Error processing video: {str(e)}")
                                     raise e
                     except ValueError as e:
                         st.error(f"Format de timecode invalide : {str(e)}")
 
+
                 # Prévisualisation du segment
                 if st.session_state.processed_segment:
                     st.markdown("---")
+                    st.video(st.session_state.processed_segment, format="video/mp4")
                     st.subheader("Save Options")
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
