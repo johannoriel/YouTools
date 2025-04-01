@@ -10,6 +10,15 @@ import streamlit as st
 import os
 from googleapiclient.http import MediaIoBaseUpload
 import io
+from moviepy import VideoFileClip
+import tempfile
+from pytube import YouTube
+from io import BytesIO
+from pytube import YouTube
+from pytube.exceptions import PytubeError
+from io import BytesIO
+import urllib.error
+
 
 # Liste des statistiques avancées (peut être modifiée sans restructurer le reste)
 ADVANCED_STATS = [
@@ -894,3 +903,178 @@ class YoutubeAPI:
         except Exception as e:
             print(f"Error uploading thumbnail: {str(e)}")
             return False
+
+    def search_assets(self, query: str, max_results: int = 20) -> List[Dict[str, Any]]:
+        """
+        Recherche des vidéos Creative Commons sur YouTube.
+        Retourne une liste formatée pour le media_selector.
+        """
+        try:
+            # Première requête pour obtenir les IDs des vidéos
+            search_response = self.youtube.search().list(
+                part="id,snippet",
+                q=query,
+                maxResults=max_results,
+                type="video",
+                videoLicense="creativeCommon",
+                order="relevance"
+            ).execute()
+            self.track_quota_usage(100)
+
+            video_ids = [item['id']['videoId'] for item in search_response['items']]
+            videos = []
+
+            if video_ids:
+                # Deuxième requête pour obtenir les détails complets
+                videos_response = self.youtube.videos().list(
+                    part="snippet,contentDetails",
+                    id=",".join(video_ids)
+                ).execute()
+                self.track_quota_usage(1)
+
+                for item in videos_response['items']:
+                    duration_seconds = self._iso_duration_to_seconds(item['contentDetails']['duration'])
+                    videos.append({
+                        'url': item['snippet']['thumbnails']['high']['url'],  # Pour l'affichage
+                        'name': f"{item['snippet']['title']} ({self._format_duration(duration_seconds)})",
+                        'date': datetime.strptime(item['snippet']['publishedAt'], "%Y-%m-%dT%H:%M:%SZ").timestamp(),
+                        'type': 'video',
+                        'original_data': {
+                            'id': item['id'],
+                            'title': item['snippet']['title'],
+                            'duration': duration_seconds,
+                            'url': f"https://www.youtube.com/watch?v={item['id']}"
+                        }
+                    })
+
+            return videos
+        except Exception as e:
+            print(f"YouTube API Error (search_assets): {str(e)}")
+            return []
+
+    def download_asset(self, video_data: Dict[str, Any]) -> BytesIO:
+        """
+        Solution la plus robuste avec fichier temporaire
+        """
+        import yt_dlp
+        from io import BytesIO
+        import tempfile
+        import os
+
+        video_url = f"https://www.youtube.com/watch?v={video_data['original_data']['id']}"
+
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'outtmpl': 'temp_%(id)s.%(ext)s',
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=True)
+                filename = ydl.prepare_filename(info)
+
+            # Lire le fichier dans un buffer
+            with open(filename, 'rb') as f:
+                buffer = BytesIO(f.read())
+
+        except Exception as e:
+            raise Exception(f"Échec du téléchargement: {str(e)}")
+        finally:
+            # Nettoyage du fichier temporaire
+            if os.path.exists(filename):
+                os.unlink(filename)
+
+        buffer.seek(0)
+        return buffer
+
+    def process_video_segment(self, video_buffer: BytesIO, start_time: int = 0, end_time: int = 5) -> BytesIO:
+        """
+        Découpe un segment de vidéo et retourne le buffer.
+        Version corrigée pour gérer correctement les BytesIO.
+        """
+
+        try:
+            # Créer un fichier temporaire pour l'entrée
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_input:
+                temp_input.write(video_buffer.getvalue())
+                temp_input_path = temp_input.name
+
+            # Créer un fichier temporaire pour la sortie
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_output:
+                temp_output_path = temp_output.name
+
+            # Charger la vidéo et extraire le segment
+            with VideoFileClip(temp_input_path) as clip:
+                subclip = clip.subclipped(start_time, end_time)
+                subclip.write_videofile(
+                    temp_output_path,
+                    codec="libx264",
+                    audio_codec="aac",
+                    threads=4,
+                    preset='ultrafast',
+                    ffmpeg_params=["-movflags", "frag_keyframe+empty_moov"]
+                )
+
+            # Lire le résultat dans un buffer
+            output_buffer = BytesIO()
+            with open(temp_output_path, 'rb') as f:
+                output_buffer.write(f.read())
+            output_buffer.seek(0)
+
+            return output_buffer
+
+        except Exception as e:
+            raise Exception(f"Erreur lors du traitement vidéo: {str(e)}")
+        finally:
+            # Nettoyage des fichiers temporaires
+            if 'temp_input_path' in locals() and os.path.exists(temp_input_path):
+                os.unlink(temp_input_path)
+            if 'temp_output_path' in locals() and os.path.exists(temp_output_path):
+                os.unlink(temp_output_path)
+
+    def get_video_stream(self, video_id: str) -> BytesIO:
+        """
+        Télécharge une vidéo YouTube en mémoire.
+        Retourne un BytesIO contenant la vidéo.
+        """
+        try:
+            buffer = BytesIO()
+            yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
+            stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+            stream.stream_to_buffer(buffer)
+            buffer.seek(0)
+            return buffer
+        except Exception as e:
+            print(f"YouTube Download Error: {str(e)}")
+            raise e
+
+    def _format_duration(self, seconds: int) -> str:
+        """Formatte une durée en secondes en format HH:MM:SS"""
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        seconds = seconds % 60
+        if hours > 0:
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes}:{seconds:02d}"
+
+    def _timecode_to_seconds(self, timecode: str) -> float:
+        """Convertit un timecode HH:MM:SS.mmm en secondes"""
+        parts = timecode.split(':')
+        if len(parts) == 3:  # Format HH:MM:SS.mmm
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds_parts = parts[2].split('.')
+            seconds = int(seconds_parts[0])
+            milliseconds = int(seconds_parts[1]) if len(seconds_parts) > 1 else 0
+            return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+        elif len(parts) == 2:  # Format MM:SS.mmm
+            minutes = int(parts[0])
+            seconds_parts = parts[1].split('.')
+            seconds = int(seconds_parts[0])
+            milliseconds = int(seconds_parts[1]) if len(seconds_parts) > 1 else 0
+            return minutes * 60 + seconds + milliseconds / 1000
+        else:  # Format SS.mmm
+            seconds_parts = timecode.split('.')
+            seconds = int(seconds_parts[0])
+            milliseconds = int(seconds_parts[1]) if len(seconds_parts) > 1 else 0
+            return seconds + milliseconds / 1000

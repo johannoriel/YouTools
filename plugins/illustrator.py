@@ -7,6 +7,7 @@ import shutil
 from media_selector import media_selector, remote_media_selector
 from assets_api import PexelsAPI, CanvaAPI
 from io import BytesIO
+from youtube_api import YoutubeAPI
 
 # Traductions
 translations["en"].update({
@@ -42,6 +43,15 @@ translations["en"].update({
     "download_to_stored": "Download to Stored Assets",
     "download_to_current": "Download to Current Assets",
     "download_to_both": "Download to Both",
+    "illustrator_youtube_tab": "YouTube CC Videos",
+    "illustrator_youtube_search": "Search YouTube CC Videos",
+    "illustrator_youtube_duration": "Duration",
+    "illustrator_youtube_select": "Select Videos",
+    "illustrator_youtube_cut": "Cut Video Segments",
+    "illustrator_youtube_start": "Start Time (s)",
+    "illustrator_youtube_end": "End Time (s)",
+    "illustrator_youtube_process": "Process Selected",
+    "illustrator_youtube_download": "Download Segments"
 })
 
 translations["fr"].update({
@@ -77,6 +87,15 @@ translations["fr"].update({
     "download_to_stored": "Télécharger vers Assets Stockés",
     "download_to_current": "Télécharger vers Assets Actuels",
     "download_to_both": "Télécharger vers les Deux",
+    "illustrator_youtube_tab": "Vidéos YouTube CC",
+    "illustrator_youtube_search": "Rechercher vidéos CC YouTube",
+    "illustrator_youtube_duration": "Durée",
+    "illustrator_youtube_select": "Sélectionner vidéos",
+    "illustrator_youtube_cut": "Découper les vidéos",
+    "illustrator_youtube_start": "Temps début (s)",
+    "illustrator_youtube_end": "Temps fin (s)",
+    "illustrator_youtube_process": "Traiter sélection",
+    "illustrator_youtube_download": "Télécharger segments"
 })
 
 
@@ -121,7 +140,9 @@ class IllustratorPlugin(Plugin):
             {"name": t("illustrator_stored_tab"),
              "plugin": "illustratorplugin", "tab": "stored"},
             {"name": t("illustrator_search_tab"),
-             "plugin": "illustratorplugin", "tab": "search"}
+             "plugin": "illustratorplugin", "tab": "search"},
+            {"name": t("illustrator_youtube_tab"),
+             "plugin": "illustratorplugin", "tab": "youtube"}
         ]
 
     def expand_path(self, path):
@@ -489,19 +510,168 @@ class IllustratorPlugin(Plugin):
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
 
+    def run_youtube_assets_tab(self, config):
+        """Onglet de recherche d'assets vidéo sur YouTube"""
+        st.header(t("illustrator_youtube_tab"))
+        stored_dir = self.expand_path(config.get(self.name, {}).get(
+            "illustrator_stored_dir", t("illustrator_config_default_stored")))
+        current_dir = self.expand_path(config.get(self.name, {}).get(
+            "illustrator_current_dir", t("illustrator_config_default_current")))
+
+        # Initialisation des variables de session
+        if 'youtube_results' not in st.session_state:
+            st.session_state.youtube_results = []
+        if 'selected_youtube_video' not in st.session_state:
+            st.session_state.selected_youtube_video = None
+        if 'youtube_video_buffer' not in st.session_state:
+            st.session_state.youtube_video_buffer = None
+        if 'processed_segment' not in st.session_state:
+            st.session_state.processed_segment = None
+
+        # Initialisation de l'API YouTube
+        youtube_api = YoutubeAPI(config)
+
+        # Recherche de vidéos
+        keywords = st.text_input(t("illustrator_search_keywords"), key="youtube_keywords")
+        if st.button(t("illustrator_youtube_search")):
+            with st.spinner("Searching YouTube..."):
+                try:
+                    st.session_state.youtube_results = youtube_api.search_assets(keywords)
+                    st.session_state.selected_youtube_video = None
+                    st.session_state.youtube_video_buffer = None
+                    st.session_state.processed_segment = None
+                except Exception as e:
+                    st.error(f"Search error: {str(e)}")
+
+        # Affichage des résultats
+        if st.session_state.youtube_results:
+            # Sélection du dossier de destination
+            subdirs = self.get_subdirectories(stored_dir)
+            selected_subdir = st.selectbox(
+                t("illustrator_destination_folder"),
+                subdirs + ["[Create New Folder]"],
+                key="youtube_folder"
+            )
+
+            if selected_subdir == "[Create New Folder]":
+                new_folder = st.text_input(t("illustrator_create_folder"), key="youtube_new_folder")
+                if new_folder and st.button("Create"):
+                    new_path = os.path.join(stored_dir, new_folder)
+                    os.makedirs(new_path, exist_ok=True)
+                    st.success(f"Folder created: {new_path}")
+                    st.rerun()
+                return
+
+            # Sélection de la vidéo avec le media_selector standard
+            st.session_state.selected_youtube_video = remote_media_selector(
+                st.session_state.youtube_results,
+                "youtube",
+                st
+            )
+
+            # Options de découpage et traitement
+            if st.session_state.selected_youtube_video:
+                st.markdown("---")
+                st.subheader(t("illustrator_youtube_cut"))
+
+                # Afficher la durée totale de la vidéo
+                total_duration = st.session_state.selected_youtube_video['original_data']['duration']
+                st.write(f"Durée totale: {youtube_api._format_duration(total_duration)}")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    start_time = st.text_input(
+                        t("illustrator_youtube_start"),
+                        value="00:00:00.000",
+                        help="Format HH:MM:SS.mmm ou MM:SS.mmm ou SS.mmm"
+                    )
+                with col2:
+                    end_time = st.text_input(
+                        t("illustrator_youtube_end"),
+                        value="00:00:05.000",
+                        help="Format HH:MM:SS.mmm ou MM:SS.mmm ou SS.mmm"
+                    )
+
+                if st.button(t("illustrator_youtube_process")):
+                    try:
+                        # Convertir les timecodes en secondes
+                        start_seconds = youtube_api._timecode_to_seconds(start_time)
+                        end_seconds = youtube_api._timecode_to_seconds(end_time)
+
+                        # Validation
+                        if start_seconds >= end_seconds:
+                            st.error("Le temps de fin doit être après le temps de début")
+                        elif end_seconds > total_duration:
+                            st.error(f"Le temps de fin ne peut pas dépasser la durée totale ({self._format_duration(total_duration)})")
+                        else:
+                            with st.spinner("Processing video..."):
+                                try:
+                                    # Télécharger la vidéo complète
+                                    st.session_state.youtube_video_buffer = youtube_api.download_asset(
+                                        st.session_state.selected_youtube_video
+                                    )
+
+                                    # Découper le segment
+                                    st.session_state.processed_segment = youtube_api.process_video_segment(
+                                        st.session_state.youtube_video_buffer,
+                                        start_seconds,
+                                        end_seconds
+                                    )
+                                    st.success("Video segment processed!")
+                                except Exception as e:
+                                    st.error(f"Error processing video: {str(e)}")
+                                    raise e
+                    except ValueError as e:
+                        st.error(f"Format de timecode invalide : {str(e)}")
+
+                # Prévisualisation du segment
+                if st.session_state.processed_segment:
+                    st.markdown("---")
+                    st.subheader("Segment Preview")
+                    st.video(st.session_state.processed_segment, format="video/mp4")
+
+                    # Boutons de sauvegarde
+                    st.markdown("---")
+                    st.subheader("Save Options")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        if st.button(t("download_to_current")):
+                            self._save_youtube_segment(current_dir, None, st.session_state.selected_youtube_video)
+                    with col2:
+                        if st.button(t("download_to_stored")):
+                            self._save_youtube_segment(stored_dir, selected_subdir, st.session_state.selected_youtube_video)
+                    with col3:
+                        if st.button(t("download_to_both")):
+                            self._save_youtube_segment(current_dir, None, st.session_state.selected_youtube_video)
+                            self._save_youtube_segment(stored_dir, selected_subdir, st.session_state.selected_youtube_video)
+
+    def _save_youtube_segment(self, base_dir: str, subdir: str, video_data: dict):
+        """Sauvegarde un segment vidéo YouTube"""
+        try:
+            target_dir = os.path.join(base_dir, subdir) if subdir else base_dir
+            os.makedirs(target_dir, exist_ok=True)
+
+            filename = f"yt_{video_data['original_data']['id']}.mp4"
+            filepath = os.path.join(target_dir, filename)
+
+            with open(filepath, 'wb') as f:
+                f.write(st.session_state.processed_segment.getvalue())
+
+            st.success(f"Saved to {filepath}")
+        except Exception as e:
+            st.error(f"Error saving video: {str(e)}")
+
     def run(self, config):
         """Logique principale du plugin"""
         self.config = config
         st.header(t("illustrator_header"))
 
-        # Récupération de l'onglet actif
-        active_tab = st.session_state.get("illustrator_active_tab", "current")
-
         # Navigation par onglets
         tabs = st.tabs([
             t("illustrator_current_tab"),
             t("illustrator_stored_tab"),
-            t("illustrator_search_tab")
+            t("illustrator_search_tab"),
+            t("illustrator_youtube_tab")
         ])
 
         with tabs[0]:
@@ -510,6 +680,8 @@ class IllustratorPlugin(Plugin):
             self.run_stored_assets_tab(config)
         with tabs[2]:
             self.run_search_assets_tab(config)
+        with tabs[3]:
+            self.run_youtube_assets_tab(config)
 
 
 if __name__ == "__main__":
