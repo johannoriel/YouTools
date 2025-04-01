@@ -10,6 +10,9 @@ from video_utils import (
 import pandas as pd
 import os
 from plugins.ragllm import RagllmPlugin
+from plugins.trimsilences import TrimsilencesPlugin
+from plugins.chromakey import ChromakeyPlugin
+from chromakey_background import replace_background
 
 # Traductions
 translations["en"].update({
@@ -362,6 +365,41 @@ class VideocutPlugin(Plugin):
                                 st.rerun()
 
                     col1_actions, col2_actions, col3_actions = st.columns(3)
+                    with col1_actions:
+                        # Section Chromakey
+                        background_directory = config.get('chromakey', {}).get('background_directory', '')
+                        if not background_directory:
+                            st.error("Background directory not configured in chromakey plugin")
+                        else:
+                            background_files = [f for f in os.listdir(background_directory)
+                                             if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+                            if not background_files:
+                                st.error("No background videos found in directory")
+                            else:
+                                # Afficher la sélection du fond
+                                selected_background = st.selectbox(
+                                    "Select background video",
+                                    background_files,
+                                    key="chroma_background_select"
+                                )
+
+                                # Bouton Replace Green Screen
+                                if st.button("Replace Green Screen") and selected_videos["selection"]["rows"]:
+                                    with st.spinner("Replacing green screens..."):
+                                        for idx in selected_videos["selection"]["rows"]:
+                                            video_path = video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
+                                            try:
+                                                background_path = os.path.join(background_directory, selected_background)
+                                                result_filename = f"chroma_{os.path.basename(video_path)}"
+                                                result_path = os.path.join(os.path.dirname(video_path), result_filename)
+                                                target_color_rgb = config.get('chromakey', {}).get("default_target_color", "#00FF00")
+                                                target_color_rgb = [int(target_color_rgb.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)]
+                                                replace_background(video_path, background_path, result_path, target_color_rgb)
+                                                st.success(f"Green screen replaced for {os.path.basename(video_path)}")
+                                            except Exception as e:
+                                                st.error(f"Error processing {os.path.basename(video_path)}: {str(e)}")
+                                        st.rerun()
+
                     with col2_actions:
                         # Bouton Normalize Audio
                         if st.button(t("video_normalize_audio")) and selected_videos["selection"]["rows"]:
@@ -376,6 +414,28 @@ class VideocutPlugin(Plugin):
                                             video=os.path.basename(video_path)))
                                     except Exception as e:
                                         st.error(t("video_error").format(error=str(e)))
+                            st.rerun()
+
+                with col3_actions:
+                    # Bouton Trim Silences
+                    if st.button("Trim Silences") and selected_videos["selection"]["rows"]:
+                        with st.spinner("Trimming silences..."):
+                            for idx in selected_videos["selection"]["rows"]:
+                                video_path = video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
+                                try:
+                                    result, reduction, original_duration, final_duration = self.trimsilences_plugin.remove_silence(
+                                        video_path,
+                                        config['trimsilences']['silence_threshold'],
+                                        config['trimsilences']['silence_duration'],
+                                        config['trimsilences']['keep_duration'],
+                                        os.path.dirname(video_path)
+                                    )
+                                    if isinstance(result, str) and (result.startswith("Erreur") or result.startswith("Une erreur")):
+                                        st.error(f"Error processing {os.path.basename(video_path)}: {result}")
+                                    else:
+                                        st.success(f"Trimmed {os.path.basename(video_path)} - Reduction: {reduction}% | {original_duration:.1f}s → {final_duration:.1f}s")
+                                except Exception as e:
+                                    st.error(f"Error processing {os.path.basename(video_path)}: {str(e)}")
                             st.rerun()
 
     def handle_chapters(self, col1, selected_videos, video_df, show_end_columns):
