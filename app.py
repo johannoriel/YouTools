@@ -238,9 +238,12 @@ def main():
             config.setdefault(plugin_name, {})[key] = value
 
     # Ajouter le bouton "Clean session" dans la barre latérale
-    if expander.button(t("Clean session")):
+    col1, col2 = expander.columns([1, 1])
+    if col1.button(t("Clean session")):
         st.session_state.clear()  # Cela réinitialise st.session_state
         st.rerun()  # Relancer l'application pour refléter les changements
+    if col2.button(t("Refresh")):
+        st.rerun()
 
     # Initialize selected tab
     if 'selected_tab_id' not in st.session_state:

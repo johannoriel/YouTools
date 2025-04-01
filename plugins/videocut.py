@@ -119,6 +119,9 @@ class VideocutPlugin(Plugin):
         super().__init__(name, plugin_manager)
         self.working_dir = None
         self.ragllm = RagllmPlugin("ragllm", plugin_manager)
+        self.trimsilences_plugin = self.plugin_manager.get_plugin(
+            'trimsilences')
+        self.chromakey_plugin = self.plugin_manager.get_plugin('chromakey')
 
     def get_config_fields(self):
         return {
