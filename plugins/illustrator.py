@@ -206,6 +206,29 @@ class IllustratorPlugin(Plugin):
                 else:
                     st.video(media_data['url'], format="video/mp4", autoplay=True)
 
+    def folder_selector_with_creation(self, base_dir, key=None):
+        """Sélection de dossier avec option de création de nouveau dossier"""
+        subdirs = self.get_subdirectories(base_dir)
+        selected_subdir = st.selectbox(
+            t("illustrator_destination_folder"),
+            subdirs + ["[Create New Folder]"],
+            key=f"folder_selector_{key}" if key else None
+        )
+
+        if selected_subdir == "[Create New Folder]":
+            new_folder = st.text_input(
+                t("illustrator_create_folder"),
+                key=f"new_folder_{key}" if key else None
+            )
+            if new_folder and st.button("Create", key=f"create_{key}" if key else None):
+                new_path = os.path.join(base_dir, new_folder)
+                os.makedirs(new_path, exist_ok=True)
+                st.success(f"Folder created: {new_path}")
+                st.rerun()
+            return None
+
+        return selected_subdir
+
     def run_current_assets_tab(self, config):
         """Onglet des assets courants"""
         st.header(t("illustrator_current_tab"))
@@ -313,202 +336,189 @@ class IllustratorPlugin(Plugin):
                 self.show_media_preview(selected_media)
 
     def run_search_assets_tab(self, config):
-        """Onglet de recherche de nouveaux assets"""
-        st.header(t("illustrator_search_tab"))
-        stored_dir = self.expand_path(config.get(self.name, {}).get(
-            "illustrator_stored_dir", t("illustrator_config_default_stored")))
-        current_dir = self.expand_path(config.get(self.name, {}).get(
-            "illustrator_current_dir", t("illustrator_config_default_current")))
+            """Onglet de recherche de nouveaux assets"""
+            st.header(t("illustrator_search_tab"))
+            stored_dir = self.expand_path(config.get(self.name, {}).get(
+                "illustrator_stored_dir", t("illustrator_config_default_stored")))
+            current_dir = self.expand_path(config.get(self.name, {}).get(
+                "illustrator_current_dir", t("illustrator_config_default_current")))
 
-        # Initialisation des variables de session
-        if 'search_results' not in st.session_state:
-            st.session_state.search_results = None
-        if 'selected_item' not in st.session_state:
-            st.session_state.selected_item = None
-        if 'media_buffer' not in st.session_state:
-            st.session_state.media_buffer = None
-        if 'media_type' not in st.session_state:
-            st.session_state.media_type = None
-
-        # Configuration des API
-        api_keys = {
-            "pexels": config.get(self.name, {}).get("pexels_api_key", ""),
-            "canva": config.get(self.name, {}).get("canva_api_key", "")
-        }
-
-        # Sélection de l'API et type de média
-        col1, col2 = st.columns(2)
-        with col1:
-            selected_api = st.selectbox(
-                t("illustrator_search_api"), list(self.apis.keys()))
-        with col2:
-            media_type = st.selectbox(
-                t("illustrator_media_type"),
-                ["photos", "videos", "both"],
-                format_func=lambda x: t(f"illustrator_{x}")
-            )
-
-        if not api_keys[selected_api]:
-            st.error(f"API key for {selected_api} is not configured")
-            return
-
-        # Recherche
-        if 'search_triggered' not in st.session_state:
-                st.session_state.search_triggered = False
-
-        def trigger_search():
-            st.session_state.search_triggered = True
-
-        keywords = st.text_input(
-            t("illustrator_search_keywords"),
-            key="search_keywords",
-            on_change=trigger_search
-        )
-
-            # Déclencher la recherche soit avec Enter soit avec le bouton
-        if (st.session_state.search_triggered or st.button(t("illustrator_search_button"))) and keywords:
-            with st.spinner("Searching..."):
-                try:
-                    results = []
-                    if media_type in ["photos", "both"]:
-                        photos = self.apis[selected_api].search(
-                            remove_quotes(keywords),
-                            api_keys[selected_api],
-                            "photos"
-                        )
-                        results.extend(photos)
-                    if media_type in ["videos", "both"]:
-                        videos = self.apis[selected_api].search(
-                            remove_quotes(keywords),
-                            api_keys[selected_api],
-                            "videos"
-                        )
-                        results.extend(videos)
-
-                    formatted_results = []
-                    for item in results:
-                        formatted_results.append({
-                            'url': item['url'],
-                            'name': item.get('name', f"Media {item['id']}"),
-                            'date': item.get('date', 0),
-                            'original_data': item
-                        })
-                    st.session_state.search_results = formatted_results
-                    # Réinitialiser la sélection quand on fait une nouvelle recherche
-                    st.session_state.selected_item = None
-                    st.session_state.media_buffer = None
-                    st.session_state.media_type = None
-                except Exception as e:
-                    st.error(f"Search error: {str(e)}")
-
-        # Affichage des résultats
-        if st.session_state.search_results:
-            # Sélection du dossier de destination pour stored assets
-            subdirs = self.get_subdirectories(stored_dir)
-            selected_subdir = st.selectbox(
-                t("illustrator_destination_folder"),
-                subdirs + ["[Create New Folder]"]
-            )
-
-            if selected_subdir == "[Create New Folder]":
-                new_folder = st.text_input(t("illustrator_create_folder"))
-                if new_folder and st.button("Create"):
-                    new_path = os.path.join(stored_dir, new_folder)
-                    os.makedirs(new_path, exist_ok=True)
-                    st.success(f"Folder created: {new_path}")
-                    st.rerun()
-                return
-
-            # Sélection du média
-            new_selection = remote_media_selector(
-                st.session_state.search_results, "search")
-
-            # Si la sélection a changé, réinitialiser le buffer
-            if new_selection != st.session_state.selected_item:
-                st.session_state.selected_item = new_selection
+            # Initialisation des variables de session
+            if 'search_results' not in st.session_state:
+                st.session_state.search_results = None
+            if 'selected_item' not in st.session_state:
+                st.session_state.selected_item = None
+            if 'media_buffer' not in st.session_state:
                 st.session_state.media_buffer = None
+            if 'media_type' not in st.session_state:
                 st.session_state.media_type = None
 
-            # Téléchargement pour prévisualisation
-            if st.session_state.selected_item and not st.session_state.media_buffer:
-                with st.spinner("Downloading for preview..."):
-                    try:
-                        buffer, media_type = self.apis[selected_api].memory_download(
-                            st.session_state.selected_item['original_data']
-                        )
-                        st.session_state.media_buffer = buffer
-                        st.session_state.media_type = media_type
-                    except Exception as e:
-                        st.error(f"Preview download error: {str(e)}")
+            # Configuration des API
+            api_keys = {
+                "pexels": config.get(self.name, {}).get("pexels_api_key", ""),
+                "canva": config.get(self.name, {}).get("canva_api_key", "")
+            }
 
-            # Prévisualisation
-            if st.session_state.media_buffer:
-                self.show_media_preview(
-                    st.session_state.media_buffer,
-                    st.session_state.media_type
+            # Sélection de l'API et type de média
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_api = st.selectbox(
+                    t("illustrator_search_api"), list(self.apis.keys()))
+            with col2:
+                media_type = st.selectbox(
+                    t("illustrator_media_type"),
+                    ["photos", "videos", "both"],
+                    format_func=lambda x: t(f"illustrator_{x}")
                 )
 
-            # Boutons de téléchargement
-            if st.session_state.selected_item and selected_subdir and st.session_state.media_buffer:
-                media_type = st.session_state.selected_item['original_data']['type']
-                ext = '.mp4' if media_type == 'video' else '.jpg'
+            if not api_keys[selected_api]:
+                st.error(f"API key for {selected_api} is not configured")
+                return
 
-                st.markdown("---")
-                st.subheader("Save Options")
+            # Recherche
+            if 'search_triggered' not in st.session_state:
+                    st.session_state.search_triggered = False
 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button(t("download_to_current")):
-                        try:
-                            current_dir = self.expand_path(self.config.get(self.name, {}).get(
-                                "illustrator_current_dir", t("illustrator_config_default_current")))
-                            os.makedirs(current_dir, exist_ok=True)
+            def trigger_search():
+                st.session_state.search_triggered = True
 
-                            filename = f"{st.session_state.selected_item['name']}{ext}"
-                            filepath = os.path.join(current_dir, filename)
+            keywords = st.text_input(
+                t("illustrator_search_keywords"),
+                key="search_keywords",
+                on_change=trigger_search
+            )
 
-                            with open(filepath, 'wb') as f:
-                                f.write(st.session_state.media_buffer.getvalue())
-                            st.success(f"Added to current assets: {filepath}")
-                        except Exception as e:
-                            st.error(f"Error: {str(e)}")
-
-                with col2:
-                    if st.button(t("download_to_stored")):
-                        try:
-                            filename = f"{st.session_state.selected_item['name']}{ext}"
-                            filepath = os.path.join(stored_dir, selected_subdir, filename)
-
-                            # On réécrit le buffer dans le fichier
-                            with open(filepath, 'wb') as f:
-                                f.write(st.session_state.media_buffer.getvalue())
-                            st.success(f"Saved to stored assets: {filepath}")
-                        except Exception as e:
-                            st.error(f"Error: {str(e)}")
-
-                with col3:
-                    if st.button(t("download_to_both")):
-                        try:
-                            # Save to stored
-                            filename = f"{st.session_state.selected_item['name']}{ext}"
-                            stored_path = os.path.join(stored_dir, selected_subdir, filename)
-                            with open(stored_path, 'wb') as f:
-                                f.write(st.session_state.media_buffer.getvalue())
-
-                            # Save to current
-                            current_dir = self.expand_path(self.config.get(self.name, {}).get(
-                                "illustrator_current_dir", t("illustrator_config_default_current")))
-                            os.makedirs(current_dir, exist_ok=True)
-                            current_path = os.path.join(current_dir, filename)
-                            with open(current_path, 'wb') as f:
-                                f.write(st.session_state.media_buffer.getvalue())
-
-                            st.success(
-                                f"Saved to stored assets: {stored_path}\n"
-                                f"Added to current assets: {current_path}"
+            # Déclencher la recherche soit avec Enter soit avec le bouton
+            if (st.session_state.search_triggered or st.button(t("illustrator_search_button"))) and keywords:
+                with st.spinner("Searching..."):
+                    try:
+                        results = []
+                        if media_type in ["photos", "both"]:
+                            photos = self.apis[selected_api].search(
+                                remove_quotes(keywords),
+                                api_keys[selected_api],
+                                "photos"
                             )
+                            results.extend(photos)
+                        if media_type in ["videos", "both"]:
+                            videos = self.apis[selected_api].search(
+                                remove_quotes(keywords),
+                                api_keys[selected_api],
+                                "videos"
+                            )
+                            results.extend(videos)
+
+                        formatted_results = []
+                        for item in results:
+                            formatted_results.append({
+                                'url': item['url'],
+                                'name': item.get('name', f"Media {item['id']}"),
+                                'date': item.get('date', 0),
+                                'original_data': item
+                            })
+                        st.session_state.search_results = formatted_results
+                        # Réinitialiser la sélection quand on fait une nouvelle recherche
+                        st.session_state.selected_item = None
+                        st.session_state.media_buffer = None
+                        st.session_state.media_type = None
+                    except Exception as e:
+                        st.error(f"Search error: {str(e)}")
+
+            # Affichage des résultats
+            if st.session_state.search_results:
+
+                # Sélection du média
+                new_selection = remote_media_selector(
+                    st.session_state.search_results, "search")
+
+                # Si la sélection a changé, réinitialiser le buffer
+                if new_selection != st.session_state.selected_item:
+                    st.session_state.selected_item = new_selection
+                    st.session_state.media_buffer = None
+                    st.session_state.media_type = None
+
+                # Téléchargement pour prévisualisation
+                if st.session_state.selected_item and not st.session_state.media_buffer:
+                    with st.spinner("Downloading for preview..."):
+                        try:
+                            buffer, media_type = self.apis[selected_api].memory_download(
+                                st.session_state.selected_item['original_data']
+                            )
+                            st.session_state.media_buffer = buffer
+                            st.session_state.media_type = media_type
                         except Exception as e:
-                            st.error(f"Error: {str(e)}")
+                            st.error(f"Preview download error: {str(e)}")
+
+                # Prévisualisation
+                if st.session_state.media_buffer:
+                    self.show_media_preview(
+                        st.session_state.media_buffer,
+                        st.session_state.media_type
+                    )
+
+                # Boutons de téléchargement
+                if st.session_state.selected_item and st.session_state.media_buffer:
+                    media_type = st.session_state.selected_item['original_data']['type']
+                    ext = '.mp4' if media_type == 'video' else '.jpg'
+
+                    st.markdown("---")
+                    st.subheader("Save Options")
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        if st.button(t("download_to_current"), key="search_download_current"):
+                            try:
+                                current_dir = self.expand_path(self.config.get(self.name, {}).get(
+                                    "illustrator_current_dir", t("illustrator_config_default_current")))
+                                os.makedirs(current_dir, exist_ok=True)
+
+                                filename = f"{st.session_state.selected_item['name']}{ext}"
+                                filepath = os.path.join(current_dir, filename)
+
+                                with open(filepath, 'wb') as f:
+                                    f.write(st.session_state.media_buffer.getvalue())
+                                st.success(f"Added to current assets: {filepath}")
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+
+                    with col2:
+                        selected_subdir = self.folder_selector_with_creation(stored_dir, "search_save")
+
+                    with col3:
+                        if selected_subdir and st.button(t("download_to_stored"), key="search_download_stored"):
+                            try:
+                                filename = f"{st.session_state.selected_item['name']}{ext}"
+                                filepath = os.path.join(stored_dir, selected_subdir, filename)
+
+                                with open(filepath, 'wb') as f:
+                                    f.write(st.session_state.media_buffer.getvalue())
+                                st.success(f"Saved to stored assets: {filepath}")
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+
+                    with col4:
+                        if selected_subdir and st.button(t("download_to_both"), key="search_download_both"):
+                            try:
+                                # Save to stored
+                                filename = f"{st.session_state.selected_item['name']}{ext}"
+                                stored_path = os.path.join(stored_dir, selected_subdir, filename)
+                                with open(stored_path, 'wb') as f:
+                                    f.write(st.session_state.media_buffer.getvalue())
+
+                                # Save to current
+                                current_dir = self.expand_path(self.config.get(self.name, {}).get(
+                                    "illustrator_current_dir", t("illustrator_config_default_current")))
+                                os.makedirs(current_dir, exist_ok=True)
+                                current_path = os.path.join(current_dir, filename)
+                                with open(current_path, 'wb') as f:
+                                    f.write(st.session_state.media_buffer.getvalue())
+
+                                st.success(
+                                    f"Saved to stored assets: {stored_path}\n"
+                                    f"Added to current assets: {current_path}"
+                                )
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
 
     def run_youtube_assets_tab(self, config):
         """Onglet de recherche d'assets vidéo sur YouTube"""
@@ -553,22 +563,6 @@ class IllustratorPlugin(Plugin):
 
         # Affichage des résultats
         if st.session_state.youtube_results:
-            # Sélection du dossier de destination
-            subdirs = self.get_subdirectories(stored_dir)
-            selected_subdir = st.selectbox(
-                t("illustrator_destination_folder"),
-                subdirs + ["[Create New Folder]"],
-                key="youtube_folder"
-            )
-
-            if selected_subdir == "[Create New Folder]":
-                new_folder = st.text_input(t("illustrator_create_folder"), key="youtube_new_folder")
-                if new_folder and st.button("Create"):
-                    new_path = os.path.join(stored_dir, new_folder)
-                    os.makedirs(new_path, exist_ok=True)
-                    st.success(f"Folder created: {new_path}")
-                    st.rerun()
-                return
 
             # Sélection de la vidéo avec le media_selector standard
             st.session_state.selected_youtube_video = remote_media_selector(
@@ -635,21 +629,21 @@ class IllustratorPlugin(Plugin):
                 # Prévisualisation du segment
                 if st.session_state.processed_segment:
                     st.markdown("---")
-                    st.subheader("Segment Preview")
-                    st.video(st.session_state.processed_segment, format="video/mp4")
-
-                    # Boutons de sauvegarde
-                    st.markdown("---")
                     st.subheader("Save Options")
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        if st.button(t("download_to_current")):
+                        if st.button(t("download_to_current"), key="youtube_download_current"):
                             self._save_youtube_segment(current_dir, None, st.session_state.selected_youtube_video)
+
                     with col2:
-                        if st.button(t("download_to_stored")):
-                            self._save_youtube_segment(stored_dir, selected_subdir, st.session_state.selected_youtube_video)
+                        selected_subdir = self.folder_selector_with_creation(stored_dir, "youtube_save")
+
                     with col3:
-                        if st.button(t("download_to_both")):
+                        if selected_subdir and st.button(t("download_to_stored"), key="youtube_download_stored"):
+                            self._save_youtube_segment(stored_dir, selected_subdir, st.session_state.selected_youtube_video)
+
+                    with col4:
+                        if selected_subdir and st.button(t("download_to_both"), key="youtube_download_both"):
                             self._save_youtube_segment(current_dir, None, st.session_state.selected_youtube_video)
                             self._save_youtube_segment(stored_dir, selected_subdir, st.session_state.selected_youtube_video)
 
