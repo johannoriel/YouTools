@@ -904,21 +904,27 @@ class YoutubeAPI:
             print(f"Error uploading thumbnail: {str(e)}")
             return False
 
-    def search_assets(self, query: str, max_results: int = 20) -> List[Dict[str, Any]]:
+    def search_assets(self, query: str, max_results: int = 20, creative_commons: bool = True) -> List[Dict[str, Any]]:
         """
-        Recherche des vidéos Creative Commons sur YouTube.
+        Recherche des vidéos sur YouTube (Creative Commons ou normales).
         Retourne une liste formatée pour le media_selector.
         """
         try:
+            # Paramètres de base de la requête
+            request_params = {
+                "part": "id,snippet",
+                "q": query,
+                "maxResults": max_results,
+                "type": "video",
+                "order": "relevance"
+            }
+
+            # Ajouter le filtre Creative Commons si demandé
+            if creative_commons:
+                request_params["videoLicense"] = "creativeCommon"
+
             # Première requête pour obtenir les IDs des vidéos
-            search_response = self.youtube.search().list(
-                part="id,snippet",
-                q=query,
-                maxResults=max_results,
-                type="video",
-                videoLicense="creativeCommon",
-                order="relevance"
-            ).execute()
+            search_response = self.youtube.search().list(**request_params).execute()
             self.track_quota_usage(100)
 
             video_ids = [item['id']['videoId'] for item in search_response['items']]

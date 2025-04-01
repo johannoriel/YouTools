@@ -531,12 +531,20 @@ class IllustratorPlugin(Plugin):
         # Initialisation de l'API YouTube
         youtube_api = YoutubeAPI(config)
 
-        # Recherche de vidéos
-        keywords = st.text_input(t("illustrator_search_keywords"), key="youtube_keywords")
+        # Options de recherche
+        col1, col2 = st.columns(2)
+        with col1:
+            keywords = st.text_input(t("illustrator_search_keywords"), key="youtube_keywords")
+        with col2:
+            creative_commons = st.checkbox("Creative Commons only", value=True)
+
         if st.button(t("illustrator_youtube_search")):
             with st.spinner("Searching YouTube..."):
                 try:
-                    st.session_state.youtube_results = youtube_api.search_assets(keywords)
+                    st.session_state.youtube_results = youtube_api.search_assets(
+                        keywords,
+                        creative_commons=creative_commons
+                    )
                     st.session_state.selected_youtube_video = None
                     st.session_state.youtube_video_buffer = None
                     st.session_state.processed_segment = None
@@ -645,21 +653,27 @@ class IllustratorPlugin(Plugin):
                             self._save_youtube_segment(current_dir, None, st.session_state.selected_youtube_video)
                             self._save_youtube_segment(stored_dir, selected_subdir, st.session_state.selected_youtube_video)
 
-    def _save_youtube_segment(self, base_dir: str, subdir: str, video_data: dict):
-        """Sauvegarde un segment vidéo YouTube"""
+    def _save_youtube_segment(self, base_dir: str, subdir: str, video_data: dict) -> str:
+        """Sauvegarde un segment vidéo YouTube avec comme nom le titre de la vidéo"""
         try:
             target_dir = os.path.join(base_dir, subdir) if subdir else base_dir
             os.makedirs(target_dir, exist_ok=True)
 
-            filename = f"yt_{video_data['original_data']['id']}.mp4"
+            # Créer un nom de fichier propre à partir du titre de la vidéo
+            title = video_data['original_data']['title']
+            import re
+            clean_title = re.sub(r'[^\w\-_\. ]', '_', title)[:100]  # Limite à 100 caractères
+            filename = f"{clean_title}.mp4"
             filepath = os.path.join(target_dir, filename)
 
             with open(filepath, 'wb') as f:
                 f.write(st.session_state.processed_segment.getvalue())
 
             st.success(f"Saved to {filepath}")
+            return filepath
         except Exception as e:
             st.error(f"Error saving video: {str(e)}")
+            return None
 
     def run(self, config):
         """Logique principale du plugin"""
