@@ -726,61 +726,91 @@ class VideocutPlugin(Plugin):
             else:
                 st.write("Select a video to view subtitles.")
 
-    def run(self, config):
-        self.working_dir = config.get(self.name, {}).get(
-            "video_workdir", t("video_config_workdir_default"))
+    def get_selected_directories(self, working_dir):
+        """Gère la sélection des répertoires avec des options spéciales"""
+        # Liste tous les répertoires immédiats
+        immediate_subdirs = [d for d in os.listdir(working_dir)
+                           if os.path.isdir(os.path.join(working_dir, d))]
 
-        self.setup_header()
-        selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos, show_end_columns = self.setup_controls()
+        # Options spéciales
+        options = [
+            "ALL_DIRS_RECURSIVE",  # Tous les répertoires (récursif)
+            "ROOT_DIR_ONLY"       # Répertoire racine seulement
+        ] + immediate_subdirs
 
-        # Nouveau sélecteur de répertoires
-        st.sidebar.markdown(f"**{t('video_directory_selector')}**")
-        dir_mode = st.sidebar.radio(
-            "",
-            [t("video_directory_all"), t("video_directory_select")],
-            label_visibility="collapsed"
+        # Traductions pour l'affichage
+        display_names = [
+            "All directories (recursive)",
+            "Root directory only"
+        ] + immediate_subdirs
+
+        # Créer un mapping entre noms affichés et valeurs réelles
+        options_map = dict(zip(display_names, options))
+
+        # Sélection multiple avec les options spéciales
+        selected = st.sidebar.multiselect(
+            "Select directories to include",
+            display_names,
+            default=[display_names[0]] if display_names else None
         )
 
+        if not selected:
+            st.warning("Please select at least one directory")
+            return None
 
-        if dir_mode == t("video_directory_all"):
-            # Mode récursif - tous les répertoires
-            video_df = scan_videos(self.working_dir, selected_extensions, recursive=True)
-        else:
-            # Mode sélection manuelle
-            immediate_subdirs = [d for d in os.listdir(self.working_dir)
-                               if os.path.isdir(os.path.join(self.working_dir, d))]
-            selected = st.sidebar.multiselect(
-                "Select directories to include",
-                immediate_subdirs,
-                default=immediate_subdirs[0] if immediate_subdirs else None
-            )
+        # Convertir les sélections en valeurs réelles
+        real_selections = [options_map[s] for s in selected]
 
-            if not selected:
-                st.warning("Please select at least one directory")
+        # Construire la liste des répertoires à scanner
+        dirs_to_scan = []
+
+        if "ALL_DIRS_RECURSIVE" in real_selections:
+            # Mode récursif complet
+            return [(working_dir, True)]
+        elif "ROOT_DIR_ONLY" in real_selections:
+            # Juste le répertoire racine
+            dirs_to_scan.append((working_dir, False))
+
+        # Ajouter les répertoires sélectionnés individuellement
+        for selection in real_selections:
+            if selection not in ["ALL_DIRS_RECURSIVE", "ROOT_DIR_ONLY"]:
+                dir_path = os.path.join(working_dir, selection)
+                dirs_to_scan.append((dir_path, False))
+
+        return dirs_to_scan
+
+    def run(self, config):
+            self.working_dir = config.get(self.name, {}).get(
+                "video_workdir", t("video_config_workdir_default"))
+
+            self.setup_header()
+            selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos, show_end_columns = self.setup_controls()
+
+            # Nouveau sélecteur de répertoires
+            st.sidebar.markdown(f"**{t('video_directory_selector')}**")
+            dirs_to_scan = self.get_selected_directories(self.working_dir)
+
+            if not dirs_to_scan:
                 return
 
-            # Scanner chaque répertoire sélectionné en mode non-récursif
+            # Scanner chaque répertoire selon les paramètres
             video_dfs = []
-            for subdir in selected:
-                dir_path = os.path.join(self.working_dir, subdir)
-                video_df = scan_videos(dir_path, selected_extensions, recursive=False)
+            for dir_path, recursive in dirs_to_scan:
+                video_df = scan_videos(dir_path, selected_extensions, recursive=recursive)
                 video_dfs.append(video_df)
 
-            video_df = pd.concat(video_dfs).reset_index(drop=True)
+            video_df = pd.concat(video_dfs).reset_index(drop=True) if video_dfs else pd.DataFrame()
 
-        if video_df.empty:
-            st.write("No videos found with the selected extensions.")
-            return
+            if video_df.empty:
+                st.write("No videos found with the selected extensions.")
+                return
 
-        if st.sidebar.button("Refresh"):
-            st.rerun()
-
-        col1, col2, selected_videos = self.display_videos(video_df)
-        self.handle_video_actions(
-            col1, selected_videos, video_df, selected_model, config)
-        self.handle_chapters(col1, selected_videos, video_df, show_end_columns)
-        self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails,
-                             refresh_thumbnails, mute_videos, show_end_columns)
+            col1, col2, selected_videos = self.display_videos(video_df)
+            self.handle_video_actions(
+                col1, selected_videos, video_df, selected_model, config)
+            self.handle_chapters(col1, selected_videos, video_df, show_end_columns)
+            self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails,
+                                 refresh_thumbnails, mute_videos, show_end_columns)
 
 
 if __name__ == "__main__":
