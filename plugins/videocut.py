@@ -5,7 +5,7 @@ from plugins.common import remove_quotes
 from video_utils import (
     scan_videos, load_subtitles_and_chapters, save_vtt, generate_subtitles,
     convert_to_mp4, rename_video, merge_videos, split_video, delete_videos,
-    generate_thumbnail, format_time, parse_timecode_to_ms, split_by_chapters
+    generate_thumbnail, format_time, parse_timecode_to_ms, split_by_chapters, normalize_audio
 )
 import pandas as pd
 import os
@@ -56,6 +56,9 @@ translations["en"].update({
     "video_directory_selector": "Directory Selection",
     "video_directory_all": "All directories (recursive)",
     "video_directory_select": "Select directories",
+    "video_normalize_audio": "Normalize Audio",
+    "video_normalize_processing": "Normalizing audio...",
+    "video_normalize_success": "Audio normalized successfully for {video}!",
 })
 
 translations["fr"].update({
@@ -102,6 +105,9 @@ translations["fr"].update({
     "video_directory_selector": "Sélection de répertoires",
     "video_directory_all": "Tous les répertoires (récursif)",
     "video_directory_select": "Sélectionner des répertoires",
+    "video_normalize_audio": "Normaliser l'audio",
+    "video_normalize_processing": "Normalisation de l'audio en cours...",
+    "video_normalize_success": "Audio normalisé avec succès pour {video} !",
 })
 
 
@@ -354,6 +360,23 @@ class VideocutPlugin(Plugin):
                                                                    1] = new_order[selected_idx + 1], new_order[selected_idx]
                                 st.session_state["video_order"] = new_order
                                 st.rerun()
+
+                    col1_actions, col2_actions, col3_actions = st.columns(3)
+                    with col2_actions:
+                        # Bouton Normalize Audio
+                        if st.button(t("video_normalize_audio")) and selected_videos["selection"]["rows"]:
+                            with st.spinner(t("video_normalize_processing")):
+                                for idx in selected_videos["selection"]["rows"]:
+                                    video_path = video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
+                                    try:
+                                        reference_audio_path = config.get("movied", {}).get(
+                                            "movied_reference_audio", "")
+                                        normalize_audio(video_path, reference_audio_path)
+                                        st.success(t("video_normalize_success").format(
+                                            video=os.path.basename(video_path)))
+                                    except Exception as e:
+                                        st.error(t("video_error").format(error=str(e)))
+                            st.rerun()
 
     def handle_chapters(self, col1, selected_videos, video_df, show_end_columns):
         with col1:
@@ -658,6 +681,7 @@ class VideocutPlugin(Plugin):
             label_visibility="collapsed"
         )
 
+
         if dir_mode == t("video_directory_all"):
             # Mode récursif - tous les répertoires
             video_df = scan_videos(self.working_dir, selected_extensions, recursive=True)
@@ -687,6 +711,9 @@ class VideocutPlugin(Plugin):
         if video_df.empty:
             st.write("No videos found with the selected extensions.")
             return
+
+        if st.sidebar.button("Refresh"):
+            st.rerun()
 
         col1, col2, selected_videos = self.display_videos(video_df)
         self.handle_video_actions(
