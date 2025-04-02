@@ -34,7 +34,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
 
     # Select animation if random
     if animation_type == "random":
-        animations = ["swinging"]
+        animations = ["spinning_mirror"]
         animation_type = random.choice(animations)
 
     # Define the animation functions
@@ -148,6 +148,37 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         frame.paste(img.resize((final_w, final_h), Image.Resampling.LANCZOS), (int(x_pos), paste_y))
         return np.array(frame)
 
+    def spinning_mirror_animation(t, progress):
+        """Image spins with horizontal mirror and flattening effect, 2 oscillations in 1s, then stabilizes"""
+        # Use same scale as zoom (fully visible, max size without overflow)
+        scale_factor = min(target_w / img_w, target_h / img_h)
+        final_w = int(img_w * scale_factor)
+        final_h = int(img_h * scale_factor)
+        center_x = target_w // 2
+        center_y = target_h // 2  # Centre final de l'écran
+
+        # Durée totale de l'animation (en secondes)
+        oscillation_duration = 1.0  # 1 seconde pour 2 oscillations
+        oscillation_progress = min(t / oscillation_duration, 1.0)
+
+        sine_value = math.cos(oscillation_progress * math.pi * 2)
+        abs_sine = abs(sine_value)
+
+        # Appliquer le miroir horizontal si sinus négatif
+        base_img = img if sine_value >= 0 else img.transpose(Image.FLIP_LEFT_RIGHT)
+
+        # Aplatissement horizontal
+        new_w = int(final_w * (0.1 + 0.9 * abs_sine))  # Largeur varie entre 10% et 100%
+        resized_img = base_img.resize((new_w, final_h), Image.Resampling.NEAREST)
+
+        # Position pour centrer l'image
+        paste_x = center_x - new_w // 2  # Ajuster pour le centre horizontal après resize
+        paste_y = center_y - final_h // 2
+
+        frame = Image.new("RGB", target_size, (0, 0, 0))
+        frame.paste(resized_img, (int(paste_x), int(paste_y)), resized_img if resized_img.mode == 'RGBA' else None)
+        return np.array(frame)
+
     # Main frame generator
     def make_frame(t):
         progress = min(t / duration, 1.0)
@@ -160,6 +191,8 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
             return horizontal_bounce_animation(t, progress)
         elif animation_type == "swinging":
             return swinging_animation(t, progress)
+        elif animation_type == "spinning_mirror":
+            return spinning_mirror_animation(t, progress)
         else:
             return zoom_animation(t, progress)  # fallback
 
