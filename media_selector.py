@@ -35,21 +35,25 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st):
         raise ValueError("media_dirs must be a string or a list of strings")
 
     # List files from all selected directories (no recursion)
-    media_files = []
-    media_paths = []
-    for dir_path in media_dirs:
-        if not os.path.exists(dir_path):
-            continue
-        files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f)) and
-                 any(f.lower().endswith(ext.lower()) for ext in extensions)]
-        media_files.extend(files)
-        media_paths.extend(os.path.join(dir_path, f) for f in files)
+    def scan_media_files():
+        media_files = []
+        media_paths = []
+        for dir_path in media_dirs:
+            if not os.path.exists(dir_path):
+                continue
+            files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f)) and
+                     any(f.lower().endswith(ext.lower()) for ext in extensions)]
+            media_files.extend(files)
+            media_paths.extend(os.path.join(dir_path, f) for f in files)
+        return media_files, media_paths
 
+    # Initial scan
+    media_files, media_paths = scan_media_files()
     media_names = [os.path.splitext(f)[0] for f in media_files]
     media_dates = [os.path.getmtime(path) for path in media_paths]
 
-    # Filter and sort UI
-    search_col, sort_col = streamlit_component.columns(2)
+    # Filter and sort UI - now with 3 columns
+    search_col, sort_col, refresh_col = streamlit_component.columns([4, 3, 1])
     with search_col:
         search_query = st.text_input(
             "Rechercher un média (ex. 'ru')", "", key=f"search_{suffix}")
@@ -62,7 +66,18 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st):
         ]
         sort_choice = st.selectbox(
             "Trier par :", sort_options, key=f"sort_{suffix}")
+    with refresh_col:
+        st.write("")  # Espacement vertical
+        if st.button("🔄", key=f"refresh_{suffix}", help="Rafraîchir la liste des médias"):
+            # Effacer le cache des thumbnails
+            st.cache_data.clear()
+            # Rescanner les fichiers
+            media_files, media_paths = scan_media_files()
+            media_names = [os.path.splitext(f)[0] for f in media_files]
+            media_dates = [os.path.getmtime(path) for path in media_paths]
+            st.rerun()
 
+    # Reste de la fonction inchangé...
     # Filter by search query
     if search_query:
         filtered_indices = [i for i, name in enumerate(
