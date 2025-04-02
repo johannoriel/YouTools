@@ -151,7 +151,7 @@ class VideocutPlugin(Plugin):
                 model_options = ["base", "medium",
                                  "turbo", "large-v3", "large-v3-turbo"]
                 selected_model = st.selectbox(
-                    t("video_model_label"), model_options, index=0, key="video_model")
+                    t("video_model_label"), model_options, index=4, key="video_model")
             with col_thumb:
                 generate_thumbnails = st.checkbox(
                     t("video_generate_thumbnails"), key="video_generate_thumbnails")
