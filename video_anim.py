@@ -61,7 +61,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
     def falling_animation(t, progress):
         """Image falls from mid-height with acceleration, bounces, then stabilizes"""
         # Start position (mid-height)
-        start_y = target_h // 4  # Mi-hauteur approximative
+        start_y = - target_h   # Mi-hauteur approximative
 
         # Use same scale as zoom (fully visible, max size without overflow)
         scale_factor = min(target_w / img_w, target_h / img_h)
@@ -73,7 +73,8 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         if progress < 0.6:
             # Falling phase (60% of time) with acceleration (quadratic easing)
             fall_progress = progress / 0.6
-            y_pos = start_y + (paste_y - start_y) * (fall_progress ** 2)  # Accélération
+            # Tomber de start_y vers paste_y (inversion de la direction)
+            y_pos = start_y - (start_y - paste_y) * (fall_progress ** 2)  # Chute accélérée
         elif progress < 0.8:
             # Bounce phase (20% of time)
             bounce_progress = (progress - 0.6) / 0.2
@@ -101,9 +102,9 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         pivot_y = end_y
 
         if progress < 0.5:
-            # Initial rotation (50% of time) from -90° to 0°
+            # Initial rotation (50% of time) from 90° (haut) to 0° (final)
             swing_progress = progress / 0.5
-            angle = -math.pi / 2 * (1 - swing_progress)  # De -90° à 0°
+            angle = math.pi / 2 * (1 - swing_progress)  # De 90° à 0° (inversion)
         elif progress < 0.7:
             # Small bounce (20% of time)
             bounce_progress = (progress - 0.5) / 0.2
