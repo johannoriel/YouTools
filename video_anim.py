@@ -4,7 +4,7 @@ from PIL import Image
 from moviepy import *
 import math
 
-def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, animation_type="random"):
+def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, animation_type="random", background="green"):
     """Replace a section of the video with an animated image.
 
     Args:
@@ -14,6 +14,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         image_path: Path to the image to insert
         target_size: Target size (width, height) of the video
         animation_type: Type of animation ("zoom", "falling", "swinging", "horizontal_bounce", "spinning_mirror", "fade", "random")
+        background: Background type ("video" for original video, "green" for green screen)
     """
     duration = end_sec - start_sec
     audio_clip = main_clip.subclipped(start_sec, end_sec).audio
@@ -37,8 +38,17 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         animations = ["zoom", "falling", "swinging", "horizontal_bounce", "spinning_mirror", "fade"]
         animation_type = random.choice(animations)
 
+    # Définir le fond
+    if background == "video":
+        background_clip = main_clip.subclip(start_sec, end_sec)  # Fond = vidéo originale
+    elif background == "green":
+        background_clip = ColorClip(size=target_size, color=(0, 255, 0), duration=duration)  # Fond vert
+    else:
+        background_clip = ColorClip(size=target_size, color=(0, 0, 0), duration=duration)  # Fallback noir
+
+
     # Define the animation functions
-    def zoom_animation(t, progress):
+    def zoom_animation(t, progress, background_frame):
         """Zoom animation (original functionality)"""
         zoom_factor = 1.10
         current_zoom = 1 + (zoom_factor - 1) * progress
@@ -54,11 +64,11 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         paste_y = (target_h - new_h) // 2
 
         zoomed_img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        frame = Image.new("RGB", target_size, (0, 0, 0))
-        frame.paste(zoomed_img, (paste_x, paste_y))
+        frame = Image.fromarray(background_frame)
+        frame.paste(zoomed_img, (int(paste_x), int(paste_y)), zoomed_img if zoomed_img.mode == 'RGBA' else None)
         return np.array(frame)
 
-    def falling_animation(t, progress):
+    def falling_animation(t, progress, background_frame):
         """Image falls from mid-height with acceleration, bounces, then stabilizes"""
         # Start position (mid-height)
         start_y = - target_h   # Mi-hauteur approximative
@@ -84,11 +94,11 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
             # Stable phase (20% of time)
             y_pos = paste_y
 
-        frame = Image.new("RGB", target_size, (0, 0, 0))
+        frame = Image.fromarray(background_frame)
         frame.paste(img.resize((final_w, final_h), Image.Resampling.NEAREST), (paste_x, int(y_pos)))
         return np.array(frame)
 
-    def swinging_animation(t, progress):
+    def swinging_animation(t, progress, background_frame, background_type="video"):
         """Image oscillates around its center at final position"""
         # Use same scale as zoom (fully visible, max size without overflow)
         scale_factor = min(target_w / img_w, target_h / img_h)
@@ -107,8 +117,9 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
             angle = 0
 
         # Rotate image around its center
+        fillcolor = (0, 255, 0) if background_type == "green" else (0, 0, 0, 0)
         rotated_img = img.resize((final_w, final_h), Image.Resampling.NEAREST).rotate(
-            math.degrees(angle), expand=True, resample=Image.Resampling.NEAREST
+            math.degrees(angle), expand=True, resample=Image.Resampling.NEAREST, fillcolor=fillcolor
         )
         rot_w, rot_h = rotated_img.size
 
@@ -116,11 +127,11 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         paste_x = center_x - rot_w // 2
         paste_y = center_y - rot_h // 2
 
-        frame = Image.new("RGB", target_size, (0, 0, 0))
+        frame = Image.fromarray(background_frame)
         frame.paste(rotated_img, (int(paste_x), int(paste_y)), rotated_img if rotated_img.mode == 'RGBA' else None)
         return np.array(frame)
 
-    def horizontal_bounce_animation(t, progress):
+    def horizontal_bounce_animation(t, progress, background_frame):
         """Horizontal bounce with 1-2 bounces then stabilizes"""
         # Start position (left of screen)
         start_x = -base_w
@@ -144,11 +155,11 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
             # Stable phase (20% of time)
             x_pos = end_x
 
-        frame = Image.new("RGB", target_size, (0, 0, 0))
-        frame.paste(img.resize((final_w, final_h), Image.Resampling.LANCZOS), (int(x_pos), paste_y))
+        frame = Image.fromarray(background_frame)
+        frame.paste(img.resize((final_w, final_h), Image.Resampling.NEAREST), (int(x_pos), paste_y))
         return np.array(frame)
 
-    def spinning_mirror_animation(t, progress):
+    def spinning_mirror_animation(t, progress, background_frame):
         """Image spins with horizontal mirror and flattening effect, 2 oscillations in 1s, then stabilizes"""
         # Use same scale as zoom (fully visible, max size without overflow)
         scale_factor = min(target_w / img_w, target_h / img_h)
@@ -175,12 +186,12 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         paste_x = center_x - new_w // 2  # Ajuster pour le centre horizontal après resize
         paste_y = center_y - final_h // 2
 
-        frame = Image.new("RGB", target_size, (0, 0, 0))
+        frame = Image.fromarray(background_frame)
         frame.paste(resized_img, (int(paste_x), int(paste_y)), resized_img if resized_img.mode == 'RGBA' else None)
         return np.array(frame)
 
-    def fade_animation(t, progress):
-        """Image fades in from black to full opacity in 0.5s, then stays"""
+    def fade_animation(t, progress, background_frame):
+        """Image fades in from background to full opacity in 0.5s, then stays"""
         # Use same scale as zoom (fully visible, max size without overflow)
         scale_factor = min(target_w / img_w, target_h / img_h)
         final_w = int(img_w * scale_factor)
@@ -215,29 +226,30 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         paste_x = center_x - final_w // 2
         paste_y = center_y - final_h // 2
 
-        # Créer le frame avec fond noir
-        frame = Image.new("RGB", target_size, (0, 0, 0))
+        # Utiliser le fond fourni (vidéo ou vert)
+        frame = Image.fromarray(background_frame)  # Convertir le fond en image PIL
         frame.paste(faded_img, (int(paste_x), int(paste_y)), faded_img)
         return np.array(frame)
 
     # Main frame generator
     def make_frame(t):
         progress = min(t / duration, 1.0)
-
+        # Convertir la frame en uint8 pour compatibilité avec PIL
+        background_frame = background_clip.get_frame(t).astype(np.uint8)
         if animation_type == "zoom":
-            return zoom_animation(t, progress)
+            return zoom_animation(t, progress, background_frame)
         elif animation_type == "falling":
-            return falling_animation(t, progress)
-        elif animation_type == "horizontal_bounce":
-            return horizontal_bounce_animation(t, progress)
+            return falling_animation(t, progress, background_frame)
         elif animation_type == "swinging":
-            return swinging_animation(t, progress)
+            return swinging_animation(t, progress, background_frame, background_type=background)
+        elif animation_type == "horizontal_bounce":
+            return horizontal_bounce_animation(t, progress, background_frame)
         elif animation_type == "spinning_mirror":
-            return spinning_mirror_animation(t, progress)
+            return spinning_mirror_animation(t, progress, background_frame)
         elif animation_type == "fade":
-            return fade_animation(t, progress)
+            return fade_animation(t, progress, background_frame)
         else:
-            return zoom_animation(t, progress)  # fallback
+            return zoom_animation(t, progress, background_frame)  # Fallback
 
     # Create an animated clip
     animated_img_clip = VideoClip(make_frame, duration=duration)

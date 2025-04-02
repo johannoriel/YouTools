@@ -600,6 +600,7 @@ class MoviedPlugin(Plugin):
                     "text_background_select", t("movied_green_background"))
                 use_green_background = text_background == t(
                     "movied_green_background")
+                background_type = "green" if use_green_background else "video"
                 text_style = st.session_state.get(
                     "text_style_select", t("movied_text_style_outline"))
                 text_style = "outline" if text_style == t(
@@ -638,7 +639,7 @@ class MoviedPlugin(Plugin):
                         if cmd == "replace_image":
                             image_path = remaining_args
                             main_clip = replace_with_image(
-                                main_clip, start_sec, end_sec, image_path, target_size)
+                                main_clip, start_sec, end_sec, image_path, target_size, background_type)
                             operation_log.append(
                                 {"Nature": "replace_image", "Details": image_path, "Start": real_start, "End": real_end})
 
