@@ -95,7 +95,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         final_w = int(img_w * scale_factor)
         final_h = int(img_h * scale_factor)
         center_x = target_w // 2
-        center_y = target_h // 2
+        center_y = target_h // 2  # Centre de l'écran
 
         if progress < 0.7:
             # Oscillation phase (70% of time)
