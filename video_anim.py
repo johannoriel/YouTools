@@ -34,7 +34,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
 
     # Select animation if random
     if animation_type == "random":
-        animations = ["falling", "swinging"]
+        animations = ["swinging"]
         animation_type = random.choice(animations)
 
     # Define the animation functions
@@ -89,39 +89,32 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         return np.array(frame)
 
     def swinging_animation(t, progress):
-        """Image rotates from its top-right edge with a small bounce before stabilizing"""
+        """Image oscillates around its center at final position"""
         # Use same scale as zoom (fully visible, max size without overflow)
         scale_factor = min(target_w / img_w, target_h / img_h)
         final_w = int(img_w * scale_factor)
         final_h = int(img_h * scale_factor)
-        end_x = (target_w - final_w) // 2
-        end_y = (target_h - final_h) // 2  # Final position matches zoom start
+        center_x = target_w // 2
+        center_y = target_h // 2
 
-        # Pivot point: top-right corner of the image at final position
-        pivot_x = end_x + final_w
-        pivot_y = end_y
-
-        if progress < 0.5:
-            # Initial rotation (50% of time) from 90° (haut) to 0° (final)
-            swing_progress = progress / 0.5
-            angle = math.pi / 2 * (1 - swing_progress)  # De 90° à 0° (inversion)
-        elif progress < 0.7:
-            # Small bounce (20% of time)
-            bounce_progress = (progress - 0.5) / 0.2
-            angle = (math.pi / 8) * (1 - bounce_progress) * math.sin(bounce_progress * math.pi * 2)
+        if progress < 0.7:
+            # Oscillation phase (70% of time)
+            osc_progress = progress / 0.7
+            # Oscillation décroissante autour de 0°
+            angle = (math.pi / 4) * math.sin(osc_progress * math.pi * 3) * (1 - osc_progress)
         else:
             # Stable phase (30% of time)
             angle = 0
 
-        # Rotate image around its top-right corner
+        # Rotate image around its center
         rotated_img = img.resize((final_w, final_h), Image.Resampling.NEAREST).rotate(
             math.degrees(angle), expand=True, resample=Image.Resampling.NEAREST
         )
         rot_w, rot_h = rotated_img.size
 
-        # Calculate position to keep pivot (top-right) fixed
-        paste_x = pivot_x - rot_w * math.cos(angle) - rot_h * math.sin(angle)
-        paste_y = pivot_y - rot_w * math.sin(angle) + rot_h * math.cos(angle)
+        # Position to keep the center fixed at (target_w/2, target_h/2)
+        paste_x = center_x - rot_w // 2
+        paste_y = center_y - rot_h // 2
 
         frame = Image.new("RGB", target_size, (0, 0, 0))
         frame.paste(rotated_img, (int(paste_x), int(paste_y)), rotated_img if rotated_img.mode == 'RGBA' else None)
