@@ -13,7 +13,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         end_sec: End of the section to replace (seconds)
         image_path: Path to the image to insert
         target_size: Target size (width, height) of the video
-        animation_type: Type of animation ("zoom", "falling", "swinging", "horizontal_bounce", "random")
+        animation_type: Type of animation ("zoom", "falling", "swinging", "horizontal_bounce", "spinning_mirror", "fade", "random")
     """
     duration = end_sec - start_sec
     audio_clip = main_clip.subclipped(start_sec, end_sec).audio
@@ -34,7 +34,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
 
     # Select animation if random
     if animation_type == "random":
-        animations = ["spinning_mirror"]
+        animations = ["zoom", "falling", "swinging", "horizontal_bounce", "spinning_mirror", "fade"]
         animation_type = random.choice(animations)
 
     # Define the animation functions
@@ -179,6 +179,47 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         frame.paste(resized_img, (int(paste_x), int(paste_y)), resized_img if resized_img.mode == 'RGBA' else None)
         return np.array(frame)
 
+    def fade_animation(t, progress):
+        """Image fades in from black to full opacity in 0.5s, then stays"""
+        # Use same scale as zoom (fully visible, max size without overflow)
+        scale_factor = min(target_w / img_w, target_h / img_h)
+        final_w = int(img_w * scale_factor)
+        final_h = int(img_h * scale_factor)
+        center_x = target_w // 2
+        center_y = target_h // 2  # Centre final de l'écran
+
+        # Durée du fondu (en secondes)
+        fade_duration = 0.9  # 0.5 seconde pour le fondu
+        fade_progress = min(t / fade_duration, 1.0)  # Progression sur 0.5s
+
+        # Convertir l'image en RGBA si elle ne l'est pas déjà
+        img_rgba = img.convert("RGBA") if img.mode != "RGBA" else img
+
+        # Redimensionner l'image à la taille finale
+        resized_img = img_rgba.resize((final_w, final_h), Image.Resampling.NEAREST)
+
+        # Calculer l'opacité (0 à 255) en fonction de la progression du fondu
+        alpha = int(255 * fade_progress)  # Transition linéaire sur 0.5s
+
+        # Créer une copie de l'image avec l'opacité ajustée
+        faded_img = Image.new("RGBA", resized_img.size, (0, 0, 0, 0))  # Fond transparent
+        faded_data = resized_img.split()
+        faded_img = Image.merge("RGBA", (
+            faded_data[0],  # R
+            faded_data[1],  # G
+            faded_data[2],  # B
+            faded_data[3].point(lambda x: x * alpha // 255)  # Ajuster alpha
+        ))
+
+        # Position pour centrer l'image
+        paste_x = center_x - final_w // 2
+        paste_y = center_y - final_h // 2
+
+        # Créer le frame avec fond noir
+        frame = Image.new("RGB", target_size, (0, 0, 0))
+        frame.paste(faded_img, (int(paste_x), int(paste_y)), faded_img)
+        return np.array(frame)
+
     # Main frame generator
     def make_frame(t):
         progress = min(t / duration, 1.0)
@@ -193,6 +234,8 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
             return swinging_animation(t, progress)
         elif animation_type == "spinning_mirror":
             return spinning_mirror_animation(t, progress)
+        elif animation_type == "fade":
+            return fade_animation(t, progress)
         else:
             return zoom_animation(t, progress)  # fallback
 
