@@ -34,7 +34,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
 
     # Select animation if random
     if animation_type == "random":
-        animations = ["zoom", "falling", "swinging", "horizontal_bounce"]
+        animations = ["falling", "swinging"]
         animation_type = random.choice(animations)
 
     # Define the animation functions
@@ -59,79 +59,99 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         return np.array(frame)
 
     def falling_animation(t, progress):
-        """Image falls from above with bounce effect to normal position"""
-        # Start position (above screen)
-        start_y = -base_h
-        end_y = normal_y
+        """Image falls from mid-height with acceleration, bounces, then stabilizes"""
+        # Start position (mid-height)
+        start_y = target_h // 4  # Mi-hauteur approximative
 
-        # Bounce animation (easeOutBounce approximation)
-        if progress < 0.7:
-            # Falling phase (70% of time)
-            y_pos = start_y + (end_y - start_y + 100) * (progress / 0.7)
-        else:
-            # Bounce phase (30% of time)
-            bounce_progress = (progress - 0.7) / 0.3
+        # Use same scale as zoom (fully visible, max size without overflow)
+        scale_factor = min(target_w / img_w, target_h / img_h)
+        final_w = int(img_w * scale_factor)
+        final_h = int(img_h * scale_factor)
+        paste_x = (target_w - final_w) // 2
+        paste_y = (target_h - final_h) // 2  # Final position matches zoom start
+
+        if progress < 0.6:
+            # Falling phase (60% of time) with acceleration (quadratic easing)
+            fall_progress = progress / 0.6
+            y_pos = start_y + (paste_y - start_y) * (fall_progress ** 2)  # Accélération
+        elif progress < 0.8:
+            # Bounce phase (20% of time)
+            bounce_progress = (progress - 0.6) / 0.2
             overshoot = 100 * (1 - bounce_progress)
-            y_pos = end_y - overshoot * math.sin(bounce_progress * math.pi * 2)
-
-        paste_x = normal_x
-        paste_y = int(max(0, y_pos))
+            y_pos = paste_y - overshoot * math.sin(bounce_progress * math.pi)
+        else:
+            # Stable phase (20% of time)
+            y_pos = paste_y
 
         frame = Image.new("RGB", target_size, (0, 0, 0))
-        frame.paste(img.resize((base_w, base_h), Image.Resampling.LANCZOS), (paste_x, paste_y))
-        return np.array(frame)
-
-    def horizontal_bounce_animation(t, progress):
-        """Horizontal bouncing animation"""
-        # Start position (left of screen)
-        start_x = -base_w
-        end_x = normal_x
-
-        if progress < 0.7:
-            # Sliding phase (70% of time)
-            x_pos = start_x + (end_x - start_x + 100) * (progress / 0.7)
-        else:
-            # Bounce phase (30% of time)
-            bounce_progress = (progress - 0.7) / 0.3
-            overshoot = 100 * (1 - bounce_progress)
-            x_pos = end_x - overshoot * math.sin(bounce_progress * math.pi * 2)
-
-        paste_x = int(max(0, x_pos))
-        paste_y = normal_y
-
-        frame = Image.new("RGB", target_size, (0, 0, 0))
-        frame.paste(img.resize((base_w, base_h), Image.Resampling.LANCZOS), (paste_x, paste_y))
+        frame.paste(img.resize((final_w, final_h), Image.Resampling.NEAREST), (paste_x, int(y_pos)))
         return np.array(frame)
 
     def swinging_animation(t, progress):
-        """Pendulum swing from top-left corner"""
-        # Anchor point (top-left corner)
-        anchor_x = 0
-        anchor_y = 0
+        """Image rotates from its top-right edge with a small bounce before stabilizing"""
+        # Use same scale as zoom (fully visible, max size without overflow)
+        scale_factor = min(target_w / img_w, target_h / img_h)
+        final_w = int(img_w * scale_factor)
+        final_h = int(img_h * scale_factor)
+        end_x = (target_w - final_w) // 2
+        end_y = (target_h - final_h) // 2  # Final position matches zoom start
 
-        # Pendulum length (distance to normal position)
-        length_x = normal_x - anchor_x
-        length_y = normal_y - anchor_y
+        # Pivot point: top-right corner of the image at final position
+        pivot_x = end_x + final_w
+        pivot_y = end_y
 
-        if progress < 0.4:
-            # Initial drop (40% of time)
-            swing_progress = progress / 0.4
-            angle = -math.pi/2 * (1 - swing_progress)
+        if progress < 0.5:
+            # Initial rotation (50% of time) from -90° to 0°
+            swing_progress = progress / 0.5
+            angle = -math.pi / 2 * (1 - swing_progress)  # De -90° à 0°
+        elif progress < 0.7:
+            # Small bounce (20% of time)
+            bounce_progress = (progress - 0.5) / 0.2
+            angle = (math.pi / 8) * (1 - bounce_progress) * math.sin(bounce_progress * math.pi * 2)
         else:
-            # Swinging phase (60% of time)
-            swing_progress = (progress - 0.4) / 0.6
-            # Damped oscillation
-            angle = (math.pi/8) * math.exp(-swing_progress * 3) * math.sin(swing_progress * math.pi * 4)
+            # Stable phase (30% of time)
+            angle = 0
 
-        # Calculate position along arc
-        x_pos = anchor_x + length_x * (1 - math.cos(angle))
-        y_pos = anchor_y + length_y * math.sin(abs(angle))
+        # Rotate image around its top-right corner
+        rotated_img = img.resize((final_w, final_h), Image.Resampling.NEAREST).rotate(
+            math.degrees(angle), expand=True, resample=Image.Resampling.NEAREST
+        )
+        rot_w, rot_h = rotated_img.size
 
-        paste_x = int(max(0, x_pos))
-        paste_y = int(max(0, y_pos))
+        # Calculate position to keep pivot (top-right) fixed
+        paste_x = pivot_x - rot_w * math.cos(angle) - rot_h * math.sin(angle)
+        paste_y = pivot_y - rot_w * math.sin(angle) + rot_h * math.cos(angle)
 
         frame = Image.new("RGB", target_size, (0, 0, 0))
-        frame.paste(img.resize((base_w, base_h), Image.Resampling.LANCZOS), (paste_x, paste_y))
+        frame.paste(rotated_img, (int(paste_x), int(paste_y)), rotated_img if rotated_img.mode == 'RGBA' else None)
+        return np.array(frame)
+
+    def horizontal_bounce_animation(t, progress):
+        """Horizontal bounce with 1-2 bounces then stabilizes"""
+        # Start position (left of screen)
+        start_x = -base_w
+
+        # Use same scale as zoom (fully visible, max size without overflow)
+        scale_factor = min(target_w / img_w, target_h / img_h)
+        final_w = int(img_w * scale_factor)
+        final_h = int(img_h * scale_factor)
+        end_x = (target_w - final_w) // 2
+        paste_y = (target_h - final_h) // 2  # Final position matches zoom start
+
+        if progress < 0.5:
+            # Sliding phase (50% of time)
+            x_pos = start_x + (end_x - start_x + 100) * (progress / 0.5)
+        elif progress < 0.8:
+            # Bounce phase (30% of time)
+            bounce_progress = (progress - 0.5) / 0.3
+            overshoot = 100 * math.sin(bounce_progress * math.pi * 2) * (1 - bounce_progress)
+            x_pos = end_x - overshoot
+        else:
+            # Stable phase (20% of time)
+            x_pos = end_x
+
+        frame = Image.new("RGB", target_size, (0, 0, 0))
+        frame.paste(img.resize((final_w, final_h), Image.Resampling.LANCZOS), (int(x_pos), paste_y))
         return np.array(frame)
 
     # Main frame generator
