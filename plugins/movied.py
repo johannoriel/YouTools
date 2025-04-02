@@ -8,6 +8,7 @@ import streamlit as st
 import pandas as pd
 import os
 from video_utils import *
+from video_anim import replace_with_image
 import json
 from moviepy import VideoFileClip
 from media_selector import media_selector
@@ -137,7 +138,7 @@ class MoviedPlugin(Plugin):
     def setup_controls(self):
         with st.expander("Options"):
             selected_model = st.selectbox(t("movied_model_label"), [
-                                          "base", "medium", "turbo", "large-v3", "large-v3-turbo"], index=0)
+                                          "base", "medium", "turbo", "large-v3", "large-v3-turbo"], index=4)
             thumbnail_size = st.selectbox(
                 "Thumbnail Size",
                 ["small", "medium", "large"],
@@ -354,7 +355,7 @@ class MoviedPlugin(Plugin):
                     dir_path) if os.path.isfile(os.path.join(dir_path, f))]
                 for file in files:
                     full_path = os.path.join(dir_path, file)
-                    if file.lower().endswith((".jpg", ".png")):
+                    if file.lower().endswith((".jpg", ".png", ".jpeg")):
                         base64_url = image_to_base64(full_path)
                         if base64_url:
                             media_files["images"].append({
@@ -387,7 +388,7 @@ class MoviedPlugin(Plugin):
         col1, col2, col3 = st.columns([1, 1, 1])  # 3 colonnes égales
         with col2:  # Colonne centrale pour la prévisualisation
             st.subheader("Preview")
-            if media_path.lower().endswith(('.jpg', '.png')):
+            if media_path.lower().endswith(('.jpg', '.png', '.jpeg')):
                 st.image(media_path, use_container_width=True)  # Ajuste à la largeur de la colonne
             elif media_path.lower().endswith(('.mp4', '.mkv', '.avi')):
                 st.video(media_path, format="video/mp4", autoplay=True)
@@ -421,11 +422,11 @@ class MoviedPlugin(Plugin):
             return
 
         # Extension selection
-        all_extensions = [".jpg", ".png", ".mp4", ".mkv", ".avi"]
+        all_extensions = [".jpg", ".png", ".jpeg", ".mp4", ".mkv", ".avi"]
         selected_extensions = col2.multiselect(
             "Filter by File Extensions",
             options=all_extensions,
-            default=[".mp4", ".png", ".jpg"],
+            default=[".mp4", ".png", ".jpg", ".jpeg"],
             key="extension_select"
         )
 
@@ -445,7 +446,7 @@ class MoviedPlugin(Plugin):
             self.show_media_preview(selected_media)
 
         # Determine media type
-        is_image = selected_media and any(selected_media.lower().endswith(ext) for ext in [".jpg", ".png"])
+        is_image = selected_media and any(selected_media.lower().endswith(ext) for ext in [".jpg", ".png", ".jpeg"])
         is_video = selected_media and any(selected_media.lower().endswith(ext) for ext in [".mp4", ".mkv", ".avi"])
         has_media = bool(selected_media)
 
@@ -589,10 +590,6 @@ class MoviedPlugin(Plugin):
     def execute_operations(self, video_path, vtt_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
             try:
-                from video_utils import (replace_with_image, insert_video,
-                                         replace_with_video, replace_video_keep_audio,
-                                         add_animated_text, remove_section)
-
                 main_clip = VideoFileClip(video_path)
                 target_size = (main_clip.w, main_clip.h)
                 subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
