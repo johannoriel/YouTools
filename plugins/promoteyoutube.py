@@ -9,6 +9,7 @@ from youtube_api import YoutubeAPI
 from datetime import datetime
 import pytz
 from youtube_db import *
+from plugins.automarket import AutomarketPlugin
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -207,13 +208,15 @@ class PromoteyoutubePlugin(Plugin):
             comments.extend(video_comments)
         return comments
 
-    def generate_responses(self, config, selected_comments, transcript, url, prefix="promo_"):
+    def generate_responses(self, config, selected_comments, transcript, url, prefix="promo_", keyword=""):
         """Génère les réponses pour les commentaires sélectionnés."""
         ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         responses = []
         total_comments = len(selected_comments)
         progress_bar = st.progress(0)
         progress_text = st.empty()
+        if keyword == "" or keyword is None:
+            raise ValueError("Keywords cannot be empty or None")
 
         for idx, comment_index in enumerate(selected_comments):
             progress = (idx + 1) / total_comments
@@ -240,7 +243,12 @@ class PromoteyoutubePlugin(Plugin):
             responses.append({
                 'comment_id': comment['id'],
                 'response': clean_response,
-                'comment_index': comment_index
+                'response_text': clean_response,
+                'target_video_id': comment['video_id'],
+                'comment_index': comment_index,
+                'channel_id': comment['channel_id'],
+                'keyword': keyword,
+                'comment_text': comment['text'],
             })
 
         progress_bar.empty()
@@ -430,7 +438,7 @@ class PromoteyoutubePlugin(Plugin):
 
         return [i for i, selected in st.session_state[f"{prefix}selected_videos"].items() if selected]
 
-    def select_and_process_comments(self, config, selected_video_indices, campaign_video, max_comments, prefix="promo_"):
+    def select_and_process_comments(self, config, selected_video_indices, campaign_video, max_comments, prefix="promo_", keywords=""):
         """Gère la sélection des commentaires et le traitement des réponses."""
         transcript = campaign_video.get('transcript', '')
         url = campaign_video['url']
@@ -508,7 +516,7 @@ class PromoteyoutubePlugin(Plugin):
                     selected_comments = [
                         i for i, sel in st.session_state[f"{prefix}selected_comments"].items() if sel]
                     responses = self.generate_responses(
-                        config, selected_comments, transcript, url, prefix)
+                        config, selected_comments, transcript, url, prefix, keywords)
                     st.session_state[f"{prefix}generated_responses"] = responses
                     st.session_state[f"{prefix}selected_responses"] = {
                         i: False for i in range(len(responses))}
@@ -582,11 +590,12 @@ class PromoteyoutubePlugin(Plugin):
                         ]
                         campaign_id = st.session_state.get(
                             f"{prefix}campaign_id", datetime.now(pytz.UTC).isoformat())
-                        self.post_responses(
+                        automarket = self.plugin_manager.get_plugin('automarket')
+                        automarket.post_responses(
                             config, selected_responses, campaign_id)
                         st.success(t("promoteyoutube_success"))
 
-    def run_campaign(self, config, target_videos, campaign_video, max_comments, prefix="promo_"):
+    def run_campaign(self, config, target_videos, campaign_video, max_comments, prefix="promo_", keywords=""):
         """Exécute une campagne en deux étapes : sélection des vidéos puis des commentaires."""
         if f"{prefix}selected_video_indices" not in st.session_state:
             st.session_state[f"{prefix}selected_video_indices"] = []
@@ -609,7 +618,7 @@ class PromoteyoutubePlugin(Plugin):
         # Étape 2 : Gestion des commentaires si des vidéos sont sélectionnées
         if st.session_state[f"{prefix}selected_video_indices"]:
             self.select_and_process_comments(
-                config, st.session_state[f"{prefix}selected_video_indices"], campaign_video, max_comments, prefix)
+                config, st.session_state[f"{prefix}selected_video_indices"], campaign_video, max_comments, prefix, keywords)
 
     def run(self, config):
         st.header(t("promoteyoutube_header"))
@@ -633,9 +642,11 @@ class PromoteyoutubePlugin(Plugin):
             key="promo_url",
             disabled=os.path.exists(url_path)
         )
+        if not 'keywords' in st.session_state:
+            st.session_state['keywords'] = ''
+        st.session_state.keywords = st.text_input(
+            t("promoteyoutube_keywords"), key="promo_keywords", value=st.session_state.keywords)
 
-        keywords = st.text_input(
-            t("promoteyoutube_keywords"), key="promo_keywords")
         max_videos = st.number_input(
             t("promoteyoutube_max_videos_label"),
             min_value=1,
@@ -651,10 +662,10 @@ class PromoteyoutubePlugin(Plugin):
         if st.button(t("promoteyoutube_search"), key="promo_search"):
             with st.spinner(t("promoteyoutube_searching")):
                 target_videos = self.search_videos(
-                    keywords, max_videos, "relevance")
+                    st.session_state.keywords, max_videos, "relevance")
                 st.session_state["promo_target_videos"] = target_videos
 
         # Utiliser target_videos depuis session_state
         if st.session_state["promo_target_videos"]:
             self.run_campaign(config, st.session_state["promo_target_videos"], {
-                              'url': url, 'transcript': transcript}, 2, prefix="promo_")
+                              'url': url, 'transcript': transcript}, 2, prefix="promo_", keywords=st.session_state.keywords)
