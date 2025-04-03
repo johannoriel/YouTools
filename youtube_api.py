@@ -526,7 +526,12 @@ class YoutubeAPI:
             self.track_quota_usage(100)
 
             videos = []
-            video_ids = [item['id']['videoId'] for item in response['items']]
+            video_ids = []
+            for item in response['items']:
+                if 'videoId' in item['id']:
+                    video_ids.append(item['id']['videoId'])
+                else:
+                    print(f"Item filtré (n'a pas videoId): {item}")
 
             # Requête groupée pour les détails des vidéos
             if video_ids:
@@ -543,6 +548,8 @@ class YoutubeAPI:
                     item['id']: item for item in video_details_response['items']}
 
                 for item in response['items']:
+                    if 'videoId' not in item['id']:
+                        continue
                     video_id = item['id']['videoId']
                     details = video_details_map.get(video_id, {})
                     title = item['snippet']['title']
@@ -583,6 +590,7 @@ class YoutubeAPI:
             return videos[:max_results]
         except Exception as e:
             print(f"YouTube API Error (search_videos): {str(e)}")
+            raise e
             return []
 
     def get_trending_videos(self, language: str = "fr", category_id: int = 0, max_results: int = 50) -> List[Dict[str, Any]]:
