@@ -112,3 +112,156 @@ class CanvaAPI:
     def download(self, media_info: Dict, dest_dir: str) -> str:
         """Télécharge un média depuis Canva"""
         raise NotImplementedError("Canva API not fully implemented yet")
+
+import requests
+from io import BytesIO
+import os
+import shutil
+from typing import Dict, List
+from bs4 import BeautifulSoup  # Pour le scraping si besoin
+
+class GoogleImageAPI:
+    def __init__(self):
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
+
+    def search(self, keywords: str, api_key: str, cx: str, num_results: int = 10) -> List[Dict]:
+        """
+        Recherche d'images via Google Custom Search API
+        :param keywords: Mots-clés de recherche
+        :param api_key: Clé API Google
+        :param cx: ID du moteur de recherche personnalisé (Custom Search Engine ID)
+        :param num_results: Nombre de résultats (max 10 par requête)
+        """
+        params = {
+            "q": keywords,
+            "searchType": "image",
+            "key": api_key,
+            "cx": cx,
+            "num": min(num_results, 10)  # Google limite à 10 par requête
+        }
+
+        response = requests.get(self.base_url, params=params)
+        if response.status_code != 200:
+            raise Exception(f"Google API error: {response.text}")
+
+        data = response.json()
+        results = []
+
+        for item in data.get("items", []):
+            title = item.get("title", f"Image {item.get('link', '').split('/')[-1]}")
+            results.append({
+                "id": item.get("link", "").split("/")[-1] or str(uuid.uuid4()),  # ID basé sur URL ou UUID
+                "url": item.get("image", {}).get("thumbnailLink", ""),  # Aperçu
+                "name": title,
+                "date": item.get("snippet", ""),
+                "original_url": item["link"],  # URL originale de l'image
+                "type": "photo"
+            })
+
+        return results
+
+    def download(self, media_info: Dict, dest_dir: str) -> str:
+        """Télécharge une image depuis Google"""
+        os.makedirs(dest_dir, exist_ok=True)
+        url = media_info["original_url"]
+        ext = os.path.splitext(url.split('?')[0])[1] or ".jpg"
+        filename = f"{media_info['name']}{ext}"
+        filepath = os.path.join(dest_dir, filename)
+
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            with open(filepath, 'wb') as f:
+                shutil.copyfileobj(response.raw, f)
+            return filepath
+        raise Exception(f"Download failed: {response.status_code}")
+
+    def memory_download(self, media_info: Dict) -> tuple:
+        """Télécharge une image en mémoire"""
+        url = media_info["original_url"]
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            file_data = BytesIO()
+            for chunk in response.iter_content(chunk_size=8192):
+                file_data.write(chunk)
+            file_data.seek(0)
+            return file_data, "photo"
+        raise Exception(f"Download failed: {response.status_code}")
+
+
+class DuckDuckGoImageAPI:
+    def __init__(self):
+        self.base_url = "https://duckduckgo.com/"
+
+    def search(self, keywords: str, max_results: int = 10) -> List[Dict]:
+        """
+        Recherche d'images via DuckDuckGo (scraping basique car pas d'API officielle)
+        :param keywords: Mots-clés de recherche
+        :param max_results: Nombre maximum de résultats
+        """
+        params = {"q": keywords, "t": "h_", "iar": "images", "iax": "images"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+        # Première requête pour obtenir le token vqd
+        response = requests.get(self.base_url, params=params, headers=headers)
+        if response.status_code != 200:
+            raise Exception(f"DuckDuckGo error: {response.status_code}")
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        vqd = None
+        for script in soup.find_all("script"):
+            if "vqd=" in str(script):
+                vqd = str(script).split("vqd='")[1].split("'")[0]
+                break
+
+        if not vqd:
+            raise Exception("Could not extract vqd token")
+
+        # Requête pour les images
+        image_url = "https://duckduckgo.com/i.js"
+        params = {"q": keywords, "vqd": vqd, "l": "us-en", "o": "json", "p": "1"}
+        response = requests.get(image_url, params=params, headers=headers)
+        if response.status_code != 200:
+            raise Exception(f"DuckDuckGo image fetch error: {response.status_code}")
+
+        data = response.json()
+        results = []
+
+        for i, item in enumerate(data.get("results", [])[:max_results]):
+            title = item.get("title", f"Image {i}")
+            results.append({
+                "id": str(uuid.uuid4()),  # Pas d'ID natif, on génère un UUID
+                "url": item.get("thumbnail", ""),  # Aperçu
+                "name": title,
+                "date": "",  # Pas de date disponible facilement
+                "original_url": item["image"],  # URL originale
+                "type": "photo"
+            })
+
+        return results
+
+    def download(self, media_info: Dict, dest_dir: str) -> str:
+        """Télécharge une image depuis DuckDuckGo"""
+        os.makedirs(dest_dir, exist_ok=True)
+        url = media_info["original_url"]
+        ext = os.path.splitext(url.split('?')[0])[1] or ".jpg"
+        filename = f"{media_info['name']}{ext}"
+        filepath = os.path.join(dest_dir, filename)
+
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            with open(filepath, 'wb') as f:
+                shutil.copyfileobj(response.raw, f)
+            return filepath
+        raise Exception(f"Download failed: {response.status_code}")
+
+    def memory_download(self, media_info: Dict) -> tuple:
+        """Télécharge une image en mémoire"""
+        url = media_info["original_url"]
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            file_data = BytesIO()
+            for chunk in response.iter_content(chunk_size=8192):
+                file_data.write(chunk)
+            file_data.seek(0)
+            return file_data, "photo"
+        raise Exception(f"Download failed: {response.status_code}")

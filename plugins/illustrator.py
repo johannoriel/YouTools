@@ -5,7 +5,7 @@ from plugins.common import remove_quotes
 import os
 import shutil
 from media_selector import media_selector, remote_media_selector
-from assets_api import PexelsAPI, CanvaAPI
+from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI
 from io import BytesIO
 from youtube_api import YoutubeAPI
 
@@ -104,7 +104,8 @@ class IllustratorPlugin(Plugin):
         super().__init__(name, plugin_manager)
         self.apis = {
             "pexels": PexelsAPI(),
-            "canva": CanvaAPI()
+            "google": GoogleImageAPI(),
+            "duckduckgo": DuckDuckGoImageAPI()
         }
 
     def get_config_fields(self):
@@ -125,10 +126,11 @@ class IllustratorPlugin(Plugin):
                 "label": "Pexels API Key",
                 "default": ""
             },
-            "canva_api_key": {
+            "google_cx": {
                 "type": "text",
-                "label": "Canva API Key",
-                "default": ""
+                "label": "Google Custom Search Engine ID",
+                "default": "",
+                "help": "Required for Google Image Search"
             }
         }
 
@@ -336,93 +338,111 @@ class IllustratorPlugin(Plugin):
                 self.show_media_preview(selected_media)
 
     def run_search_assets_tab(self, config):
-            """Onglet de recherche de nouveaux assets"""
-            st.header(t("illustrator_search_tab"))
-            stored_dir = self.expand_path(config.get(self.name, {}).get(
-                "illustrator_stored_dir", t("illustrator_config_default_stored")))
-            current_dir = self.expand_path(config.get(self.name, {}).get(
-                "illustrator_current_dir", t("illustrator_config_default_current")))
+        """Onglet de recherche de nouveaux assets"""
+        st.header(t("illustrator_search_tab"))
+        stored_dir = self.expand_path(config.get(self.name, {}).get(
+            "illustrator_stored_dir", t("illustrator_config_default_stored")))
+        current_dir = self.expand_path(config.get(self.name, {}).get(
+            "illustrator_current_dir", t("illustrator_config_default_current")))
 
-            # Initialisation des variables de session
-            if 'search_results' not in st.session_state:
-                st.session_state.search_results = None
-            if 'selected_item' not in st.session_state:
-                st.session_state.selected_item = None
-            if 'media_buffer' not in st.session_state:
-                st.session_state.media_buffer = None
-            if 'media_type' not in st.session_state:
-                st.session_state.media_type = None
+        # Initialisation des variables de session
+        if 'search_results' not in st.session_state:
+            st.session_state.search_results = None
+        if 'selected_item' not in st.session_state:
+            st.session_state.selected_item = None
+        if 'media_buffer' not in st.session_state:
+            st.session_state.media_buffer = None
+        if 'media_type' not in st.session_state:
+            st.session_state.media_type = None
 
-            # Configuration des API
-            api_keys = {
-                "pexels": config.get(self.name, {}).get("pexels_api_key", ""),
-                "canva": config.get(self.name, {}).get("canva_api_key", "")
-            }
-
-            # Sélection de l'API et type de média
-            col1, col2 = st.columns(2)
-            with col1:
-                selected_api = st.selectbox(
-                    t("illustrator_search_api"), list(self.apis.keys()))
-            with col2:
-                media_type = st.selectbox(
-                    t("illustrator_media_type"),
-                    ["photos", "videos", "both"],
-                    format_func=lambda x: t(f"illustrator_{x}")
-                )
-
-            if not api_keys[selected_api]:
-                st.error(f"API key for {selected_api} is not configured")
-                return
-
-            # Recherche
-            if 'search_triggered' not in st.session_state:
-                    st.session_state.search_triggered = False
-
-            def trigger_search():
-                st.session_state.search_triggered = True
-
-            keywords = st.text_input(
-                t("illustrator_search_keywords"),
-                key="search_keywords",
-                on_change=trigger_search
+        # Sélection de l'API et type de média
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_api = st.selectbox(
+                t("illustrator_search_api"), list(self.apis.keys()))
+        with col2:
+            # DuckDuckGo ne supporte que les photos
+            media_types = ["photos"] if selected_api == "duckduckgo" else ["photos", "videos", "both"]
+            media_type = st.selectbox(
+                t("illustrator_media_type"),
+                media_types,
+                format_func=lambda x: t(f"illustrator_{x}")
             )
 
-            # Déclencher la recherche soit avec Enter soit avec le bouton
-            if (st.session_state.search_triggered or st.button(t("illustrator_search_button"))) and keywords:
-                with st.spinner("Searching..."):
-                    try:
-                        results = []
+        # Vérification des configurations nécessaires
+        if selected_api == "pexels" and not config.get(self.name, {}).get("pexels_api_key"):
+            st.error("API key for Pexels is not configured")
+            return
+        if selected_api == "google":
+            if not config.get('common', {}).get('youtube_api_key'):
+                st.error("Google API key (YouTube API key) is not configured in common settings")
+                return
+            if not config.get(self.name, {}).get('google_cx'):
+                st.error("Google Custom Search Engine ID (cx) is not configured")
+                return
+
+        # Recherche
+        if 'search_triggered' not in st.session_state:
+            st.session_state.search_triggered = False
+
+        def trigger_search():
+            st.session_state.search_triggered = True
+
+        keywords = st.text_input(
+            t("illustrator_search_keywords"),
+            key="search_keywords",
+            on_change=trigger_search
+        )
+
+        # Déclencher la recherche soit avec Enter soit avec le bouton
+        if (st.session_state.search_triggered or st.button(t("illustrator_search_button"))) and keywords:
+            with st.spinner("Searching..."):
+                try:
+                    results = []
+                    if selected_api == "google":
+                        results = self.apis[selected_api].search(
+                            remove_quotes(keywords),
+                            config.get('common', {}).get('youtube_api_key'),
+                            config.get(self.name, {}).get('google_cx')
+                        )
+                    elif selected_api == "duckduckgo":
+                        results = self.apis[selected_api].search(
+                            remove_quotes(keywords)
+                        )
+                    else:  # Pexels
                         if media_type in ["photos", "both"]:
                             photos = self.apis[selected_api].search(
                                 remove_quotes(keywords),
-                                api_keys[selected_api],
+                                config.get(self.name, {}).get("pexels_api_key"),
                                 "photos"
                             )
                             results.extend(photos)
                         if media_type in ["videos", "both"]:
                             videos = self.apis[selected_api].search(
                                 remove_quotes(keywords),
-                                api_keys[selected_api],
+                                config.get(self.name, {}).get("pexels_api_key"),
                                 "videos"
                             )
                             results.extend(videos)
 
-                        formatted_results = []
-                        for item in results:
-                            formatted_results.append({
-                                'url': item['url'],
-                                'name': item.get('name', f"Media {item['id']}"),
-                                'date': item.get('date', 0),
-                                'original_data': item
-                            })
-                        st.session_state.search_results = formatted_results
-                        # Réinitialiser la sélection quand on fait une nouvelle recherche
-                        st.session_state.selected_item = None
-                        st.session_state.media_buffer = None
-                        st.session_state.media_type = None
-                    except Exception as e:
-                        st.error(f"Search error: {str(e)}")
+                    formatted_results = []
+                    for item in results:
+                        formatted_results.append({
+                            'url': item['url'],
+                            'name': item.get('name', f"Media {item['id']}"),
+                            'date': item.get('date', 0),
+                            'original_data': item
+                        })
+                    st.session_state.search_results = formatted_results
+                    # Réinitialiser la sélection quand on fait une nouvelle recherche
+                    st.session_state.selected_item = None
+                    st.session_state.media_buffer = None
+                    st.session_state.media_type = None
+                except Exception as e:
+                    st.error(f"Search error: {str(e)}")
+
+        # Le reste de la méthode reste inchangé...
+        # [Affichage des résultats et options de téléchargement]
 
             # Affichage des résultats
             if st.session_state.search_results:
