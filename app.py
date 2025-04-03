@@ -205,13 +205,6 @@ def main():
     plugin_manager.load_core_plugins()
     plugin_manager.load_starred_plugins(config)
 
-    # Load environment variables
-    load_dotenv()
-    API_KEY = os.getenv("YOUTUBE_API_KEY")
-    LLM_KEY = os.getenv("LLM_API_KEY")
-    config['api_key'] = API_KEY
-    config['llm_key'] = LLM_KEY
-
     # Create tabs
     tabs = [{"id": "configurations", "name": t(
         "configurations")}] + plugin_manager.get_all_tabs()

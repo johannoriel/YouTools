@@ -109,7 +109,7 @@ class RecentvideosPlugin(Plugin):
 
     def run(self, config):
         st.header(t("recent_videos_header"))
-        api_key = config['api_key']
+        api_key = config['common']['youtube_api_key']
 
         if 'channel_id' in config['common'] and config['common']['channel_id']:
             # Utilisation de YoutubeAPI pour récupérer toutes les vidéos

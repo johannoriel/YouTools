@@ -80,6 +80,11 @@ class CommonPlugin(Plugin):
                 "label": "YouTube project number",
                 "default": ""
             },
+            "youtube_api_key": {  # Nouveau champ pour la clé API
+                "type": "text",
+                "label": "YouTube API Key",
+                "default": ""
+            },
             "work_directory": {
                 "type": "text",
                 "label": t("work_directory"),
