@@ -639,7 +639,7 @@ class MoviedPlugin(Plugin):
                         if cmd == "replace_image":
                             image_path = remaining_args
                             main_clip = replace_with_image(
-                                main_clip, start_sec, end_sec, image_path, target_size, background_type)
+                                main_clip, start_sec, end_sec, image_path, target_size, background=background_type)
                             operation_log.append(
                                 {"Nature": "replace_image", "Details": image_path, "Start": real_start, "End": real_end})
 
