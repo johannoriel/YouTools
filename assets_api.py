@@ -200,6 +200,17 @@ class DuckDuckGoImageAPI:
         """
         params = {"q": keywords, "t": "h_", "iar": "images", "iax": "images"}
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        headers = {
+                'authority': 'duckduckgo.com',
+                'accept': 'application/json, text/javascript, */*; q=0.01',
+                'sec-fetch-dest': 'empty',
+                'x-requested-with': 'XMLHttpRequest',
+                'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.163 Safari/537.36',
+                'sec-fetch-site': 'same-origin',
+                'sec-fetch-mode': 'cors',
+                'referer': 'https://duckduckgo.com/',
+                'accept-language': 'en-US,en;q=0.9',
+            }
 
         # Première requête pour obtenir le token vqd
         response = requests.get(self.base_url, params=params, headers=headers)
@@ -210,7 +221,7 @@ class DuckDuckGoImageAPI:
         vqd = None
         for script in soup.find_all("script"):
             if "vqd=" in str(script):
-                vqd = str(script).split("vqd='")[1].split("'")[0]
+                vqd = str(script).split('vqd="')[1].split('"')[0]
                 break
 
         if not vqd:
@@ -219,7 +230,18 @@ class DuckDuckGoImageAPI:
         # Requête pour les images
         image_url = "https://duckduckgo.com/i.js"
         params = {"q": keywords, "vqd": vqd, "l": "us-en", "o": "json", "p": "1"}
+        params = (
+                ('l', 'us-en'),
+                ('o', 'json'),
+                ('q', keywords),
+                ('vqd', vqd),
+                ('f', ',,,'),
+                ('p', '1'),
+                ('v7exp', 'a'),
+            )
         response = requests.get(image_url, params=params, headers=headers)
+        import streamlit as st
+        st.write(response)
         if response.status_code != 200:
             raise Exception(f"DuckDuckGo image fetch error: {response.status_code}")
 
