@@ -56,6 +56,17 @@ translations["en"].update({
     "movied_text_style_label": "Text Style",
     "movied_text_style_outline": "Outline",
     "movied_text_style_box": "Box",
+    "movied_add_to_interest": "Add",
+    "movied_remove_from_interest": "Remove",
+    "movied_merge_subtitles": "Merge",
+    "movied_multiple_selection": "Multiple Selection",
+    "movied_category": "Category",
+    "movied_complement": "Complement",
+    "movied_merge_error_not_continuous": "Cannot merge: Selected subtitles are not continuous.",
+    "movied_force_add": "Forced Add",
+    "movied_edit_subtitles": "Edit Subtitles",
+    "movied_final_selection": "Final Selection",
+    "movied_refresh": "Refresh",
 })
 
 translations["fr"].update({
@@ -100,6 +111,17 @@ translations["fr"].update({
     "movied_text_style_label": "Style de Texte",
     "movied_text_style_outline": "Contour",
     "movied_text_style_box": "Boîte",
+    "movied_add_to_interest": "Ajouter",
+    "movied_remove_from_interest": "Supprimer",
+    "movied_merge_subtitles": "Fusionner",
+    "movied_multiple_selection": "Sélection Multiple",
+    "movied_category": "Catégorie",
+    "movied_complement": "Complément",
+    "movied_merge_error_not_continuous": "Impossible de fusionner : Les sous-titres sélectionnés ne sont pas continus.",
+    "movied_force_add": "Ajout Forcé",
+    "movied_edit_subtitles": "Éditer les Sous-titres",
+    "movied_final_selection": "Sélection Finale",
+    "movied_refresh": "Rafraîchir",
 })
 
 
@@ -259,7 +281,7 @@ class MoviedPlugin(Plugin):
         return selected_video
 
     def handle_transcript(self, selected_video, video_df, selected_model):
-        # Existing method to handle the first subtitle selection
+        # Step 1: Display all subtitles with "Add" and "Forced Add" buttons
         if selected_video["selection"]["rows"]:
             idx = selected_video["selection"]["rows"][0]
             video_info = video_df.iloc[idx]
@@ -305,39 +327,183 @@ class MoviedPlugin(Plugin):
                     key="subtitle_selector",
                     hide_index=True
                 )
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(t("movied_add_to_interest")) and selected_subtitles["selection"]["rows"]:
+                        selected_indices = selected_subtitles["selection"]["rows"]
+                        if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
+                            new_entries = subtitles_df.iloc[selected_indices][["Start", "End", "Text"]]
+                            if "interest_subtitles_df" not in st.session_state:
+                                st.session_state["interest_subtitles_df"] = new_entries
+                            else:
+                                # Only add new entries that don't already exist
+                                existing = st.session_state["interest_subtitles_df"][["Start", "End", "Text"]]
+                                combined = pd.concat([existing, new_entries]).drop_duplicates(subset=["Start", "End", "Text"]).reset_index(drop=True)
+                                # Preserve Category and Complement if they exist
+                                if t("movied_category") in st.session_state["interest_subtitles_df"].columns:
+                                    combined = combined.merge(
+                                        st.session_state["interest_subtitles_df"][["Start", "End", "Text", t("movied_category"), t("movied_complement")]],
+                                        on=["Start", "End", "Text"],
+                                        how="left"
+                                    ).fillna({t("movied_category"): "", t("movied_complement"): ""})
+                                st.session_state["interest_subtitles_df"] = combined
+                            st.rerun()
+
+                with col2:
+                    if st.button(t("movied_force_add")) and selected_subtitles["selection"]["rows"]:
+                        selected_indices = selected_subtitles["selection"]["rows"]
+                        if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
+                            new_entries = subtitles_df.iloc[selected_indices][["Start", "End", "Text"]]
+                            if "interest_subtitles_df" not in st.session_state:
+                                st.session_state["interest_subtitles_df"] = new_entries
+                            else:
+                                # Force add, allowing duplicates
+                                combined = pd.concat([st.session_state["interest_subtitles_df"], new_entries]).reset_index(drop=True)
+                                st.session_state["interest_subtitles_df"] = combined
+                            st.rerun()
+
                 return selected_subtitles, subtitles_df, vtt_path
             return None, None, None
         return None, None, None
 
     def handle_intermediate_subtitles(self, selected_subtitles, subtitles_df):
-        # New method to handle the second subtitle selection
-        if selected_subtitles and selected_subtitles["selection"]["rows"]:
-            selected_indices = selected_subtitles["selection"]["rows"]
-            if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
-                # Create a DataFrame for the selected subtitles
-                intermediate_subtitles_df = subtitles_df.iloc[selected_indices][["Start", "End", "Text"]]
+        # Step 2: Manage interest subtitles with Remove and Merge
+        if "interest_subtitles_df" not in st.session_state or st.session_state["interest_subtitles_df"].empty:
+            st.write("No subtitles of interest selected yet.")
+            return None, None
 
-                st.write("Subtitles of Interest (Select to Edit):")
-                selected_intermediate = st.dataframe(
-                    intermediate_subtitles_df,
-                    selection_mode="multi-row",
-                    on_select="rerun",
-                    key="intermediate_subtitle_selector",
-                    hide_index=True
-                )
-                return selected_intermediate, intermediate_subtitles_df
-            else:
-                st.error("Selected subtitle index out of bounds or subtitles DataFrame is empty.")
-                return None, None
-        return None, None
+        intermediate_subtitles_df = st.session_state["interest_subtitles_df"]
 
-    def handle_section(self, selected_intermediate, intermediate_subtitles_df):
-        # Modified to work with the intermediate subtitle selection
-        if selected_intermediate and selected_intermediate["selection"]["rows"]:
-            selected_indices = selected_intermediate["selection"]["rows"]
-            if not intermediate_subtitles_df.empty and selected_indices[0] < len(intermediate_subtitles_df):
-                start_time = intermediate_subtitles_df.iloc[selected_indices[0]]["Start"]
-                end_time = intermediate_subtitles_df.iloc[selected_indices[-1]]["End"]
+        st.write("Subtitles of Interest (Manage):")
+        selected_intermediate = st.dataframe(
+            intermediate_subtitles_df[["Start", "End", "Text"]],
+            selection_mode="multi-row",
+            on_select="rerun",
+            key="intermediate_subtitle_selector",
+            hide_index=True
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button(t("movied_remove_from_interest")) and selected_intermediate["selection"]["rows"]:
+                selected_indices = selected_intermediate["selection"]["rows"]
+                # Merge edited data back to preserve Category and Complement
+                if "edited_subtitles_df" in st.session_state:
+                    edited = st.session_state["edited_subtitles_df"]
+                    intermediate_subtitles_df = intermediate_subtitles_df.merge(
+                        edited[[t("movied_category"), t("movied_complement"), "Start", "End", "Text"]],
+                        on=["Start", "End", "Text"],
+                        how="left",
+                        suffixes=("", "_edited")
+                    ).fillna({t("movied_category"): "", t("movied_complement"): ""})
+                    # Drop any duplicate columns from merge
+                    intermediate_subtitles_df = intermediate_subtitles_df[["Start", "End", "Text", t("movied_category"), t("movied_complement")]]
+                # Remove selected rows
+                intermediate_subtitles_df = intermediate_subtitles_df.drop(selected_indices).reset_index(drop=True)
+                st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
+                st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
+                st.rerun()
+
+        with col2:
+            if st.button(t("movied_merge_subtitles")) and selected_intermediate["selection"]["rows"]:
+                selected_indices = sorted(selected_intermediate["selection"]["rows"])
+                if len(selected_indices) > 1:
+                    is_continuous = True
+                    for i in range(len(selected_indices) - 1):
+                        current_end = self.parse_timecode(intermediate_subtitles_df.iloc[selected_indices[i]]["End"])
+                        next_start = self.parse_timecode(intermediate_subtitles_df.iloc[selected_indices[i + 1]]["Start"])
+                        if current_end != next_start:
+                            is_continuous = False
+                            break
+
+                    if is_continuous:
+                        start_time = intermediate_subtitles_df.iloc[selected_indices[0]]["Start"]
+                        end_time = intermediate_subtitles_df.iloc[selected_indices[-1]]["End"]
+                        merged_text = " ".join(intermediate_subtitles_df.iloc[selected_indices]["Text"].tolist())
+                        # Preserve Category and Complement from the first selected row
+                        category = intermediate_subtitles_df.iloc[selected_indices[0]].get(t("movied_category"), "")
+                        complement = intermediate_subtitles_df.iloc[selected_indices[0]].get(t("movied_complement"), "")
+                        merged_row = pd.DataFrame({
+                            "Start": [start_time],
+                            "End": [end_time],
+                            "Text": [merged_text],
+                            t("movied_category"): [category],
+                            t("movied_complement"): [complement]
+                        })
+                        # Drop selected rows and append merged row
+                        intermediate_subtitles_df = intermediate_subtitles_df.drop(selected_indices).reset_index(drop=True)
+                        intermediate_subtitles_df = pd.concat([intermediate_subtitles_df, merged_row]).reset_index(drop=True)
+                        st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
+                        st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
+                        st.rerun()
+                    else:
+                        st.error(t("movied_merge_error_not_continuous"))
+
+        return selected_intermediate, intermediate_subtitles_df
+
+    def handle_edit_subtitles(self):
+        # Step 3: Edit subtitles with st.data_editor
+        if "interest_subtitles_df" not in st.session_state or st.session_state["interest_subtitles_df"].empty:
+            st.write("No subtitles available for editing.")
+            return None
+
+        st.write(t("movied_edit_subtitles"))
+        # Use edited_subtitles_df if it exists, otherwise copy from interest_subtitles_df
+        if "edited_subtitles_df" not in st.session_state:
+            st.session_state["edited_subtitles_df"] = st.session_state["interest_subtitles_df"].copy()
+            if t("movied_category") not in st.session_state["edited_subtitles_df"].columns:
+                st.session_state["edited_subtitles_df"][t("movied_category")] = ""
+            if t("movied_complement") not in st.session_state["edited_subtitles_df"].columns:
+                st.session_state["edited_subtitles_df"][t("movied_complement")] = ""
+
+        edited_df = st.data_editor(
+            st.session_state["edited_subtitles_df"],
+            column_config={
+                "Start": st.column_config.TextColumn("Start", disabled=True),
+                "End": st.column_config.TextColumn("End", disabled=True),
+                "Text": st.column_config.TextColumn("Text", disabled=True),
+                t("movied_category"): st.column_config.SelectboxColumn(
+                    t("movied_category"),
+                    options=["", "meme", "illustration", "texte"],
+                    default=""
+                ),
+                t("movied_complement"): st.column_config.TextColumn(t("movied_complement"), default="")
+            },
+            hide_index=True,
+            key="subtitle_editor"
+        )
+        st.session_state["edited_subtitles_df"] = edited_df
+        return edited_df
+
+    def handle_final_selection(self):
+        # Step 4: Final selection with single-row mode and refresh button
+        if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
+            st.write("No edited subtitles available for final selection.")
+            return None, None
+
+        st.write(t("movied_final_selection"))
+        if st.button(t("movied_refresh")):
+            if "interest_subtitles_df" in st.session_state:
+                st.session_state["edited_subtitles_df"] = st.session_state["interest_subtitles_df"].copy()
+            st.rerun()
+
+        final_subtitles_df = st.session_state["edited_subtitles_df"]
+        selected_final = st.dataframe(
+            final_subtitles_df[[t("movied_category"), t("movied_complement"), "Start", "End", "Text"]],
+            selection_mode="single-row",
+            on_select="rerun",
+            key="final_subtitle_selector",
+            hide_index=True
+        )
+        return selected_final, final_subtitles_df
+
+    def handle_section(self, selected_final, final_subtitles_df):
+        if selected_final and selected_final["selection"]["rows"]:
+            selected_indices = selected_final["selection"]["rows"]
+            if not final_subtitles_df.empty and selected_indices[0] < len(final_subtitles_df):
+                start_time = final_subtitles_df.iloc[selected_indices[0]]["Start"]
+                end_time = final_subtitles_df.iloc[selected_indices[-1]]["End"]
 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -346,11 +512,9 @@ class MoviedPlugin(Plugin):
                     edited_end = st.text_input(t("movied_end_time"), end_time, key="end_time")
                 return edited_start, edited_end
             else:
-                st.error("Selected intermediate subtitle index out of bounds or DataFrame is empty.")
+                st.error("Selected final subtitle index out of bounds or DataFrame is empty.")
                 return None, None
         return None, None
-
-
     def list_media_files(self):
         # Clé pour stocker les vignettes dans session_state
         if "thumbnail_size" not in st.session_state:
@@ -450,10 +614,19 @@ class MoviedPlugin(Plugin):
             return
 
         # Single media selector for images and videos
+        # Use Complement as initial_search if Category is "illustration"
+        initial_search = None
+        if "final_subtitle_selector" in st.session_state and st.session_state["final_subtitle_selector"]["selection"]["rows"]:
+            selected_idx = st.session_state["final_subtitle_selector"]["selection"]["rows"][0]
+            final_df = st.session_state["edited_subtitles_df"]
+            if final_df.iloc[selected_idx][t("movied_category")] == "illustration":
+                initial_search = final_df.iloc[selected_idx][t("movied_complement")]
+
         selected_media = media_selector(
             media_dirs=dirs_to_scan,
             extensions=selected_extensions,
-            suffix="movied"
+            suffix="movied",
+            initial_search=initial_search
         )
 
         # Prévisualisation si un média est sélectionné
@@ -778,25 +951,22 @@ class MoviedPlugin(Plugin):
 
         selected_video = self.display_videos(video_df)
         selected_subtitles, subtitles_df, vtt_path = self.handle_transcript(selected_video, video_df, selected_model)
-
-        # Add intermediate subtitle selection step
         selected_intermediate, intermediate_subtitles_df = self.handle_intermediate_subtitles(selected_subtitles, subtitles_df)
-        start_time, end_time = self.handle_section(selected_intermediate, intermediate_subtitles_df)
+        edited_subtitles_df = self.handle_edit_subtitles()
+        selected_final, final_subtitles_df = self.handle_final_selection()
+        start_time, end_time = self.handle_section(selected_final, final_subtitles_df)
 
-        # Proceed with operations only if a video and intermediate subtitles are selected
         if selected_video["selection"]["rows"]:
             video_path = video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"]
-            if selected_intermediate and selected_intermediate["selection"]["rows"]:
+            if selected_final and selected_final["selection"]["rows"]:
                 self.handle_operations(start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size)
             else:
                 self.handle_operations(None, None, video_path, vtt_path, thumbnail_size, font, font_size)
         else:
             self.handle_operations(None, None, None, None, thumbnail_size, font, font_size)
 
-        # Afficher les résultats stockés dans la session après un rerun
         if "operations_log" in st.session_state:
             st.write("Operations with Real Timecodes:")
-            # Activer la sélection d'une ligne dans le DataFrame
             selected_operation = st.dataframe(
                 st.session_state["operations_log"],
                 hide_index=True,
@@ -804,8 +974,6 @@ class MoviedPlugin(Plugin):
                 on_select="rerun",
                 key="operations_log_selector"
             )
-
-            # Si une ligne est sélectionnée, récupérer le timecode de début
             start_time_seconds = None
             if selected_operation["selection"]["rows"]:
                 selected_row = selected_operation["selection"]["rows"][0]
@@ -816,7 +984,6 @@ class MoviedPlugin(Plugin):
         if "generated_video_path" in st.session_state:
             st.write("Generated Video:")
             _, col, _ = st.columns(3)
-            # Passer start_time à st.video si une ligne est sélectionnée
             col.video(
                 st.session_state["generated_video_path"],
                 start_time=start_time_seconds if start_time_seconds is not None else 0,
