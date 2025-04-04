@@ -12,6 +12,7 @@ from video_anim import replace_with_image
 import json
 from moviepy import VideoFileClip
 from media_selector import media_selector
+from datetime import datetime
 
 # Translations
 translations["en"].update({
@@ -67,6 +68,9 @@ translations["en"].update({
     "movied_edit_subtitles": "Edit Subtitles",
     "movied_final_selection": "Final Selection",
     "movied_refresh": "Refresh",
+    "movied_sort_subtitles": "Sort",
+    "movied_export": "Export",
+    "movied_import": "Import",
 })
 
 translations["fr"].update({
@@ -122,6 +126,9 @@ translations["fr"].update({
     "movied_edit_subtitles": "Éditer les Sous-titres",
     "movied_final_selection": "Sélection Finale",
     "movied_refresh": "Rafraîchir",
+    "movied_sort_subtitles": "Trier",
+    "movied_export": "Exporter",
+    "movied_import": "Importer",
 })
 
 
@@ -158,7 +165,7 @@ class MoviedPlugin(Plugin):
         st.header(t("movied_header"))
 
     def setup_controls(self):
-        with st.expander("Options"):
+        with st.sidebar.expander("Options"):
             selected_model = st.selectbox(t("movied_model_label"), [
                                           "base", "medium", "turbo", "large-v3", "large-v3-turbo"], index=4)
             thumbnail_size = st.selectbox(
@@ -276,7 +283,8 @@ class MoviedPlugin(Plugin):
             selection_mode="single-row",
             on_select="rerun",
             key="movied_selector",
-            hide_index=True
+            hide_index=True,
+            height=200
         )
         return selected_video
 
@@ -337,16 +345,14 @@ class MoviedPlugin(Plugin):
                             if "interest_subtitles_df" not in st.session_state:
                                 st.session_state["interest_subtitles_df"] = new_entries
                             else:
-                                # Only add new entries that don't already exist
                                 existing = st.session_state["interest_subtitles_df"][["Start", "End", "Text"]]
                                 combined = pd.concat([existing, new_entries]).drop_duplicates(subset=["Start", "End", "Text"]).reset_index(drop=True)
-                                # Preserve Category and Complement if they exist
-                                if t("movied_category") in st.session_state["interest_subtitles_df"].columns:
+                                if "Category" in st.session_state["interest_subtitles_df"].columns:
                                     combined = combined.merge(
-                                        st.session_state["interest_subtitles_df"][["Start", "End", "Text", t("movied_category"), t("movied_complement")]],
+                                        st.session_state["interest_subtitles_df"][["Start", "End", "Text", "Category", "Complement"]],
                                         on=["Start", "End", "Text"],
                                         how="left"
-                                    ).fillna({t("movied_category"): "", t("movied_complement"): ""})
+                                    ).fillna({"Category": "", "Complement": ""})
                                 st.session_state["interest_subtitles_df"] = combined
                             st.rerun()
 
@@ -358,7 +364,6 @@ class MoviedPlugin(Plugin):
                             if "interest_subtitles_df" not in st.session_state:
                                 st.session_state["interest_subtitles_df"] = new_entries
                             else:
-                                # Force add, allowing duplicates
                                 combined = pd.concat([st.session_state["interest_subtitles_df"], new_entries]).reset_index(drop=True)
                                 st.session_state["interest_subtitles_df"] = combined
                             st.rerun()
@@ -368,12 +373,12 @@ class MoviedPlugin(Plugin):
         return None, None, None
 
     def handle_intermediate_subtitles(self, selected_subtitles, subtitles_df):
-        # Step 2: Manage interest subtitles with Remove and Merge
+        # Step 2: Manage interest subtitles with Remove, Merge, and Sort
         if "interest_subtitles_df" not in st.session_state or st.session_state["interest_subtitles_df"].empty:
             st.write("No subtitles of interest selected yet.")
             return None, None
 
-        intermediate_subtitles_df = st.session_state["interest_subtitles_df"]
+        intermediate_subtitles_df = st.session_state["interest_subtitles_df"].copy()
 
         st.write("Subtitles of Interest (Manage):")
         selected_intermediate = st.dataframe(
@@ -384,22 +389,19 @@ class MoviedPlugin(Plugin):
             hide_index=True
         )
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             if st.button(t("movied_remove_from_interest")) and selected_intermediate["selection"]["rows"]:
                 selected_indices = selected_intermediate["selection"]["rows"]
-                # Merge edited data back to preserve Category and Complement
                 if "edited_subtitles_df" in st.session_state:
                     edited = st.session_state["edited_subtitles_df"]
                     intermediate_subtitles_df = intermediate_subtitles_df.merge(
-                        edited[[t("movied_category"), t("movied_complement"), "Start", "End", "Text"]],
+                        edited[["Category", "Complement", "Start", "End", "Text"]],
                         on=["Start", "End", "Text"],
                         how="left",
                         suffixes=("", "_edited")
-                    ).fillna({t("movied_category"): "", t("movied_complement"): ""})
-                    # Drop any duplicate columns from merge
-                    intermediate_subtitles_df = intermediate_subtitles_df[["Start", "End", "Text", t("movied_category"), t("movied_complement")]]
-                # Remove selected rows
+                    ).fillna({"Category": "", "Complement": ""})
+                    intermediate_subtitles_df = intermediate_subtitles_df[["Start", "End", "Text", "Category", "Complement"]]
                 intermediate_subtitles_df = intermediate_subtitles_df.drop(selected_indices).reset_index(drop=True)
                 st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
                 st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
@@ -421,17 +423,17 @@ class MoviedPlugin(Plugin):
                         start_time = intermediate_subtitles_df.iloc[selected_indices[0]]["Start"]
                         end_time = intermediate_subtitles_df.iloc[selected_indices[-1]]["End"]
                         merged_text = " ".join(intermediate_subtitles_df.iloc[selected_indices]["Text"].tolist())
-                        # Preserve Category and Complement from the first selected row
-                        category = intermediate_subtitles_df.iloc[selected_indices[0]].get(t("movied_category"), "")
-                        complement = intermediate_subtitles_df.iloc[selected_indices[0]].get(t("movied_complement"), "")
+                        category = intermediate_subtitles_df.iloc[selected_indices[0]].get("Category", "")
+                        complement = intermediate_subtitles_df.iloc[selected_indices[0]].get("Complement", "")
                         merged_row = pd.DataFrame({
                             "Start": [start_time],
                             "End": [end_time],
                             "Text": [merged_text],
-                            t("movied_category"): [category],
-                            t("movied_complement"): [complement]
+                            "Category": [category],
+                            "Complement": [complement]
                         })
-                        # Drop selected rows and append merged row
+                        # Ensure index is reset before dropping to avoid KeyError
+                        intermediate_subtitles_df = intermediate_subtitles_df.reset_index(drop=True)
                         intermediate_subtitles_df = intermediate_subtitles_df.drop(selected_indices).reset_index(drop=True)
                         intermediate_subtitles_df = pd.concat([intermediate_subtitles_df, merged_row]).reset_index(drop=True)
                         st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
@@ -440,22 +442,42 @@ class MoviedPlugin(Plugin):
                     else:
                         st.error(t("movied_merge_error_not_continuous"))
 
+        with col3:
+            if st.button(t("movied_sort_subtitles")):
+                intermediate_subtitles_df["Start_seconds"] = intermediate_subtitles_df["Start"].apply(self.parse_timecode)
+                intermediate_subtitles_df = intermediate_subtitles_df.sort_values("Start_seconds").drop(columns=["Start_seconds"]).reset_index(drop=True)
+                st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
+                st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
+                st.rerun()
+
         return selected_intermediate, intermediate_subtitles_df
 
     def handle_edit_subtitles(self):
-        # Step 3: Edit subtitles with st.data_editor
+        # Step 3: Edit subtitles with st.data_editor and Refresh button
         if "interest_subtitles_df" not in st.session_state or st.session_state["interest_subtitles_df"].empty:
             st.write("No subtitles available for editing.")
             return None
 
         st.write(t("movied_edit_subtitles"))
-        # Use edited_subtitles_df if it exists, otherwise copy from interest_subtitles_df
         if "edited_subtitles_df" not in st.session_state:
             st.session_state["edited_subtitles_df"] = st.session_state["interest_subtitles_df"].copy()
-            if t("movied_category") not in st.session_state["edited_subtitles_df"].columns:
-                st.session_state["edited_subtitles_df"][t("movied_category")] = ""
-            if t("movied_complement") not in st.session_state["edited_subtitles_df"].columns:
-                st.session_state["edited_subtitles_df"][t("movied_complement")] = ""
+            if "Category" not in st.session_state["edited_subtitles_df"].columns:
+                st.session_state["edited_subtitles_df"]["Category"] = ""
+            if "Complement" not in st.session_state["edited_subtitles_df"].columns:
+                st.session_state["edited_subtitles_df"]["Complement"] = ""
+
+        if st.button(t("movied_refresh"), key="refresh_edit"):
+            current_edited = st.session_state["edited_subtitles_df"]
+            new_base = st.session_state["interest_subtitles_df"].copy()
+            synced_df = new_base.merge(
+                current_edited[["Category", "Complement", "Start", "End", "Text"]],
+                on=["Start", "End", "Text"],
+                how="left",
+                suffixes=("", "_edited")
+            ).fillna({"Category": "", "Complement": ""})
+            synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
+            st.session_state["edited_subtitles_df"] = synced_df
+            st.rerun()
 
         edited_df = st.data_editor(
             st.session_state["edited_subtitles_df"],
@@ -463,12 +485,12 @@ class MoviedPlugin(Plugin):
                 "Start": st.column_config.TextColumn("Start", disabled=True),
                 "End": st.column_config.TextColumn("End", disabled=True),
                 "Text": st.column_config.TextColumn("Text", disabled=True),
-                t("movied_category"): st.column_config.SelectboxColumn(
-                    t("movied_category"),
+                "Category": st.column_config.SelectboxColumn(
+                    "Category",
                     options=["", "meme", "illustration", "texte"],
                     default=""
                 ),
-                t("movied_complement"): st.column_config.TextColumn(t("movied_complement"), default="")
+                "Complement": st.column_config.TextColumn("Complement", default="")
             },
             hide_index=True,
             key="subtitle_editor"
@@ -477,20 +499,29 @@ class MoviedPlugin(Plugin):
         return edited_df
 
     def handle_final_selection(self):
-        # Step 4: Final selection with single-row mode and refresh button
+        # Step 4: Final selection with single-row mode and unique Refresh button
         if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
             st.write("No edited subtitles available for final selection.")
             return None, None
 
         st.write(t("movied_final_selection"))
-        if st.button(t("movied_refresh")):
+        if st.button(t("movied_refresh"), key="refresh_final"):  # Unique key added
             if "interest_subtitles_df" in st.session_state:
-                st.session_state["edited_subtitles_df"] = st.session_state["interest_subtitles_df"].copy()
+                current_edited = st.session_state["edited_subtitles_df"]
+                new_base = st.session_state["interest_subtitles_df"].copy()
+                synced_df = new_base.merge(
+                    current_edited[["Category", "Complement", "Start", "End", "Text"]],
+                    on=["Start", "End", "Text"],
+                    how="left",
+                    suffixes=("", "_edited")
+                ).fillna({"Category": "", "Complement": ""})
+                synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
+                st.session_state["edited_subtitles_df"] = synced_df
             st.rerun()
 
         final_subtitles_df = st.session_state["edited_subtitles_df"]
         selected_final = st.dataframe(
-            final_subtitles_df[[t("movied_category"), t("movied_complement"), "Start", "End", "Text"]],
+            final_subtitles_df[["Category", "Complement", "Start", "End", "Text"]],
             selection_mode="single-row",
             on_select="rerun",
             key="final_subtitle_selector",
@@ -619,8 +650,8 @@ class MoviedPlugin(Plugin):
         if "final_subtitle_selector" in st.session_state and st.session_state["final_subtitle_selector"]["selection"]["rows"]:
             selected_idx = st.session_state["final_subtitle_selector"]["selection"]["rows"][0]
             final_df = st.session_state["edited_subtitles_df"]
-            if final_df.iloc[selected_idx][t("movied_category")] == "illustration":
-                initial_search = final_df.iloc[selected_idx][t("movied_complement")]
+            if final_df.iloc[selected_idx]["Category"] == "illustration":
+                initial_search = final_df.iloc[selected_idx]["Complement"]
 
         selected_media = media_selector(
             media_dirs=dirs_to_scan,
@@ -936,6 +967,69 @@ class MoviedPlugin(Plugin):
         secs = seconds % 60
         return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
+    def export_data(self, video_name):
+        if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
+            st.sidebar.warning("No data to export.")
+            return
+
+        # Prepare data for export
+        subtitles_data = st.session_state["edited_subtitles_df"].to_dict(orient="records")
+        operations = st.session_state.get("operations", "")
+
+        export_data = {
+            "subtitles": subtitles_data,
+            "operations": operations.split("\n") if operations else []
+        }
+
+        # Generate filename with current time
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{video_name} - {current_time}.json"
+        filepath = os.path.join(self.working_dir, filename)
+
+        # Write to JSON file
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(export_data, f, ensure_ascii=False, indent=4)
+
+        st.sidebar.success(f"Data exported to {filename}")
+
+    def import_data(self):
+        # Use Streamlit file uploader in sidebar
+        uploaded_file = st.sidebar.file_uploader("Choose a JSON file", type="json", key="import_file")
+        if uploaded_file and st.sidebar.button(t("movied_import")):
+            try:
+                # Read and parse JSON
+                data = json.load(uploaded_file)
+                subtitles_data = data.get("subtitles", [])
+                operations_data = data.get("operations", [])
+
+                # Validate and convert subtitles data to DataFrame
+                if subtitles_data:
+                    imported_df = pd.DataFrame(subtitles_data)
+                    required_columns = ["Start", "End", "Text"]
+                    optional_columns = ["Category", "Complement"]
+                    if all(col in imported_df.columns for col in required_columns):
+                        # Ensure optional columns exist
+                        for col in optional_columns:
+                            if col not in imported_df.columns:
+                                imported_df[col] = ""
+                        imported_df = imported_df[["Start", "End", "Text", "Category", "Complement"]]
+                        st.session_state["interest_subtitles_df"] = imported_df.copy()
+                        st.session_state["edited_subtitles_df"] = imported_df.copy()
+                    else:
+                        st.sidebar.error("Imported JSON missing required subtitle columns.")
+                        return
+
+                # Import operations
+                if operations_data:
+                    st.session_state["operations"] = "\n".join(operations_data)
+                else:
+                    st.session_state["operations"] = ""
+
+                st.sidebar.success("Data imported successfully.")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Error importing data: {str(e)}")
+
     def run(self, config):
         self.working_dir = config.get(self.name, {}).get("movied_workdir", t("movied_workdir_default"))
         self.media_dirs = config.get(self.name, {}).get("movied_media_dirs", t("movied_media_dirs_default")).split("\n")
@@ -955,6 +1049,15 @@ class MoviedPlugin(Plugin):
         edited_subtitles_df = self.handle_edit_subtitles()
         selected_final, final_subtitles_df = self.handle_final_selection()
         start_time, end_time = self.handle_section(selected_final, final_subtitles_df)
+
+        # Sidebar buttons for Export and Import
+        with st.sidebar:
+            st.header("Data Management")
+            if selected_video["selection"]["rows"]:
+                video_name = os.path.splitext(os.path.basename(video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"]))[0]
+                if st.button(t("movied_export")):
+                    self.export_data(video_name)
+            self.import_data()
 
         if selected_video["selection"]["rows"]:
             video_path = video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"]
