@@ -259,25 +259,22 @@ class MoviedPlugin(Plugin):
         return selected_video
 
     def handle_transcript(self, selected_video, video_df, selected_model):
+        # Existing method to handle the first subtitle selection
         if selected_video["selection"]["rows"]:
             idx = selected_video["selection"]["rows"][0]
             video_info = video_df.iloc[idx]
             vtt_path = os.path.splitext(video_info["Full Path"])[0] + ".vtt"
 
-            # Créer deux colonnes pour les boutons
             col1, col2 = st.columns(2)
             with col1:
                 if st.button(t("movied_generate_transcript")):
                     with st.spinner(t("movied_processing")):
                         try:
-                            generate_subtitles(
-                                video_info["Full Path"], selected_model)
-                            subtitles_df, _ = load_subtitles_and_chapters(
-                                vtt_path)
+                            generate_subtitles(video_info["Full Path"], selected_model)
+                            subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
                             st.session_state["subtitles_df"] = subtitles_df
                             st.session_state["current_vtt_path"] = vtt_path
-                            st.success(t("movied_success").format(
-                                video=os.path.basename(video_info["Full Path"])))
+                            st.success(t("movied_success").format(video=os.path.basename(video_info["Full Path"])))
                             st.rerun()
                         except Exception as e:
                             st.error(t("movied_error").format(error=str(e)))
@@ -287,13 +284,11 @@ class MoviedPlugin(Plugin):
                 if st.button(t("movied_normalize_audio")):
                     with st.spinner(t("movied_normalizing")):
                         try:
-                            normalize_audio(
-                                video_info["Full Path"], self.reference_audio_path)
-                            st.rerun()  # Relancer pour refléter les changements
+                            normalize_audio(video_info["Full Path"], self.reference_audio_path)
+                            st.rerun()
                         except Exception as e:
                             st.error(t("movied_error").format(error=str(e)))
 
-            # Load existing subtitles if available
             if os.path.exists(vtt_path):
                 if "subtitles_df" not in st.session_state or st.session_state.get("current_vtt_path") != vtt_path:
                     subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
@@ -302,8 +297,7 @@ class MoviedPlugin(Plugin):
                 else:
                     subtitles_df = st.session_state["subtitles_df"]
 
-                st.write(t("movied_subtitles").format(
-                    video=video_info["Video"]))
+                st.write(t("movied_subtitles").format(video=video_info["Video"]))
                 selected_subtitles = st.dataframe(
                     subtitles_df[["Start", "End", "Text"]],
                     selection_mode="multi-row",
@@ -315,26 +309,47 @@ class MoviedPlugin(Plugin):
             return None, None, None
         return None, None, None
 
-    def handle_section(self, selected_subtitles, subtitles_df):
+    def handle_intermediate_subtitles(self, selected_subtitles, subtitles_df):
+        # New method to handle the second subtitle selection
         if selected_subtitles and selected_subtitles["selection"]["rows"]:
             selected_indices = selected_subtitles["selection"]["rows"]
-            if not subtitles_df.empty and selected_indices[0] < len(subtitles_df):
-                start_time = subtitles_df.iloc[selected_indices[0]]["Start"]
-                end_time = subtitles_df.iloc[selected_indices[-1]]["End"]
+            if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
+                # Create a DataFrame for the selected subtitles
+                intermediate_subtitles_df = subtitles_df.iloc[selected_indices][["Start", "End", "Text"]]
+
+                st.write("Subtitles of Interest (Select to Edit):")
+                selected_intermediate = st.dataframe(
+                    intermediate_subtitles_df,
+                    selection_mode="multi-row",
+                    on_select="rerun",
+                    key="intermediate_subtitle_selector",
+                    hide_index=True
+                )
+                return selected_intermediate, intermediate_subtitles_df
+            else:
+                st.error("Selected subtitle index out of bounds or subtitles DataFrame is empty.")
+                return None, None
+        return None, None
+
+    def handle_section(self, selected_intermediate, intermediate_subtitles_df):
+        # Modified to work with the intermediate subtitle selection
+        if selected_intermediate and selected_intermediate["selection"]["rows"]:
+            selected_indices = selected_intermediate["selection"]["rows"]
+            if not intermediate_subtitles_df.empty and selected_indices[0] < len(intermediate_subtitles_df):
+                start_time = intermediate_subtitles_df.iloc[selected_indices[0]]["Start"]
+                end_time = intermediate_subtitles_df.iloc[selected_indices[-1]]["End"]
 
                 col1, col2 = st.columns(2)
                 with col1:
-                    edited_start = st.text_input(
-                        t("movied_start_time"), start_time, key="start_time")
+                    edited_start = st.text_input(t("movied_start_time"), start_time, key="start_time")
                 with col2:
-                    edited_end = st.text_input(
-                        t("movied_end_time"), end_time, key="end_time")
+                    edited_end = st.text_input(t("movied_end_time"), end_time, key="end_time")
                 return edited_start, edited_end
             else:
-                st.error(
-                    "Selected subtitle index out of bounds or subtitles DataFrame is empty.")
+                st.error("Selected intermediate subtitle index out of bounds or DataFrame is empty.")
                 return None, None
         return None, None
+
 
     def list_media_files(self):
         # Clé pour stocker les vignettes dans session_state
@@ -749,12 +764,9 @@ class MoviedPlugin(Plugin):
         return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
     def run(self, config):
-        self.working_dir = config.get(self.name, {}).get(
-            "movied_workdir", t("movied_workdir_default"))
-        self.media_dirs = config.get(self.name, {}).get(
-            "movied_media_dirs", t("movied_media_dirs_default")).split("\n")
-        self.reference_audio_path = config.get(self.name, {}).get(
-            "movied_reference_audio", "/path/to/sample.mp3")
+        self.working_dir = config.get(self.name, {}).get("movied_workdir", t("movied_workdir_default"))
+        self.media_dirs = config.get(self.name, {}).get("movied_media_dirs", t("movied_media_dirs_default")).split("\n")
+        self.reference_audio_path = config.get(self.name, {}).get("movied_reference_audio", "/path/to/sample.mp3")
 
         self.setup_header()
         selected_model, thumbnail_size, font, font_size, text_background, text_style = self.setup_controls()
@@ -765,20 +777,21 @@ class MoviedPlugin(Plugin):
             return
 
         selected_video = self.display_videos(video_df)
-        selected_subtitles, subtitles_df, vtt_path = self.handle_transcript(
-            selected_video, video_df, selected_model)
-        start_time, end_time = self.handle_section(
-            selected_subtitles, subtitles_df)
+        selected_subtitles, subtitles_df, vtt_path = self.handle_transcript(selected_video, video_df, selected_model)
 
-        # Toujours afficher les opérations, même sans sous-titres sélectionnés
+        # Add intermediate subtitle selection step
+        selected_intermediate, intermediate_subtitles_df = self.handle_intermediate_subtitles(selected_subtitles, subtitles_df)
+        start_time, end_time = self.handle_section(selected_intermediate, intermediate_subtitles_df)
+
+        # Proceed with operations only if a video and intermediate subtitles are selected
         if selected_video["selection"]["rows"]:
-            video_path = video_df.iloc[selected_video["selection"]
-                                       ["rows"][0]]["Full Path"]
-            self.handle_operations(
-                start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size)
+            video_path = video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"]
+            if selected_intermediate and selected_intermediate["selection"]["rows"]:
+                self.handle_operations(start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size)
+            else:
+                self.handle_operations(None, None, video_path, vtt_path, thumbnail_size, font, font_size)
         else:
-            self.handle_operations(
-                None, None, None, None, thumbnail_size, font, font_size)
+            self.handle_operations(None, None, None, None, thumbnail_size, font, font_size)
 
         # Afficher les résultats stockés dans la session après un rerun
         if "operations_log" in st.session_state:
@@ -797,9 +810,7 @@ class MoviedPlugin(Plugin):
             if selected_operation["selection"]["rows"]:
                 selected_row = selected_operation["selection"]["rows"][0]
                 selected_timecode = st.session_state["operations_log"].iloc[selected_row]["Start"]
-                # Convertir le timecode (HH:MM:SS.mmm) en secondes
-                h, m, s = map(float, selected_timecode.replace(
-                    ",", ".").split(":"))
+                h, m, s = map(float, selected_timecode.replace(",", ".").split(":"))
                 start_time_seconds = h * 3600 + m * 60 + s
 
         if "generated_video_path" in st.session_state:
