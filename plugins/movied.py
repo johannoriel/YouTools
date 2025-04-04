@@ -13,6 +13,7 @@ import json
 from moviepy import VideoFileClip
 from media_selector import media_selector
 from datetime import datetime
+import glob
 
 # Translations
 translations["en"].update({
@@ -71,6 +72,10 @@ translations["en"].update({
     "movied_sort_subtitles": "Sort",
     "movied_export": "Export",
     "movied_import": "Import",
+    "movied_verify": "Verification",
+    "movied_import_last": "Import Last",
+    "movied_overlap_warning": "Warning: Operations overlap between {start1} - {end1} and {start2} - {end2}",
+    "movied_all_ok": "All operations are OK",
 })
 
 translations["fr"].update({
@@ -129,6 +134,10 @@ translations["fr"].update({
     "movied_sort_subtitles": "Trier",
     "movied_export": "Exporter",
     "movied_import": "Importer",
+    "movied_verify": "Vérification",
+    "movied_import_last": "Importer le Dernier",
+    "movied_overlap_warning": "Attention : Les opérations se chevauchent entre {start1} - {end1} et {start2} - {end2}",
+    "movied_all_ok": "Tout est OK",
 })
 
 
@@ -603,6 +612,44 @@ class MoviedPlugin(Plugin):
             elif media_path.lower().endswith(('.mp4', '.mkv', '.avi')):
                 st.video(media_path, format="video/mp4", autoplay=True)
 
+    def verify_operations(self):
+        """Verify if operations in the input text overlap."""
+        operations = st.session_state.get("operations", "").strip()
+        if not operations:
+            st.warning("No operations to verify.")
+            return
+
+        # Parse operations into a list of tuples (start, end)
+        ops_list = []
+        for line in operations.split("\n"):
+            parts = line.strip().split()
+            if parts[0] == "insert_video":
+                continue
+            if len(parts) >= 3:  # Expect at least operation_type, start, end
+                try:
+                    start = self.parse_timecode(parts[1])
+                    end = self.parse_timecode(parts[2])
+                    ops_list.append((start, end, line))
+                except ValueError:
+                    st.warning(f"Invalid timecode in operation: {line}")
+                    return
+
+        # Check for overlaps
+        overlaps = False
+        for i in range(len(ops_list)):
+            for j in range(i + 1, len(ops_list)):
+                start1, end1, line1 = ops_list[i]
+                start2, end2, line2 = ops_list[j]
+                if start1 < end2 and start2 < end1:  # Overlap condition
+                    st.warning(t("movied_overlap_warning").format(
+                        start1=self.format_timecode(start1), end1=self.format_timecode(end1),
+                        start2=self.format_timecode(start2), end2=self.format_timecode(end2)
+                    ))
+                    overlaps = True
+
+        if not overlaps and ops_list:
+            st.success(t("movied_all_ok"))
+
     def handle_operations(self, start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size):
         if not video_path:
             st.warning("Please select a video to edit first.")
@@ -749,8 +796,11 @@ class MoviedPlugin(Plugin):
         st.session_state["operations"] = operations
 
         # Generate button
-        if st.button(t("movied_generate"), key="generate_btn", type="primary") and operations:
+        col1, col2 = st.columns(2)
+        if col1.button(t("movied_generate"), key="generate_btn", type="primary") and operations:
             self.execute_operations(video_path, vtt_path, operations, font, font_size)
+        if col2.button(t("movied_verify")):
+            self.verify_operations()
 
     def add_to_operations(self, operation):
         current_ops = st.session_state.get("operations", "")
@@ -906,7 +956,7 @@ class MoviedPlugin(Plugin):
                         elif cmd == "replace_video_keep_audio":
                             video_path_replace = remaining_args
                             main_clip = replace_video_keep_audio(
-                                main_clip, start_sec, end_sec, video_path_replace, target_size)
+                                main_clip, start_sec, end_sec, video_path_replace, target_size, Background=background_type)
                             operation_log.append(
                                 {"Nature": "replace_video_keep_audio", "Details": video_path_replace, "Start": real_start, "End": real_end})
 
@@ -992,6 +1042,33 @@ class MoviedPlugin(Plugin):
 
         st.sidebar.success(f"Data exported to {filename}")
 
+    def _import_data_json(self, data):
+        subtitles_data = data.get("subtitles", [])
+        operations_data = data.get("operations", [])
+
+        # Validate and convert subtitles data to DataFrame
+        if subtitles_data:
+            imported_df = pd.DataFrame(subtitles_data)
+            required_columns = ["Start", "End", "Text"]
+            optional_columns = ["Category", "Complement"]
+            if all(col in imported_df.columns for col in required_columns):
+                # Ensure optional columns exist
+                for col in optional_columns:
+                    if col not in imported_df.columns:
+                        imported_df[col] = ""
+                imported_df = imported_df[["Start", "End", "Text", "Category", "Complement"]]
+                st.session_state["interest_subtitles_df"] = imported_df.copy()
+                st.session_state["edited_subtitles_df"] = imported_df.copy()
+            else:
+                st.sidebar.error("Imported JSON missing required subtitle columns.")
+                return
+
+        # Import operations
+        if operations_data:
+            st.session_state["operations"] = "\n".join(operations_data)
+        else:
+            st.session_state["operations"] = ""
+
     def import_data(self):
         # Use Streamlit file uploader in sidebar
         uploaded_file = st.sidebar.file_uploader("Choose a JSON file", type="json", key="import_file")
@@ -999,36 +1076,31 @@ class MoviedPlugin(Plugin):
             try:
                 # Read and parse JSON
                 data = json.load(uploaded_file)
-                subtitles_data = data.get("subtitles", [])
-                operations_data = data.get("operations", [])
-
-                # Validate and convert subtitles data to DataFrame
-                if subtitles_data:
-                    imported_df = pd.DataFrame(subtitles_data)
-                    required_columns = ["Start", "End", "Text"]
-                    optional_columns = ["Category", "Complement"]
-                    if all(col in imported_df.columns for col in required_columns):
-                        # Ensure optional columns exist
-                        for col in optional_columns:
-                            if col not in imported_df.columns:
-                                imported_df[col] = ""
-                        imported_df = imported_df[["Start", "End", "Text", "Category", "Complement"]]
-                        st.session_state["interest_subtitles_df"] = imported_df.copy()
-                        st.session_state["edited_subtitles_df"] = imported_df.copy()
-                    else:
-                        st.sidebar.error("Imported JSON missing required subtitle columns.")
-                        return
-
-                # Import operations
-                if operations_data:
-                    st.session_state["operations"] = "\n".join(operations_data)
-                else:
-                    st.session_state["operations"] = ""
+                self._import_data_json(data)
 
                 st.sidebar.success("Data imported successfully.")
                 st.rerun()
             except Exception as e:
                 st.sidebar.error(f"Error importing data: {str(e)}")
+
+    def import_last(self, video_name):
+        # Find the most recent JSON file for the selected video
+        pattern = os.path.join(self.working_dir, f"{video_name} - *.json")
+        json_files = glob.glob(pattern)
+        if not json_files:
+            st.sidebar.warning(f"No export files found for {video_name}.")
+            return
+
+        latest_file = max(json_files, key=os.path.getctime)
+        try:
+            with open(latest_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self._import_data_json(data)
+
+                st.sidebar.success(f"Imported last export: {os.path.basename(latest_file)}")
+                st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Error importing last file: {str(e)}")
 
     def run(self, config):
         self.working_dir = config.get(self.name, {}).get("movied_workdir", t("movied_workdir_default"))
@@ -1057,6 +1129,8 @@ class MoviedPlugin(Plugin):
                 video_name = os.path.splitext(os.path.basename(video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"]))[0]
                 if st.button(t("movied_export")):
                     self.export_data(video_name)
+                if st.button(t("movied_import_last")):
+                    self.import_last(video_name)
             self.import_data()
 
         if selected_video["selection"]["rows"]:
