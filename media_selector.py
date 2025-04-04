@@ -3,7 +3,37 @@ import os
 from PIL import Image
 import cv2
 from streamlit_image_select import image_select
+from global_vars import translations, t
 
+translations["en"].update({
+    "media_selector_search_placeholder": "Search for media (e.g. 'ru')",
+    "media_selector_sort_label": "Sort by:",
+    "media_selector_sort_option_az": "Alphabetical (A-Z)",
+    "media_selector_sort_option_za": "Alphabetical (Z-A)",
+    "media_selector_sort_option_date_oldest": "Date (oldest to newest)",
+    "media_selector_sort_option_date_newest": "Date (newest to oldest)",
+    "media_selector_refresh_tooltip": "Refresh media list",
+    "media_selector_no_media_found": "No media found in selected directories.",
+    "media_selector_remote_search_placeholder": "Search for media",
+    "media_selector_remote_choose_label": "Choose a media",
+    "media_selector_remote_no_matching": "No media matching criteria.",
+    "media_selector_remote_no_media": "No media available."
+})
+
+translations["fr"].update({
+    "media_selector_search_placeholder": "Rechercher un média (ex. 'ru')",
+    "media_selector_sort_label": "Trier par :",
+    "media_selector_sort_option_az": "Alphabétique (A-Z)",
+    "media_selector_sort_option_za": "Alphabétique (Z-A)",
+    "media_selector_sort_option_date_oldest": "Date (plus ancien au plus récent)",
+    "media_selector_sort_option_date_newest": "Date (plus récent au plus ancien)",
+    "media_selector_refresh_tooltip": "Rafraîchir la liste des médias",
+    "media_selector_no_media_found": "Aucun média trouvé dans les répertoires sélectionnés.",
+    "media_selector_remote_search_placeholder": "Rechercher un média",
+    "media_selector_remote_choose_label": "Choisis un média",
+    "media_selector_remote_no_matching": "Aucun média ne correspond aux critères.",
+    "media_selector_remote_no_media": "Aucun média disponible."
+})
 
 def get_thumbnail(media_path):
     if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
@@ -27,7 +57,7 @@ def get_thumbnail(media_path):
     return img
 
 
-def media_selector(media_dirs, extensions, suffix, streamlit_component=st):
+def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initial_search=None):
     # Normalize input to a list of directories
     if isinstance(media_dirs, str):
         media_dirs = [media_dirs]
@@ -56,19 +86,21 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st):
     search_col, sort_col, refresh_col = streamlit_component.columns([4, 3, 1])
     with search_col:
         search_query = st.text_input(
-            "Rechercher un média (ex. 'ru')", "", key=f"search_{suffix}")
+            t("media_selector_search_placeholder"),
+            initial_search if initial_search is not None else "",
+            key=f"search_{suffix}")
     with sort_col:
         sort_options = [
-            "Alphabétique (A-Z)",
-            "Alphabétique (Z-A)",
-            "Date (plus ancien au plus récent)",
-            "Date (plus récent au plus ancien)"
+            t("media_selector_sort_option_az"),
+            t("media_selector_sort_option_za"),
+            t("media_selector_sort_option_date_oldest"),
+            t("media_selector_sort_option_date_newest")
         ]
         sort_choice = st.selectbox(
-            "Trier par :", sort_options, key=f"sort_{suffix}")
+            t("media_selector_sort_label"), sort_options, key=f"sort_{suffix}")
     with refresh_col:
         st.write("")  # Espacement vertical
-        if st.button("🔄", key=f"refresh_{suffix}", help="Rafraîchir la liste des médias"):
+        if st.button("🔄", key=f"refresh_{suffix}", help=t("media_selector_refresh_tooltip")):
             # Effacer le cache des thumbnails
             st.cache_data.clear()
             # Rescanner les fichiers
@@ -86,17 +118,14 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st):
         filtered_indices = list(range(len(media_files)))
 
     # Sort based on user choice
-    if sort_choice == "Alphabétique (A-Z)":
-        sorted_indices = sorted(
-            filtered_indices, key=lambda i: media_names[i].lower())
-    elif sort_choice == "Alphabétique (Z-A)":
-        sorted_indices = sorted(
-            filtered_indices, key=lambda i: media_names[i].lower(), reverse=True)
-    elif sort_choice == "Date (plus ancien au plus récent)":
+    if sort_choice == t("media_selector_sort_option_az"):
+        sorted_indices = sorted(filtered_indices, key=lambda i: media_names[i].lower())
+    elif sort_choice == t("media_selector_sort_option_za"):
+        sorted_indices = sorted(filtered_indices, key=lambda i: media_names[i].lower(), reverse=True)
+    elif sort_choice == t("media_selector_sort_option_date_oldest"):
         sorted_indices = sorted(filtered_indices, key=lambda i: media_dates[i])
-    else:  # "Date (plus récent au plus ancien)"
-        sorted_indices = sorted(
-            filtered_indices, key=lambda i: media_dates[i], reverse=True)
+    else:  # t("media_selector_sort_option_date_newest")
+        sorted_indices = sorted(filtered_indices, key=lambda i: media_dates[i], reverse=True)
 
     # Apply sorting
     filtered_media_paths = [media_paths[i] for i in sorted_indices]
@@ -123,13 +152,12 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st):
                 selected_idx = thumbnails.index(selected_thumb)
                 selected_media = filtered_media_paths[selected_idx]
         else:
-            streamlit_component.write(
-                "Aucun média trouvé dans les répertoires sélectionnés.")
+            streamlit_component.write(t("media_selector_no_media_found"))
 
     return selected_media
 
 
-def remote_media_selector(media_items, suffix, streamlit_component=st):
+def remote_media_selector(media_items, suffix, streamlit_component=st, initial_search=None):
     """
     Sélectionneur de médias pour des ressources distantes (URLs ou images en mémoire)
 
@@ -145,7 +173,7 @@ def remote_media_selector(media_items, suffix, streamlit_component=st):
         L'item sélectionné ou None
     """
     if not media_items:
-        streamlit_component.write("Aucun média disponible.")
+        streamlit_component.write(t("media_selector_remote_no_media"))
         return None
 
     # Extraire les informations nécessaires
@@ -158,16 +186,18 @@ def remote_media_selector(media_items, suffix, streamlit_component=st):
     search_col, sort_col = streamlit_component.columns(2)
     with search_col:
         search_query = streamlit_component.text_input(
-            "Rechercher un média", "", key=f"search_remote_{suffix}")
+            t("media_selector_remote_search_placeholder"),
+            initial_search if initial_search is not None else "",
+            key=f"search_remote_{suffix}")
     with sort_col:
         sort_options = [
-            "Alphabétique (A-Z)",
-            "Alphabétique (Z-A)",
-            "Date (plus ancien au plus récent)",
-            "Date (plus récent au plus ancien)"
+            t("media_selector_sort_option_az"),
+            t("media_selector_sort_option_za"),
+            t("media_selector_sort_option_date_oldest"),
+            t("media_selector_sort_option_date_newest")
         ]
         sort_choice = streamlit_component.selectbox(
-            "Trier par :", sort_options, key=f"sort_remote_{suffix}")
+            t("media_selector_sort_label"), sort_options, key=f"sort_remote_{suffix}")
 
     # Filtrer par requête de recherche
     if search_query:
@@ -177,17 +207,14 @@ def remote_media_selector(media_items, suffix, streamlit_component=st):
         filtered_indices = list(range(len(media_items)))
 
     # Trier selon le choix de l'utilisateur
-    if sort_choice == "Alphabétique (A-Z)":
-        sorted_indices = sorted(
-            filtered_indices, key=lambda i: media_names[i].lower())
-    elif sort_choice == "Alphabétique (Z-A)":
-        sorted_indices = sorted(
-            filtered_indices, key=lambda i: media_names[i].lower(), reverse=True)
-    elif sort_choice == "Date (plus ancien au plus récent)":
+    if sort_choice == t("media_selector_sort_option_az"):
+        sorted_indices = sorted(filtered_indices, key=lambda i: media_names[i].lower())
+    elif sort_choice == t("media_selector_sort_option_za"):
+        sorted_indices = sorted(filtered_indices, key=lambda i: media_names[i].lower(), reverse=True)
+    elif sort_choice == t("media_selector_sort_option_date_oldest"):
         sorted_indices = sorted(filtered_indices, key=lambda i: media_dates[i])
-    else:  # "Date (plus récent au plus ancien)"
-        sorted_indices = sorted(
-            filtered_indices, key=lambda i: media_dates[i], reverse=True)
+    else:  # t("media_selector_sort_option_date_newest")
+        sorted_indices = sorted(filtered_indices, key=lambda i: media_dates[i], reverse=True)
 
     # Appliquer le tri
     filtered_media_urls = [media_urls[i] for i in sorted_indices]
@@ -199,7 +226,7 @@ def remote_media_selector(media_items, suffix, streamlit_component=st):
     with streamlit_component.container(height=400):
         if filtered_media_urls:
             selected_idx = image_select(
-                label="Choisis un média",
+                t("media_selector_remote_choose_label"),
                 images=filtered_media_urls,
                 captions=filtered_media_names,
                 use_container_width=True,
@@ -208,7 +235,6 @@ def remote_media_selector(media_items, suffix, streamlit_component=st):
             if selected_idx is not None:
                 selected_media = filtered_media_items[selected_idx]
         else:
-            streamlit_component.write(
-                "Aucun média ne correspond aux critères.")
+            streamlit_component.write(t("media_selector_remote_no_matching"))
 
     return selected_media
