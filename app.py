@@ -235,7 +235,7 @@ def main():
     if col1.button(t("Clean session")):
         st.session_state.clear()  # Cela réinitialise st.session_state
         st.rerun()  # Relancer l'application pour refléter les changements
-    if col2.button(t("Refresh")):
+    if col2.button(t("Rerun")):
         st.rerun()
 
     # Initialize selected tab
