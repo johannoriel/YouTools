@@ -6,7 +6,42 @@ import cv2
 from io import BytesIO
 from typing import Dict, List
 import uuid
+from bs4 import BeautifulSoup
 
+def asset_download(media_info: Dict, dest_dir: str) -> str:
+    """Télécharge un média depuis Pexels"""
+    os.makedirs(dest_dir, exist_ok=True)
+    url = media_info["original_url"]
+
+    # Déterminer l'extension à partir de l'URL ou utiliser .jpg par défaut
+    ext = os.path.splitext(url.split('?')[0])[1] or ".jpg"
+    filename = f"{media_info['name']}{ext}"
+    filepath = os.path.join(dest_dir, filename)
+
+    headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+    response = requests.get(url, headers=headers, stream=True)
+    if response.status_code == 200:
+        with open(filepath, 'wb') as f:
+            shutil.copyfileobj(response.raw, f)
+        return filepath
+    raise Exception(f"Download failed: {response.status_code}")
+
+def asset_memory_download(media_info: Dict) -> tuple:
+    """Télécharge un média en mémoire sans écrire sur le disque"""
+    url = media_info["original_url"]
+    headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+    response = requests.get(url, headers=headers, stream=True)
+    if response.status_code == 200:
+        file_data = BytesIO()
+        for chunk in response.iter_content(chunk_size=8192):
+            file_data.write(chunk)
+        file_data.seek(0)  # Rewind to start of file
+        return file_data, media_info["type"]
+    raise Exception(f"Download failed: {response.status_code}")
 
 class PexelsAPI:
     def extract_title_from_url(self, url):
@@ -74,34 +109,7 @@ class PexelsAPI:
 
         return results
 
-    def download(self, media_info: Dict, dest_dir: str) -> str:
-        """Télécharge un média depuis Pexels"""
-        os.makedirs(dest_dir, exist_ok=True)
-        url = media_info["original_url"]
 
-        # Déterminer l'extension à partir de l'URL ou utiliser .jpg par défaut
-        ext = os.path.splitext(url.split('?')[0])[1] or ".jpg"
-        filename = f"{media_info['name']}{ext}"
-        filepath = os.path.join(dest_dir, filename)
-
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            with open(filepath, 'wb') as f:
-                shutil.copyfileobj(response.raw, f)
-            return filepath
-        raise Exception(f"Download failed: {response.status_code}")
-
-    def memory_download(self, media_info: Dict) -> tuple:
-        """Télécharge un média en mémoire sans écrire sur le disque"""
-        url = media_info["original_url"]
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            file_data = BytesIO()
-            for chunk in response.iter_content(chunk_size=8192):
-                file_data.write(chunk)
-            file_data.seek(0)  # Rewind to start of file
-            return file_data, media_info["type"]
-        raise Exception(f"Download failed: {response.status_code}")
 
 class CanvaAPI:
     def search(self, keywords: str, api_key: str) -> List[Dict]:
@@ -113,12 +121,6 @@ class CanvaAPI:
         """Télécharge un média depuis Canva"""
         raise NotImplementedError("Canva API not fully implemented yet")
 
-import requests
-from io import BytesIO
-import os
-import shutil
-from typing import Dict, List
-from bs4 import BeautifulSoup  # Pour le scraping si besoin
 
 class GoogleImageAPI:
     def __init__(self):
@@ -159,33 +161,6 @@ class GoogleImageAPI:
             })
 
         return results
-
-    def download(self, media_info: Dict, dest_dir: str) -> str:
-        """Télécharge une image depuis Google"""
-        os.makedirs(dest_dir, exist_ok=True)
-        url = media_info["original_url"]
-        ext = os.path.splitext(url.split('?')[0])[1] or ".jpg"
-        filename = f"{media_info['name']}{ext}"
-        filepath = os.path.join(dest_dir, filename)
-
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            with open(filepath, 'wb') as f:
-                shutil.copyfileobj(response.raw, f)
-            return filepath
-        raise Exception(f"Download failed: {response.status_code}")
-
-    def memory_download(self, media_info: Dict) -> tuple:
-        """Télécharge une image en mémoire"""
-        url = media_info["original_url"]
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            file_data = BytesIO()
-            for chunk in response.iter_content(chunk_size=8192):
-                file_data.write(chunk)
-            file_data.seek(0)
-            return file_data, "photo"
-        raise Exception(f"Download failed: {response.status_code}")
 
 
 class DuckDuckGoImageAPI:
@@ -260,30 +235,3 @@ class DuckDuckGoImageAPI:
             })
 
         return results
-
-    def download(self, media_info: Dict, dest_dir: str) -> str:
-        """Télécharge une image depuis DuckDuckGo"""
-        os.makedirs(dest_dir, exist_ok=True)
-        url = media_info["original_url"]
-        ext = os.path.splitext(url.split('?')[0])[1] or ".jpg"
-        filename = f"{media_info['name']}{ext}"
-        filepath = os.path.join(dest_dir, filename)
-
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            with open(filepath, 'wb') as f:
-                shutil.copyfileobj(response.raw, f)
-            return filepath
-        raise Exception(f"Download failed: {response.status_code}")
-
-    def memory_download(self, media_info: Dict) -> tuple:
-        """Télécharge une image en mémoire"""
-        url = media_info["original_url"]
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            file_data = BytesIO()
-            for chunk in response.iter_content(chunk_size=8192):
-                file_data.write(chunk)
-            file_data.seek(0)
-            return file_data, "photo"
-        raise Exception(f"Download failed: {response.status_code}")

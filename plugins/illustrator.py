@@ -5,7 +5,7 @@ from plugins.common import remove_quotes
 import os
 import shutil
 from media_selector import media_selector, remote_media_selector
-from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI
+from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, asset_memory_download, asset_download
 from io import BytesIO
 from youtube_api import YoutubeAPI
 
@@ -141,8 +141,12 @@ class IllustratorPlugin(Plugin):
              "plugin": "illustratorplugin", "tab": "current"},
             {"name": t("illustrator_stored_tab"),
              "plugin": "illustratorplugin", "tab": "stored"},
-            {"name": t("illustrator_search_tab"),
-             "plugin": "illustratorplugin", "tab": "search"},
+            {"name": "Pexels",  # Changed from search tab to specific API tabs
+             "plugin": "illustratorplugin", "tab": "pexels"},
+            {"name": "Google",
+             "plugin": "illustratorplugin", "tab": "google"},
+            {"name": "DuckDuckGo",
+             "plugin": "illustratorplugin", "tab": "duckduckgo"},
             {"name": t("illustrator_youtube_tab"),
              "plugin": "illustratorplugin", "tab": "youtube"}
         ]
@@ -337,208 +341,273 @@ class IllustratorPlugin(Plugin):
             if selected_media:
                 self.show_media_preview(selected_media)
 
-    def run_search_assets_tab(self, config):
-        """Onglet de recherche de nouveaux assets"""
-        st.header(t("illustrator_search_tab"))
+    def _save_media_options(self, media_buffer, media_name, media_type, stored_dir, current_dir, prefix=""):
+        """Affiche les options de sauvegarde communes pour tous les moteurs de recherche"""
+        st.markdown("---")
+        st.subheader("Save Options")
+
+        ext = '.mp4' if media_type == 'video' else '.jpg'
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            if st.button(t("download_to_current"), key=f"download_current_{prefix}_{media_name}"):
+                try:
+                    os.makedirs(current_dir, exist_ok=True)
+                    filename = f"{media_name}{ext}"
+                    filepath = os.path.join(current_dir, filename)
+
+                    with open(filepath, 'wb') as f:
+                        media_buffer.seek(0)
+                        f.write(media_buffer.read())
+                    st.success(f"Added to current assets: {filepath}")
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+
+        with col2:
+            selected_subdir = self.folder_selector_with_creation(stored_dir, f"save_{prefix}_{media_name}")
+
+        with col3:
+            if selected_subdir and st.button(t("download_to_stored"), key=f"download_stored_{prefix}_{media_name}"):
+                try:
+                    filename = f"{media_name}{ext}"
+                    filepath = os.path.join(stored_dir, selected_subdir, filename)
+
+                    with open(filepath, 'wb') as f:
+                        media_buffer.seek(0)
+                        f.write(media_buffer.read())
+                    st.success(f"Saved to stored assets: {filepath}")
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+
+        with col4:
+            if selected_subdir and st.button(t("download_to_both"), key=f"download_to_both_{prefix}_{media_name}"):
+                try:
+                    # Save to stored
+                    filename = f"{media_name}{ext}"
+                    stored_path = os.path.join(stored_dir, selected_subdir, filename)
+                    with open(stored_path, 'wb') as f:
+                        media_buffer.seek(0)
+                        f.write(media_buffer.read())
+
+                    # Save to current
+                    os.makedirs(current_dir, exist_ok=True)
+                    current_path = os.path.join(current_dir, filename)
+                    with open(current_path, 'wb') as f:
+                        media_buffer.seek(0)
+                        f.write(media_buffer.read())
+
+                    st.success(
+                        f"Saved to stored assets: {stored_path}\n"
+                        f"Added to current assets: {current_path}"
+                    )
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+
+    def _handle_search_results(self, api_name, results, config, prefix=""):
+        """Gère l'affichage et la sélection des résultats de recherche (commun à tous les moteurs)"""
         stored_dir = self.expand_path(config.get(self.name, {}).get(
             "illustrator_stored_dir", t("illustrator_config_default_stored")))
         current_dir = self.expand_path(config.get(self.name, {}).get(
             "illustrator_current_dir", t("illustrator_config_default_current")))
 
+        # Format results for the media selector
+        formatted_results = []
+        for item in results:
+            formatted_results.append({
+                'url': item['url'],
+                'name': item.get('name', f"Media {item['id']}"),
+                'date': item.get('date', 0),
+                'original_data': item
+            })
+
+        # Store results in session state with prefix
+        st.session_state[f"search_results_{prefix}"] = formatted_results
+        st.session_state[f"selected_item_{prefix}"] = None
+        st.session_state[f"media_buffer_{prefix}"] = None
+        st.session_state[f"media_type_{prefix}"] = None
+
+    def _display_search_results(self, api_name, prefix=""):
+        """Affiche les résultats de recherche et gère la prévisualisation"""
+        if f"search_results_{prefix}" not in st.session_state or not st.session_state[f"search_results_{prefix}"]:
+            return
+
+        # Sélection du média
+        new_selection = remote_media_selector(
+            st.session_state[f"search_results_{prefix}"],
+            f"search_{prefix}_{api_name}"
+        )
+
+        # Si la sélection a changé, réinitialiser le buffer
+        if new_selection != st.session_state[f"selected_item_{prefix}"]:
+            st.session_state[f"selected_item_{prefix}"] = new_selection
+            st.session_state[f"media_buffer_{prefix}"] = None
+            st.session_state[f"media_type_{prefix}"] = None
+
+        # Téléchargement pour prévisualisation
+        if st.session_state[f"selected_item_{prefix}"] and not st.session_state[f"media_buffer_{prefix}"]:
+            with st.spinner("Downloading for preview..."):
+                try:
+                    url = st.session_state[f"selected_item_{prefix}"]['original_data']
+                    st.write(url['original_url'])
+                    buffer, media_type = asset_memory_download(url)
+                    st.session_state[f"media_buffer_{prefix}"] = buffer
+                    st.session_state[f"media_type_{prefix}"] = media_type
+                except Exception as e:
+                    st.error(f"Preview download error: {str(e)}")
+                    #raise e
+
+        # Prévisualisation
+        if st.session_state[f"media_buffer_{prefix}"]:
+            self.show_media_preview(
+                st.session_state[f"media_buffer_{prefix}"],
+                st.session_state[f"media_type_{prefix}"]
+            )
+
+        # Options de sauvegarde
+        if st.session_state[f"selected_item_{prefix}"] and st.session_state[f"media_buffer_{prefix}"]:
+            stored_dir = self.expand_path(self.config.get(self.name, {}).get(
+                "illustrator_stored_dir", t("illustrator_config_default_stored")))
+            current_dir = self.expand_path(self.config.get(self.name, {}).get(
+                "illustrator_current_dir", t("illustrator_config_default_current")))
+
+            self._save_media_options(
+                st.session_state[f"media_buffer_{prefix}"],
+                st.session_state[f"selected_item_{prefix}"]['name'],
+                st.session_state[f"selected_item_{prefix}"]['original_data']['type'],
+                stored_dir,
+                current_dir,
+                prefix
+            )
+
+    def run_pexels_tab(self, config):
+        """Onglet de recherche Pexels"""
+        st.header("Pexels Search")
+
+        if not config.get(self.name, {}).get("pexels_api_key"):
+            st.error("API key for Pexels is not configured")
+            return
+
         # Initialisation des variables de session
         if 'search_results' not in st.session_state:
             st.session_state.search_results = None
-        if 'selected_item' not in st.session_state:
-            st.session_state.selected_item = None
-        if 'media_buffer' not in st.session_state:
-            st.session_state.media_buffer = None
-        if 'media_type' not in st.session_state:
-            st.session_state.media_type = None
 
-        # Sélection de l'API et type de média
+        # Options de recherche
         col1, col2 = st.columns(2)
         with col1:
-            selected_api = st.selectbox(
-                t("illustrator_search_api"), list(self.apis.keys()))
+            keywords = st.text_input(
+                t("illustrator_search_keywords"),
+                key="pexels_keywords",
+                on_change=lambda: setattr(st.session_state, 'pexels_search_triggered', True)
+            )
         with col2:
-            # DuckDuckGo ne supporte que les photos
-            media_types = ["photos"] if selected_api == "duckduckgo" else ["photos", "videos", "both"]
             media_type = st.selectbox(
                 t("illustrator_media_type"),
-                media_types,
+                ["photos", "videos", "both"],
                 format_func=lambda x: t(f"illustrator_{x}")
             )
 
-        # Vérification des configurations nécessaires
-        if selected_api == "pexels" and not config.get(self.name, {}).get("pexels_api_key"):
-            st.error("API key for Pexels is not configured")
-            return
-        if selected_api == "google":
-            if not config.get('common', {}).get('youtube_api_key'):
-                st.error("Google API key (YouTube API key) is not configured in common settings")
-                return
-            if not config.get(self.name, {}).get('google_cx'):
-                st.error("Google Custom Search Engine ID (cx) is not configured")
-                return
-
-        # Recherche
-        if 'search_triggered' not in st.session_state:
-            st.session_state.search_triggered = False
-
-        def trigger_search():
-            st.session_state.search_triggered = True
-
-        keywords = st.text_input(
-            t("illustrator_search_keywords"),
-            key="search_keywords",
-            on_change=trigger_search
-        )
-
-        # Déclencher la recherche soit avec Enter soit avec le bouton
-        if (st.session_state.search_triggered or st.button(t("illustrator_search_button"))) and keywords:
-            with st.spinner("Searching..."):
-                try:
-                    results = []
-                    if selected_api == "google":
-                        results = self.apis[selected_api].search(
-                            remove_quotes(keywords),
-                            config.get('common', {}).get('youtube_api_key'),
-                            config.get(self.name, {}).get('google_cx')
-                        )
-                    elif selected_api == "duckduckgo":
-                        results = self.apis[selected_api].search(
-                            remove_quotes(keywords)
-                        )
-                    else:  # Pexels
+        # Recherche soit avec Enter soit avec le bouton
+        if st.button(t("illustrator_search_button"), key="pexels_search") or getattr(st.session_state, 'pexels_search_triggered', False):
+            st.session_state.pexels_search_triggered = False
+            if keywords:
+                with st.spinner("Searching Pexels..."):
+                    try:
+                        results = []
                         if media_type in ["photos", "both"]:
-                            photos = self.apis[selected_api].search(
+                            photos = self.apis["pexels"].search(
                                 remove_quotes(keywords),
                                 config.get(self.name, {}).get("pexels_api_key"),
                                 "photos"
                             )
                             results.extend(photos)
                         if media_type in ["videos", "both"]:
-                            videos = self.apis[selected_api].search(
+                            videos = self.apis["pexels"].search(
                                 remove_quotes(keywords),
                                 config.get(self.name, {}).get("pexels_api_key"),
                                 "videos"
                             )
                             results.extend(videos)
 
-                    formatted_results = []
-                    for item in results:
-                        formatted_results.append({
-                            'url': item['url'],
-                            'name': item.get('name', f"Media {item['id']}"),
-                            'date': item.get('date', 0),
-                            'original_data': item
-                        })
-                    st.session_state.search_results = formatted_results
-                    # Réinitialiser la sélection quand on fait une nouvelle recherche
-                    st.session_state.selected_item = None
-                    st.session_state.media_buffer = None
-                    st.session_state.media_type = None
-                except Exception as e:
-                    st.error(f"Search error: {str(e)}")
+                        self._handle_search_results("pexels", results, config, prefix="pexels")
+                    except Exception as e:
+                        st.error(f"Search error: {str(e)}")
+                        raise e
 
-        # Le reste de la méthode reste inchangé...
-        # [Affichage des résultats et options de téléchargement]
+        # Affichage des résultats
+        self._display_search_results("pexels", prefix="pexels")
 
-            # Affichage des résultats
-            if st.session_state.search_results:
+    def run_google_tab(self, config):
+        """Onglet de recherche Google"""
+        st.header("Google Search")
 
-                # Sélection du média
-                new_selection = remote_media_selector(
-                    st.session_state.search_results, "search")
+        if not config.get('common', {}).get('youtube_api_key'):
+            st.error("Google API key (YouTube API key) is not configured in common settings")
+            return
+        if not config.get(self.name, {}).get('google_cx'):
+            st.error("Google Custom Search Engine ID (cx) is not configured")
+            return
 
-                # Si la sélection a changé, réinitialiser le buffer
-                if new_selection != st.session_state.selected_item:
-                    st.session_state.selected_item = new_selection
-                    st.session_state.media_buffer = None
-                    st.session_state.media_type = None
+        # Initialisation des variables de session
+        if 'search_results' not in st.session_state:
+            st.session_state.search_results = None
 
-                # Téléchargement pour prévisualisation
-                if st.session_state.selected_item and not st.session_state.media_buffer:
-                    with st.spinner("Downloading for preview..."):
-                        try:
-                            buffer, media_type = self.apis[selected_api].memory_download(
-                                st.session_state.selected_item['original_data']
-                            )
-                            st.session_state.media_buffer = buffer
-                            st.session_state.media_type = media_type
-                        except Exception as e:
-                            st.error(f"Preview download error: {str(e)}")
+        # Options de recherche
+        keywords = st.text_input(
+            t("illustrator_search_keywords"),
+            key="google_keywords",
+            on_change=lambda: setattr(st.session_state, 'google_search_triggered', True)
+        )
 
-                # Prévisualisation
-                if st.session_state.media_buffer:
-                    self.show_media_preview(
-                        st.session_state.media_buffer,
-                        st.session_state.media_type
-                    )
+        # Recherche soit avec Enter soit avec le bouton
+        if st.button(t("illustrator_search_button"), key="google_search") or getattr(st.session_state, 'google_search_triggered', False):
+            st.session_state.google_search_triggered = False
+            if keywords:
+                with st.spinner("Searching Google..."):
+                    try:
+                        results = self.apis["google"].search(
+                            remove_quotes(keywords),
+                            config.get('common', {}).get('youtube_api_key'),
+                            config.get(self.name, {}).get('google_cx')
+                        )
+                        self._handle_search_results("google", results, config, prefix="google")
+                    except Exception as e:
+                        st.error(f"Search error: {str(e)}")
+                        raise e
 
-                # Boutons de téléchargement
-                if st.session_state.selected_item and st.session_state.media_buffer:
-                    media_type = st.session_state.selected_item['original_data']['type']
-                    ext = '.mp4' if media_type == 'video' else '.jpg'
+        # Affichage des résultats
+        self._display_search_results("google", prefix="google")
 
-                    st.markdown("---")
-                    st.subheader("Save Options")
+    def run_duckduckgo_tab(self, config):
+        """Onglet de recherche DuckDuckGo"""
+        st.header("DuckDuckGo Search")
 
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        if st.button(t("download_to_current"), key="search_download_current"):
-                            try:
-                                current_dir = self.expand_path(self.config.get(self.name, {}).get(
-                                    "illustrator_current_dir", t("illustrator_config_default_current")))
-                                os.makedirs(current_dir, exist_ok=True)
+        # Initialisation des variables de session
+        if 'search_results' not in st.session_state:
+            st.session_state.search_results = None
 
-                                filename = f"{st.session_state.selected_item['name']}{ext}"
-                                filepath = os.path.join(current_dir, filename)
+        # Options de recherche
+        keywords = st.text_input(
+            t("illustrator_search_keywords"),
+            key="duckduckgo_keywords",
+            on_change=lambda: setattr(st.session_state, 'duckduckgo_search_triggered', True)
+        )
 
-                                with open(filepath, 'wb') as f:
-                                    f.write(st.session_state.media_buffer.getvalue())
-                                st.success(f"Added to current assets: {filepath}")
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
+        # Recherche soit avec Enter soit avec le bouton
+        if st.button(t("illustrator_search_button"), key="duckduckgo_search") or getattr(st.session_state, 'duckduckgo_search_triggered', False):
+            st.session_state.duckduckgo_search_triggered = False
+            if keywords:
+                with st.spinner("Searching DuckDuckGo..."):
+                    try:
+                        results = self.apis["duckduckgo"].search(
+                            remove_quotes(keywords)
+                        )
+                        self._handle_search_results("duckduckgo", results, config, prefix="duckduckgo")
+                    except Exception as e:
+                        st.error(f"Search error: {str(e)}")
+                        raise e
 
-                    with col2:
-                        selected_subdir = self.folder_selector_with_creation(stored_dir, "search_save")
-
-                    with col3:
-                        if selected_subdir and st.button(t("download_to_stored"), key="search_download_stored"):
-                            try:
-                                filename = f"{st.session_state.selected_item['name']}{ext}"
-                                filepath = os.path.join(stored_dir, selected_subdir, filename)
-
-                                with open(filepath, 'wb') as f:
-                                    f.write(st.session_state.media_buffer.getvalue())
-                                st.success(f"Saved to stored assets: {filepath}")
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
-
-                    with col4:
-                        if selected_subdir and st.button(t("download_to_both"), key="search_download_both"):
-                            try:
-                                # Save to stored
-                                filename = f"{st.session_state.selected_item['name']}{ext}"
-                                stored_path = os.path.join(stored_dir, selected_subdir, filename)
-                                with open(stored_path, 'wb') as f:
-                                    f.write(st.session_state.media_buffer.getvalue())
-
-                                # Save to current
-                                current_dir = self.expand_path(self.config.get(self.name, {}).get(
-                                    "illustrator_current_dir", t("illustrator_config_default_current")))
-                                os.makedirs(current_dir, exist_ok=True)
-                                current_path = os.path.join(current_dir, filename)
-                                with open(current_path, 'wb') as f:
-                                    f.write(st.session_state.media_buffer.getvalue())
-
-                                st.success(
-                                    f"Saved to stored assets: {stored_path}\n"
-                                    f"Added to current assets: {current_path}"
-                                )
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
+        # Affichage des résultats
+        self._display_search_results("duckduckgo", prefix="duckduckgo")
 
     def run_youtube_assets_tab(self, config):
         """Onglet de recherche d'assets vidéo sur YouTube"""
@@ -701,7 +770,9 @@ class IllustratorPlugin(Plugin):
         tabs = st.tabs([
             t("illustrator_current_tab"),
             t("illustrator_stored_tab"),
-            t("illustrator_search_tab"),
+            "Pexels",
+            "Google",
+            "DuckDuckGo",
             t("illustrator_youtube_tab")
         ])
 
@@ -710,9 +781,14 @@ class IllustratorPlugin(Plugin):
         with tabs[1]:
             self.run_stored_assets_tab(config)
         with tabs[2]:
-            self.run_search_assets_tab(config)
+            self.run_pexels_tab(config)
         with tabs[3]:
+            self.run_google_tab(config)
+        with tabs[4]:
+            self.run_duckduckgo_tab(config)
+        with tabs[5]:
             self.run_youtube_assets_tab(config)
+
 
 
 if __name__ == "__main__":
