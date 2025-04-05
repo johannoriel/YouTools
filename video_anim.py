@@ -62,7 +62,7 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
         def falling_filter(t):
             progress = min(t / duration, 1.0)
             if progress < 0.6:
-                fall_progress = progress / 0.6
+                fall_progress = progress / 0.4 + 0.2
                 y_pos = -target_h + (target_h + normal_y) * (fall_progress ** 2)
             elif progress < 0.8:
                 bounce_progress = (progress - 0.6) / 0.2
