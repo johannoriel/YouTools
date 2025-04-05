@@ -76,6 +76,17 @@ translations["en"].update({
     "movied_import_last": "Import Last",
     "movied_overlap_warning": "Warning: Operations overlap between {start1} - {end1} and {start2} - {end2}",
     "movied_all_ok": "All operations are OK",
+    "movied_filter_videos": "Video Filters",
+    "movied_extensions": "Extensions",
+    "movied_filters": "Filters",
+    "movied_mp4": "MP4",
+    "movied_mkv": "MKV",
+    "movied_exclude_edited": "Exclude _edited",
+    "movied_exclude_chroma": "Exclude chroma_*",
+    "movied_only_chroma": "Only chroma_*",
+    "movied_apply_filters": "Apply Filters",
+    "movied_format_column": "Format",
+    "movied_transcript_column": "Transcript",
 })
 
 translations["fr"].update({
@@ -138,6 +149,17 @@ translations["fr"].update({
     "movied_import_last": "Importer le Dernier",
     "movied_overlap_warning": "Attention : Les opérations se chevauchent entre {start1} - {end1} et {start2} - {end2}",
     "movied_all_ok": "Tout est OK",
+    "movied_filter_videos": "Filtres vidéos",
+    "movied_extensions": "Extensions",
+    "movied_filters": "Filtres",
+    "movied_mp4": "MP4",
+    "movied_mkv": "MKV",
+    "movied_exclude_edited": "Exclure _edited",
+    "movied_exclude_chroma": "Exclure chroma_*",
+    "movied_only_chroma": "Uniquement chroma_*",
+    "movied_apply_filters": "Appliquer les filtres",
+    "movied_format_column": "Format",
+    "movied_transcript_column": "Transcription",
 })
 
 
@@ -272,6 +294,47 @@ class MoviedPlugin(Plugin):
             return selected_model, thumbnail_size, font, font_size, text_background, text_style
 
     def list_videos(self):
+        with st.sidebar.expander(t("movied_filter_videos")):
+            st.markdown(f"**{t('movied_extensions')}:**")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.checkbox(
+                    t("movied_mp4"),
+                    value=True,
+                    key="filter_mp4",
+                    help=t("movied_mp4")
+                )
+            with col2:
+                st.checkbox(
+                    t("movied_mkv"),
+                    value=True,
+                    key="filter_mkv",
+                    help=t("movied_mkv")
+                )
+
+            st.markdown(f"**{t('movied_filters')}:**")
+            st.checkbox(
+                t("movied_exclude_edited"),
+                value=True,
+                key="exclude_edited",
+                help=t("movied_exclude_edited")
+            )
+            st.checkbox(
+                t("movied_exclude_chroma"),
+                value=False,
+                key="exclude_chroma",
+                help=t("movied_exclude_chroma")
+            )
+            st.checkbox(
+                t("movied_only_chroma"),
+                value=False,
+                key="show_only_chroma",
+                help=t("movied_only_chroma")
+            )
+
+            if st.button(t("movied_apply_filters")):
+                st.rerun()
+
         video_extensions = [".mp4", ".mkv", ".avi"]
         videos = []
 
@@ -279,12 +342,17 @@ class MoviedPlugin(Plugin):
         exclude_edited = st.session_state.get("exclude_edited", True)
         exclude_chroma = st.session_state.get("exclude_chroma", False)
         show_only_chroma = st.session_state.get("show_only_chroma", False)
+        filter_mp4 = st.session_state.get("filter_mp4", True)
+        filter_mkv = st.session_state.get("filter_mkv", True)
 
         for file in os.listdir(self.working_dir):
-            if os.path.splitext(file)[1].lower() not in video_extensions:
+            file_lower = file.lower()
+            file_ext = os.path.splitext(file_lower)[1]
+
+            # Filtre par extension
+            if not ((filter_mp4 and file_ext == ".mp4") or (filter_mkv and file_ext == ".mkv")):
                 continue
 
-            file_lower = file.lower()
             base_name = os.path.splitext(file_lower)[0]
 
             # Filtre pour ne montrer que les chroma
@@ -302,46 +370,24 @@ class MoviedPlugin(Plugin):
             videos.append({
                 "Video": file,
                 "Full Path": full_path,
-                "Has Transcript": os.path.exists(vtt_path)
+                "Has Transcript": os.path.exists(vtt_path),
+                "Type": file_ext.upper()[1:]  # Ajout de la colonne Type (MP4/MKV)
             })
         return pd.DataFrame(videos)
 
     def display_videos(self, video_df):
-        with st.sidebar.expander("Filtres vidéos"):
-            # Cases à cocher pour les exclusions
-            st.checkbox(
-                "Exclure les vidéos _edited",
-                value=True,
-                key="exclude_edited",
-                help="Exclure les fichiers se terminant par _edited.*"
-            )
-            st.checkbox(
-                "Exclure les vidéos chroma_*",
-                value=False,
-                key="exclude_chroma",
-                help="Exclure les fichiers commençant par chroma_"
-            )
-
-            # Case à cocher pour le mode exclusif chroma
-            st.checkbox(
-                "Afficher uniquement les chroma_*",
-                value=False,
-                key="show_only_chroma",
-                help="Ne montrer que les fichiers commençant par chroma_"
-            )
-
-            # Bouton pour appliquer les filtres
-            if st.button("Appliquer les filtres"):
-                st.rerun()
-
         st.write(t("movied_video_list"))
         selected_video = st.dataframe(
-            video_df[["Video", "Has Transcript"]],
+            video_df[["Video", "Type", "Has Transcript"]],
             selection_mode="single-row",
             on_select="rerun",
             key="movied_selector",
             hide_index=True,
-            height=200
+            height=200,
+            column_config={
+                "Type": st.column_config.TextColumn(t("movied_format_column")),
+                "Has Transcript": st.column_config.CheckboxColumn(t("movied_transcript_column"))
+            }
         )
         return selected_video
 
@@ -1166,6 +1212,17 @@ class MoviedPlugin(Plugin):
         self.working_dir = config.get(self.name, {}).get("movied_workdir", t("movied_workdir_default"))
         self.media_dirs = config.get(self.name, {}).get("movied_media_dirs", t("movied_media_dirs_default")).split("\n")
         self.reference_audio_path = config.get(self.name, {}).get("movied_reference_audio", "/path/to/sample.mp3")
+
+        if "exclude_edited" not in st.session_state:
+            st.session_state.exclude_edited = True
+        if "exclude_chroma" not in st.session_state:
+            st.session_state.exclude_chroma = False
+        if "show_only_chroma" not in st.session_state:
+            st.session_state.show_only_chroma = False
+        if "filter_mp4" not in st.session_state:
+            st.session_state.filter_mp4 = True
+        if "filter_mkv" not in st.session_state:
+            st.session_state.filter_mkv = True
 
         self.setup_header()
         selected_model, thumbnail_size, font, font_size, text_background, text_style = self.setup_controls()
