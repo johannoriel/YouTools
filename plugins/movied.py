@@ -274,18 +274,66 @@ class MoviedPlugin(Plugin):
     def list_videos(self):
         video_extensions = [".mp4", ".mkv", ".avi"]
         videos = []
+
+        # Récupérer les états des filtres depuis session_state
+        exclude_edited = st.session_state.get("exclude_edited", True)
+        exclude_chroma = st.session_state.get("exclude_chroma", False)
+        show_only_chroma = st.session_state.get("show_only_chroma", False)
+
         for file in os.listdir(self.working_dir):
-            if os.path.splitext(file)[1].lower() in video_extensions:
-                full_path = os.path.join(self.working_dir, file)
-                vtt_path = os.path.splitext(full_path)[0] + ".vtt"
-                videos.append({
-                    "Video": file,
-                    "Full Path": full_path,
-                    "Has Transcript": os.path.exists(vtt_path)
-                })
+            if os.path.splitext(file)[1].lower() not in video_extensions:
+                continue
+
+            file_lower = file.lower()
+            base_name = os.path.splitext(file_lower)[0]
+
+            # Filtre pour ne montrer que les chroma
+            if show_only_chroma and not base_name.startswith("chroma_"):
+                continue
+
+            # Filtres d'exclusion
+            if exclude_edited and base_name.endswith("_edited"):
+                continue
+            if exclude_chroma and base_name.startswith("chroma_"):
+                continue
+
+            full_path = os.path.join(self.working_dir, file)
+            vtt_path = os.path.splitext(full_path)[0] + ".vtt"
+            videos.append({
+                "Video": file,
+                "Full Path": full_path,
+                "Has Transcript": os.path.exists(vtt_path)
+            })
         return pd.DataFrame(videos)
 
     def display_videos(self, video_df):
+        with st.sidebar.expander("Filtres vidéos"):
+            # Cases à cocher pour les exclusions
+            st.checkbox(
+                "Exclure les vidéos _edited",
+                value=True,
+                key="exclude_edited",
+                help="Exclure les fichiers se terminant par _edited.*"
+            )
+            st.checkbox(
+                "Exclure les vidéos chroma_*",
+                value=False,
+                key="exclude_chroma",
+                help="Exclure les fichiers commençant par chroma_"
+            )
+
+            # Case à cocher pour le mode exclusif chroma
+            st.checkbox(
+                "Afficher uniquement les chroma_*",
+                value=False,
+                key="show_only_chroma",
+                help="Ne montrer que les fichiers commençant par chroma_"
+            )
+
+            # Bouton pour appliquer les filtres
+            if st.button("Appliquer les filtres"):
+                st.rerun()
+
         st.write(t("movied_video_list"))
         selected_video = st.dataframe(
             video_df[["Video", "Has Transcript"]],
