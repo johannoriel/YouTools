@@ -452,9 +452,6 @@ def parse_timecode_to_ms(timecode):
         return 0
 
 
-
-
-
 def insert_video(main_clip, start_sec, video_path_insert, target_size):
     """Insère une vidéo à une position donnée."""
     insert_clip = VideoFileClip(video_path_insert).resized(target_size)
@@ -463,26 +460,6 @@ def insert_video(main_clip, start_sec, video_path_insert, target_size):
         main_clip.subclipped(0, start_sec),
         insert_clip,
         main_clip.subclipped(start_sec)
-    ])
-    return new_clip, duration_change
-
-
-def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target_size):
-    """Remplace une section par une autre vidéo, tronquée si elle dépasse la durée spécifiée."""
-    replace_clip = VideoFileClip(video_path_replace).resized(target_size)
-    duration = end_sec - start_sec  # Durée de l'intervalle à remplacer
-
-    # Si la vidéo de remplacement est plus longue que l'intervalle, la tronquer
-    if replace_clip.duration > duration:
-        replace_clip = replace_clip.subclipped(0, duration)
-
-    # Pas de changement de durée total, car on remplace dans un intervalle fixe
-    duration_change = 0  # La durée totale de la vidéo principale reste inchangée
-
-    new_clip = concatenate_videoclips([
-        main_clip.subclipped(0, start_sec),
-        replace_clip,
-        main_clip.subclipped(end_sec)
     ])
     return new_clip, duration_change
 
@@ -514,6 +491,66 @@ def calculate_target_size(source_size, target_size):
         new_width = int(target_height * source_ratio)
 
     return (new_width, new_height)
+
+def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target_size, background="video"):
+    """Remplace une section par une autre vidéo en conservant l'aspect ratio.
+
+    Args:
+        main_clip: Clip vidéo principal
+        start_sec: Début de la section à remplacer (secondes)
+        end_sec: Fin de la section à remplacer (secondes)
+        video_path_replace: Chemin de la vidéo de remplacement
+        target_size: Taille cible (width, height)
+        background: Type de fond ("video" pour la vidéo originale, "green" pour fond vert)
+
+    Returns:
+        Tuple: (nouveau clip, changement de durée)
+    """
+    original_duration = end_sec - start_sec
+    replace_clip = VideoFileClip(video_path_replace)
+    duration_change = replace_clip.duration - original_duration
+
+    # Calcul de la nouvelle taille en conservant l'aspect ratio
+    new_size = calculate_target_size(replace_clip.size, target_size)
+
+    # Préparation du fond
+    if background == "video":
+        background_clip = main_clip.subclipped(start_sec, end_sec)
+    elif background == "green":
+        background_clip = ColorClip(size=target_size, color=(0, 255, 0), duration=min(replace_clip.duration, original_duration))
+    else:  # par défaut fond noir
+        background_clip = ColorClip(size=target_size, color=(0, 0, 0), duration=min(replace_clip.duration, original_duration))
+
+    # Redimensionnement et positionnement avec API MoviePy 2.0
+    resized_clip = replace_clip.with_effects([vfx.Resize(width=new_size[0], height=new_size[1])])
+    x_center = (target_size[0] - new_size[0]) // 2
+    y_center = (target_size[1] - new_size[1]) // 2
+
+    # Composition de la section remplacée
+    if replace_clip.duration > original_duration:
+        replace_clip = CompositeVideoClip([
+            background_clip,
+            resized_clip.subclipped(0, original_duration).with_position((x_center, y_center))
+        ])
+    else:
+        replace_clip = CompositeVideoClip([
+            background_clip,
+            resized_clip.with_position((x_center, y_center))
+        ])
+
+    # Construction du clip final
+    clips = [main_clip.subclipped(0, start_sec), replace_clip]
+
+    # Ajouter le reste de la vidéo originale si la vidéo de remplacement est plus courte
+    if replace_clip.duration < original_duration:
+        remaining_duration = original_duration - replace_clip.duration
+        filler_clip = main_clip.subclipped(end_sec - remaining_duration, end_sec)
+        clips.append(filler_clip)
+
+    clips.append(main_clip.subclipped(end_sec))
+
+    new_clip = concatenate_videoclips(clips)
+    return new_clip, duration_change
 
 def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, target_size, background="video"):
     """Remplace une section par une vidéo en conservant l'audio original, avec option de fond.
