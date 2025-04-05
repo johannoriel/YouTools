@@ -9,6 +9,18 @@ from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, asset_memo
 from io import BytesIO
 from youtube_api import YoutubeAPI
 
+# Constantes pour les extensions de fichiers
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
+VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi')
+AUDIO_EXTENSIONS = ('.mp3', '.wav')
+ALL_EXTENSIONS = IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + AUDIO_EXTENSIONS
+
+# Constantes pour les types de média
+MEDIA_TYPE_ALL = "All"
+MEDIA_TYPE_IMAGES = "Images"
+MEDIA_TYPE_VIDEOS = "Videos"
+MEDIA_TYPE_AUDIO = "Audio"
+
 # Traductions
 translations["en"].update({
     "illustrator_tab": "Illustrator",
@@ -198,11 +210,11 @@ class IllustratorPlugin(Plugin):
 
             # Cas des chemins de fichiers locaux
             elif isinstance(media_data, str):
-                if media_data.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                if media_data.lower().endswith(IMAGE_EXTENSIONS):
                     st.image(media_data)
-                elif media_data.lower().endswith(('.mp4', '.mov', '.avi')):
+                elif media_data.lower().endswith(VIDEO_EXTENSIONS):
                     st.video(media_data, format="video/mp4", autoplay=True)
-                elif media_data.lower().endswith(('.mp3', '.wav')):
+                elif media_data.lower().endswith(AUDIO_EXTENSIONS):
                     st.audio(media_data)
 
             # Cas des résultats de recherche (dictionnaire)
@@ -248,10 +260,10 @@ class IllustratorPlugin(Plugin):
 
         # Filtre par type de média
         media_types = {
-            "All": ['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi', '.mp3', '.wav'],
-            "Images": ['.jpg', '.jpeg', '.png', '.gif'],
-            "Videos": ['.mp4', '.mov', '.avi'],
-            "Audio": ['.mp3', '.wav']
+            MEDIA_TYPE_ALL: ALL_EXTENSIONS,
+            MEDIA_TYPE_IMAGES: IMAGE_EXTENSIONS,
+            MEDIA_TYPE_VIDEOS: VIDEO_EXTENSIONS,
+            MEDIA_TYPE_AUDIO: AUDIO_EXTENSIONS
         }
         selected_type = st.selectbox(
             "Filter by type", list(media_types.keys()))
@@ -300,10 +312,10 @@ class IllustratorPlugin(Plugin):
 
         # Filtre par type de média
         media_types = {
-            "All": ['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi', '.mp3', '.wav'],
-            "Images": ['.jpg', '.jpeg', '.png', '.gif'],
-            "Videos": ['.mp4', '.mov', '.avi'],
-            "Audio": ['.mp3', '.wav']
+            MEDIA_TYPE_ALL: ALL_EXTENSIONS,
+            MEDIA_TYPE_IMAGES: IMAGE_EXTENSIONS,
+            MEDIA_TYPE_VIDEOS: VIDEO_EXTENSIONS,
+            MEDIA_TYPE_AUDIO: AUDIO_EXTENSIONS
         }
 
         # Sélection du sous-répertoire et type de média sur la même ligne
@@ -788,8 +800,3 @@ class IllustratorPlugin(Plugin):
             self.run_duckduckgo_tab(config)
         with tabs[5]:
             self.run_youtube_assets_tab(config)
-
-
-
-if __name__ == "__main__":
-    st.write("Illustrator Plugin standalone test")
