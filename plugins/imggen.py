@@ -196,7 +196,7 @@ class ImggenPlugin(Plugin):
             t("seed"), key="imggen_seed", disabled=use_random_seed)
         use_face = st.checkbox(t("use_face"), key="imggen_use_face")
         steps = st.number_input(
-            t("steps"), min_value=1, value=st.session_state.imggen_steps, key="imggen_steps")
+            t("steps"), min_value=1, key="imggen_steps")
         input_image = st.file_uploader(
             t("input_image"), type=["png", "jpg", "jpeg"])
         styles = config['imggen']['styles'].split(',')
