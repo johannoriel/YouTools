@@ -5,7 +5,7 @@ from plugins.common import remove_quotes
 import os
 import shutil
 from media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
-from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, asset_memory_download, asset_download
+from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, VlipsyAPI, asset_memory_download, asset_download
 from io import BytesIO
 from youtube_api import YoutubeAPI
 import re
@@ -114,7 +114,8 @@ class IllustratorPlugin(Plugin):
         self.apis = {
             "pexels": PexelsAPI(),
             "google": GoogleImageAPI(),
-            "duckduckgo": DuckDuckGoImageAPI()
+            "duckduckgo": DuckDuckGoImageAPI(),
+            "vlipsy": VlipsyAPI()
         }
 
     def get_config_fields(self):
@@ -140,6 +141,11 @@ class IllustratorPlugin(Plugin):
                 "label": "Google Custom Search Engine ID",
                 "default": "",
                 "help": "Required for Google Image Search"
+            },
+            "vlipsy_api_key": {
+                "type": "text",
+                "label": "Vlipsy API Key",
+                "default": "vl_hFxn07bG43d0n9t"
             }
         }
 
@@ -156,6 +162,8 @@ class IllustratorPlugin(Plugin):
              "plugin": "illustratorplugin", "tab": "google"},
             {"name": "DuckDuckGo",
              "plugin": "illustratorplugin", "tab": "duckduckgo"},
+            {"name": "Vlipsy",  # Nouvel onglet
+             "plugin": "illustratorplugin", "tab": "vlipsy"},
             {"name": t("illustrator_youtube_tab"),
              "plugin": "illustratorplugin", "tab": "youtube"}
         ]
@@ -779,6 +787,44 @@ class IllustratorPlugin(Plugin):
             st.error(f"Error saving video: {str(e)}")
             return None
 
+    def run_vlipsy_tab(self, config):
+        """Onglet de recherche Vlipsy"""
+        st.header("Vlipsy Search")
+
+        # Vérification de la clé API
+        vlipsy_api_key = config.get(self.name, {}).get("vlipsy_api_key", "vl_hFxn07bG43d0n9t")
+        if not vlipsy_api_key:
+            st.error("API key for Vlipsy is not configured")
+            return
+
+        # Initialisation des variables de session
+        if 'vlipsy_results' not in st.session_state:
+            st.session_state.vlipsy_results = None
+
+        # Options de recherche
+        keywords = st.text_input(
+            t("illustrator_search_keywords"),
+            key="vlipsy_keywords",
+            on_change=lambda: setattr(st.session_state, 'vlipsy_search_triggered', True)
+        )
+
+        # Recherche soit avec Enter soit avec le bouton
+        if st.button(t("illustrator_search_button"), key="vlipsy_search") or getattr(st.session_state, 'vlipsy_search_triggered', False):
+            st.session_state.vlipsy_search_triggered = False
+            if keywords:
+                with st.spinner("Searching Vlipsy..."):
+                    try:
+                        results = self.apis["vlipsy"].search(
+                            remove_quotes(keywords)
+                        )
+                        self._handle_search_results("vlipsy", results, config, prefix="vlipsy")
+                    except Exception as e:
+                        st.error(f"Search error: {str(e)}")
+                        raise e
+
+        # Affichage des résultats
+        self._display_search_results("vlipsy", prefix="vlipsy")
+
     def run(self, config):
         """Logique principale du plugin"""
         self.config = config
@@ -791,6 +837,7 @@ class IllustratorPlugin(Plugin):
             "Pexels",
             "Google",
             "DuckDuckGo",
+            "Vlipsy",  # Ajout du nouvel onglet
             t("illustrator_youtube_tab")
         ])
 
@@ -805,4 +852,6 @@ class IllustratorPlugin(Plugin):
         with tabs[4]:
             self.run_duckduckgo_tab(config)
         with tabs[5]:
+            self.run_vlipsy_tab(config)  # Nouvelle méthode
+        with tabs[6]:
             self.run_youtube_assets_tab(config)

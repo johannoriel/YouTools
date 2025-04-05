@@ -43,20 +43,22 @@ def asset_memory_download(media_info: Dict) -> tuple:
         return file_data, media_info["type"]
     raise Exception(f"Download failed: {response.status_code}")
 
-class PexelsAPI:
-    def extract_title_from_url(self, url):
-        """Extrait le titre descriptif depuis une URL Pexels."""
-        try:
-            if "video" in url:
-                prefix = "https://www.pexels.com/video/"
-            else:
-                prefix = "https://www.pexels.com/photo/"
+def extract_title_from_url(url):
+    """Extrait le titre descriptif depuis une URL Pexels."""
+    try:
+        if "video" in url:
+            prefix = "https://www.pexels.com/video/"
+        else:
+            prefix = "https://www.pexels.com/photo/"
 
-            title = url.replace(prefix, "").rstrip("/").rsplit("-", 1)[0]
-            # Convertit en format lisible
-            return title.replace("-", " ").title()
-        except Exception:
-            return ""
+        title = url.replace(prefix, "").rstrip("/").rsplit("-", 1)[0]
+        # Convertit en format lisible
+        return title.replace("-", " ").title()
+    except Exception:
+        return ""
+
+class PexelsAPI:
+
 
     # Dans assets_api.py, méthode search de PexelsAPI:
     def search(self, keywords, api_key, media_type="photos"):
@@ -79,7 +81,7 @@ class PexelsAPI:
 
         if media_type == "photos":
             for photo in data.get("photos", []):
-                title = self.extract_title_from_url(
+                title = extract_title_from_url(
                     photo["url"]) or f"Photo {photo['id']}"
                 results.append({
                     "id": photo["id"],
@@ -93,7 +95,7 @@ class PexelsAPI:
         else:  # videos
             for video in data.get("videos", []):
                 # Prendre la première vidéo de qualité moyenne disponible
-                title = self.extract_title_from_url(
+                title = extract_title_from_url(
                     video["url"]) or f"Video {video['id']}"
                 video_file = next(
                     (v for v in video["video_files"] if v["quality"] == "sd"), video["video_files"][0])
@@ -232,6 +234,74 @@ class DuckDuckGoImageAPI:
                 "date": "",  # Pas de date disponible facilement
                 "original_url": item["image"],  # URL originale
                 "type": "photo"
+            })
+
+        return results
+
+class VlipsyAPI:
+    def __init__(self, api_key: str = "vl_hFxn07bG43d0n9t"):
+        """
+        Initialise l'API Vlipsy avec une clé par défaut ou une clé fournie par l'utilisateur.
+        :param api_key: Clé API Vlipsy (par défaut : vl_hFxn07bG43d0n9t)
+        """
+        self.base_url = "https://apiv2.vlipsy.com/v1/vlips"
+        self.api_key = api_key
+
+    def search(self, keywords: str, max_results: int = 10) -> List[Dict]:
+        """
+        Recherche des vidéos MP4 sur Vlipsy via l'API.
+        :param keywords: Mots-clés de recherche
+        :param max_results: Nombre maximum de résultats à retourner
+        :return: Liste de dictionnaires avec les détails des vidéos
+        """
+        # Étape 1 : Requête de recherche
+        search_url = f"{self.base_url}/search"
+        params = {
+            "q": keywords,
+            "limit": 30,
+            "key": self.api_key
+        }
+
+        response = requests.get(search_url, params=params)
+        if response.status_code != 200:
+            raise Exception(f"Vlipsy API search error: {response.status_code} - {response.text}")
+
+        data = response.json()
+        search_results = data.get("data", [])
+        results = []
+
+        # Étape 2 : Pour chaque résultat, obtenir les détails via l'API "vlip by ID"
+        for item in search_results[:max_results]:
+            vlip_id = item.get("id")
+            print(vlip_id)
+            if not vlip_id:
+                continue
+
+            # Requête pour obtenir les détails du vlip
+            vlip_url = f"{self.base_url}/{vlip_id}"
+            params = {"key": self.api_key}
+            vlip_response = requests.get(vlip_url, params=params)
+
+            if vlip_response.status_code != 200:
+                print(f"Error : {vlip_response}")
+                continue  # Passe au suivant si la requête échoue
+
+            vlip_data = vlip_response.json().get("data", {})
+            title = vlip_data.get("title", f"Video {vlip_id}")
+            video_url = vlip_data.get("media", {}).get("mp4", "").get("url", "")
+            thumbnail_url = vlip_data.get("media", {}).get("preview_small").get("url", "")
+
+            if not video_url:
+                continue  # Ignore si pas de vidéo MP4
+
+            results.append({
+                "id": vlip_id,
+                "url": thumbnail_url,
+                "name": title,
+                "date": vlip_data.get("created_at", ""),
+                "original_url": video_url,  # URL directe du MP4
+                "photographer": vlip_data.get("creator", {}).get("username", "Unknown"),  # Créateur
+                "type": "video"
             })
 
         return results
