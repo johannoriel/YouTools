@@ -164,9 +164,51 @@ def is_youtube_url(url):
     parsed_url = urlparse(url)
     return parsed_url.netloc in ['youtube.com', 'www.youtube.com', 'youtu.be']
 
+def filter_comments(lines):
+    """
+    Filtre tous les commentaires entre %% et %%, qu'ils soient sur une ligne ou multilignes.
+    Retourne les lignes sans les commentaires.
+    """
+    filtered_lines = []
+    in_comment = False
+    current_line = []
+
+    for line in lines:
+        if not in_comment:
+            # Recherche du début de commentaire
+            start_idx = line.find('%%')
+            if start_idx == -1:
+                # Pas de commentaire dans cette ligne
+                filtered_lines.append(line)
+                continue
+
+            # Ajouter la partie avant le commentaire
+            filtered_lines.append(line[:start_idx])
+
+            # Vérifier si le commentaire se termine sur la même ligne
+            remaining = line[start_idx+2:]
+            end_idx = remaining.find('%%')
+            if end_idx != -1:
+                # Commentaire se termine sur la même ligne
+                remaining = remaining[end_idx+2:]
+                if remaining:  # S'il reste du texte après %%
+                    filtered_lines.append(remaining)
+            else:
+                # Commentaire continue sur les lignes suivantes
+                in_comment = True
+        else:
+            # On est dans un commentaire, recherche de la fin
+            end_idx = line.find('%%')
+            if end_idx != -1:
+                # Fin du commentaire trouvée
+                in_comment = False
+                remaining = line[end_idx+2:]
+                if remaining:  # S'il reste du texte après %%
+                    filtered_lines.append(remaining)
+
+    return filtered_lines
+
 # Process input lines into slides
-
-
 def process_lines(lines, directories):
     """
     Processes a list of input lines into slides based on specific rules:
@@ -180,23 +222,7 @@ def process_lines(lines, directories):
     result = []
     current_markdown = []
     linkify = LinkifyIt()
-
-    # Pré-traitement pour supprimer les commentaires
-    filtered_lines = []
-    in_comment = False
-
-    for line in lines:
-        stripped_line = line.strip()
-        if stripped_line.startswith("%%") and stripped_line.endswith("%%"):
-            continue
-        if stripped_line == "%%":
-            in_comment = not in_comment
-            continue
-        if not in_comment:
-            filtered_lines.append(line)
-
-    if in_comment:
-        logger.warning("Unclosed comment block detected (missing closing %%)")
+    filtered_lines = filter_comments(lines)
 
     # Première passe : construire la liste initiale avec des groupes vides pour '--'
     i = 0
