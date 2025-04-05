@@ -4,16 +4,13 @@ import streamlit as st
 from plugins.common import remove_quotes
 import os
 import shutil
-from media_selector import media_selector, remote_media_selector
+from media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, asset_memory_download, asset_download
 from io import BytesIO
 from youtube_api import YoutubeAPI
+import re
 
-# Constantes pour les extensions de fichiers
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
-VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi')
-AUDIO_EXTENSIONS = ('.mp3', '.wav')
-ALL_EXTENSIONS = IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + AUDIO_EXTENSIONS
+
 
 # Constantes pour les types de média
 MEDIA_TYPE_ALL = "All"
@@ -358,14 +355,23 @@ class IllustratorPlugin(Plugin):
         st.markdown("---")
         st.subheader("Save Options")
 
+        # Nettoyer le media_name pour ne garder que lettres, chiffres, - et _
+        cleaned_media_name = re.sub(r'[^\w\-_]', '-', media_name)
+
+        # Supprimer les tirets multiples consécutifs
+        cleaned_media_name = re.sub(r'-+', '-', cleaned_media_name)
+
+        # Supprimer les tirets en début et fin de chaîne
+        cleaned_media_name = cleaned_media_name.strip('-')
+
         ext = '.mp4' if media_type == 'video' else '.jpg'
 
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            if st.button(t("download_to_current"), key=f"download_current_{prefix}_{media_name}"):
+            if st.button(t("download_to_current"), key=f"download_current_{prefix}_{cleaned_media_name}"):
                 try:
                     os.makedirs(current_dir, exist_ok=True)
-                    filename = f"{media_name}{ext}"
+                    filename = f"{cleaned_media_name}{ext}"
                     filepath = os.path.join(current_dir, filename)
 
                     with open(filepath, 'wb') as f:
@@ -376,12 +382,12 @@ class IllustratorPlugin(Plugin):
                     st.error(f"Error: {str(e)}")
 
         with col2:
-            selected_subdir = self.folder_selector_with_creation(stored_dir, f"save_{prefix}_{media_name}")
+            selected_subdir = self.folder_selector_with_creation(stored_dir, f"save_{prefix}_{cleaned_media_name}")
 
         with col3:
-            if selected_subdir and st.button(t("download_to_stored"), key=f"download_stored_{prefix}_{media_name}"):
+            if selected_subdir and st.button(t("download_to_stored"), key=f"download_stored_{prefix}_{cleaned_media_name}"):
                 try:
-                    filename = f"{media_name}{ext}"
+                    filename = f"{cleaned_media_name}{ext}"
                     filepath = os.path.join(stored_dir, selected_subdir, filename)
 
                     with open(filepath, 'wb') as f:
@@ -392,10 +398,10 @@ class IllustratorPlugin(Plugin):
                     st.error(f"Error: {str(e)}")
 
         with col4:
-            if selected_subdir and st.button(t("download_to_both"), key=f"download_to_both_{prefix}_{media_name}"):
+            if selected_subdir and st.button(t("download_to_both"), key=f"download_to_both_{prefix}_{cleaned_media_name}"):
                 try:
                     # Save to stored
-                    filename = f"{media_name}{ext}"
+                    filename = f"{cleaned_media_name}{ext}"
                     stored_path = os.path.join(stored_dir, selected_subdir, filename)
                     with open(stored_path, 'wb') as f:
                         media_buffer.seek(0)

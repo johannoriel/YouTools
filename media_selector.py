@@ -35,6 +35,12 @@ translations["fr"].update({
     "media_selector_remote_no_media": "Aucun média disponible."
 })
 
+# Constantes pour les extensions de fichiers
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
+VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi')
+AUDIO_EXTENSIONS = ('.mp3', '.wav')
+ALL_EXTENSIONS = IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + AUDIO_EXTENSIONS
+
 def get_thumbnail(media_path):
     if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
         cap = cv2.VideoCapture(media_path)

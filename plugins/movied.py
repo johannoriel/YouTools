@@ -11,7 +11,7 @@ from video_utils import *
 from video_anim import replace_with_image
 import json
 from moviepy import VideoFileClip
-from media_selector import media_selector
+from media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from datetime import datetime
 import glob
 
@@ -518,8 +518,9 @@ class MoviedPlugin(Plugin):
                         current_end = self.parse_timecode(intermediate_subtitles_df.iloc[selected_indices[i]]["End"])
                         next_start = self.parse_timecode(intermediate_subtitles_df.iloc[selected_indices[i + 1]]["Start"])
                         if current_end != next_start:
-                            is_continuous = False
-                            break
+                            if abs(next_start - current_end) > 0.5:
+                                is_continuous = False
+                                break
 
                     if is_continuous:
                         start_time = intermediate_subtitles_df.iloc[selected_indices[0]]["Start"]
@@ -680,7 +681,7 @@ class MoviedPlugin(Plugin):
                     dir_path) if os.path.isfile(os.path.join(dir_path, f))]
                 for file in files:
                     full_path = os.path.join(dir_path, file)
-                    if file.lower().endswith((".jpg", ".png", ".jpeg")):
+                    if file.lower().endswith(IMAGE_EXTENSIONS):
                         base64_url = image_to_base64(full_path)
                         if base64_url:
                             media_files["images"].append({
@@ -688,7 +689,7 @@ class MoviedPlugin(Plugin):
                                 "Path": full_path,
                                 "Preview": base64_url
                             })
-                    elif file.lower().endswith((".mp4", ".mkv", ".avi")):
+                    elif file.lower().endswith(VIDEO_EXTENSIONS):
                         thumbnail = generate_thumbnail(full_path, 0)
                         if thumbnail:
                             media_files["videos"].append({
@@ -713,9 +714,9 @@ class MoviedPlugin(Plugin):
         col1, col2, col3 = st.columns([1, 1, 1])  # 3 colonnes égales
         with col2:  # Colonne centrale pour la prévisualisation
             st.subheader("Preview")
-            if media_path.lower().endswith(('.jpg', '.png', '.jpeg')):
+            if media_path.lower().endswith(IMAGE_EXTENSIONS):
                 st.image(media_path, use_container_width=True)  # Ajuste à la largeur de la colonne
-            elif media_path.lower().endswith(('.mp4', '.mkv', '.avi')):
+            elif media_path.lower().endswith(VIDEO_EXTENSIONS):
                 st.video(media_path, format="video/mp4", autoplay=True)
 
     def verify_operations(self):
@@ -785,11 +786,11 @@ class MoviedPlugin(Plugin):
             return
 
         # Extension selection
-        all_extensions = [".jpg", ".png", ".jpeg", ".mp4", ".mkv", ".avi"]
+        all_extensions = ALL_EXTENSIONS
         selected_extensions = col2.multiselect(
             "Filter by File Extensions",
             options=all_extensions,
-            default=[".mp4", ".png", ".jpg", ".jpeg"],
+            default=ALL_EXTENSIONS,
             key="extension_select"
         )
 
@@ -818,8 +819,8 @@ class MoviedPlugin(Plugin):
             self.show_media_preview(selected_media)
 
         # Determine media type
-        is_image = selected_media and any(selected_media.lower().endswith(ext) for ext in [".jpg", ".png", ".jpeg"])
-        is_video = selected_media and any(selected_media.lower().endswith(ext) for ext in [".mp4", ".mkv", ".avi"])
+        is_image = selected_media and any(selected_media.lower().endswith(ext) for ext in IMAGE_EXTENSIONS)
+        is_video = selected_media and any(selected_media.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
         has_media = bool(selected_media)
 
         # Text input for operations that need it
@@ -1193,8 +1194,10 @@ class MoviedPlugin(Plugin):
                 # Read and parse JSON
                 data = json.load(uploaded_file)
                 self._import_data_json(data)
-                del st.session_state.operations_log
-                del st.session_state.generated_video_path
+                if 'operation_log' in st.session_state:
+                    del st.session_state.operations_log
+                if 'generated_video_path' in st.session_state:
+                    del st.session_state.generated_video_path
                 st.sidebar.success("Data imported successfully.")
                 st.rerun()
             except Exception as e:
@@ -1213,8 +1216,10 @@ class MoviedPlugin(Plugin):
             with open(latest_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 self._import_data_json(data)
-                del st.session_state.operations_log
-                del st.session_state.generated_video_path
+                if 'operation_log' in st.session_state:
+                    del st.session_state.operations_log
+                if 'generated_video_path' in st.session_state:
+                    del st.session_state.generated_video_path
                 st.sidebar.success(f"Imported last export: {os.path.basename(latest_file)}")
                 st.rerun()
         except Exception as e:
