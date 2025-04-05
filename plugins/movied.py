@@ -615,13 +615,16 @@ class MoviedPlugin(Plugin):
         return edited_df
 
     def handle_final_selection(self):
-        # Step 4: Final selection with single-row mode and unique Refresh button
+        # Step 4: Final selection with single-row mode and Refresh button
         if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
             st.write("No edited subtitles available for final selection.")
             return None, None
 
         st.write(t("movied_final_selection"))
-        if st.button(t("movied_refresh"), key="refresh_final"):  # Unique key added
+        col1, col2 = st.columns(2)
+        multiple_selection = col1.checkbox(t("movied_multiple_selection"), value=False, key="multiple_selection_final")
+        selection_mode = "multi-row" if multiple_selection else "single-row"
+        if col2.button(t("movied_refresh"), key="refresh_final"):
             if "interest_subtitles_df" in st.session_state:
                 current_edited = st.session_state["edited_subtitles_df"]
                 new_base = st.session_state["interest_subtitles_df"].copy()
@@ -638,7 +641,7 @@ class MoviedPlugin(Plugin):
         final_subtitles_df = st.session_state["edited_subtitles_df"]
         selected_final = st.dataframe(
             final_subtitles_df[["Category", "Complement", "Start", "End", "Text"]],
-            selection_mode="single-row",
+            selection_mode=selection_mode,
             on_select="rerun",
             key="final_subtitle_selector",
             hide_index=True
