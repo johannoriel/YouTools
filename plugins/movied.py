@@ -238,8 +238,7 @@ class MoviedPlugin(Plugin):
                             font_name = os.path.basename(font_path)
                             font_dict[font_name] = font_path
                     except Exception as e:
-                        print(
-                            f"Impossible de lire la police {font_path} : {str(e)}")
+                        #print(f"Impossible de lire la police {font_path} : {str(e)}")
                         continue
 
                 # Liste des noms de polices pour l'affichage dans la selectbox
@@ -569,7 +568,7 @@ class MoviedPlugin(Plugin):
             if "Complement" not in st.session_state["edited_subtitles_df"].columns:
                 st.session_state["edited_subtitles_df"]["Complement"] = ""
 
-        if st.button(t("movied_refresh"), key="refresh_edit"):
+        def refresh():
             current_edited = st.session_state["edited_subtitles_df"]
             new_base = st.session_state["interest_subtitles_df"].copy()
             synced_df = new_base.merge(
@@ -580,7 +579,19 @@ class MoviedPlugin(Plugin):
             ).fillna({"Category": "", "Complement": ""})
             synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
             st.session_state["edited_subtitles_df"] = synced_df
+
+        if st.button(t("movied_refresh"), key="refresh_edit"):
+            refresh()
             st.rerun()
+
+        # Bug bypass : https://github.com/streamlit/streamlit/issues/7749
+        def update():
+            for idx, change in st.session_state.subtitle_editor["edited_rows"].items():
+                #print(f"idx : {idx} / change : {change}")
+                for label, value in change.items():
+                    print(f"label : {label} / value : {value}")
+                    st.session_state.edited_subtitles_df.loc[idx, label] = value
+                    refresh() #needed to key idx in sync
 
         edited_df = st.data_editor(
             st.session_state["edited_subtitles_df"],
@@ -595,8 +606,9 @@ class MoviedPlugin(Plugin):
                 ),
                 "Complement": st.column_config.TextColumn("Complement", default="")
             },
-            hide_index=True,
-            key="subtitle_editor"
+            #hide_index=True,
+            key="subtitle_editor",
+            on_change=update
         )
         st.session_state["edited_subtitles_df"] = edited_df
         return edited_df
