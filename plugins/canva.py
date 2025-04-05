@@ -180,7 +180,7 @@ class CanvaPlugin(Plugin):
     def get_auth_url(self, code_challenge, config):
         auth_url = "https://www.canva.com/api/oauth/authorize"
         params = {
-            "client_id": self.getconfig("canva_client_id"),
+            "client_id": self.get_config("canva_client_id"),
             "response_type": "code",
             "scope": "design:content:read folder:read asset:read design:meta:read",
             "redirect_uri": self.get_config("canva_redirect_uri"),
