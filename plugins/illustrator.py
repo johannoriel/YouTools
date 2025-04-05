@@ -9,7 +9,7 @@ from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, VlipsyAPI,
 from io import BytesIO
 from youtube_api import YoutubeAPI
 import re
-
+from video_utils import normalize_audio
 
 
 # Constantes pour les types de média
@@ -365,14 +365,11 @@ class IllustratorPlugin(Plugin):
 
         # Nettoyer le media_name pour ne garder que lettres, chiffres, - et _
         cleaned_media_name = re.sub(r'[^\w\-_]', '-', media_name)
-
-        # Supprimer les tirets multiples consécutifs
         cleaned_media_name = re.sub(r'-+', '-', cleaned_media_name)
-
-        # Supprimer les tirets en début et fin de chaîne
         cleaned_media_name = cleaned_media_name.strip('-')
 
         ext = '.mp4' if media_type == 'video' else '.jpg'
+        reference_audio_path = self.config.get("movied", {}).get("movied_reference_audio", "")
 
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -385,6 +382,11 @@ class IllustratorPlugin(Plugin):
                     with open(filepath, 'wb') as f:
                         media_buffer.seek(0)
                         f.write(media_buffer.read())
+
+                    if media_type == 'video':
+                        with st.spinner("Normalizing audio..."):
+                            normalize_audio(filepath, reference_audio_path, make_backup=False)
+
                     st.success(f"Added to current assets: {filepath}")
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
@@ -401,6 +403,11 @@ class IllustratorPlugin(Plugin):
                     with open(filepath, 'wb') as f:
                         media_buffer.seek(0)
                         f.write(media_buffer.read())
+
+                    if media_type == 'video':
+                        with st.spinner("Normalizing audio..."):
+                            normalize_audio(filepath, reference_audio_path, make_backup=False)
+
                     st.success(f"Saved to stored assets: {filepath}")
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
@@ -415,12 +422,20 @@ class IllustratorPlugin(Plugin):
                         media_buffer.seek(0)
                         f.write(media_buffer.read())
 
+                    if media_type == 'video':
+                        with st.spinner("Normalizing audio..."):
+                            normalize_audio(stored_path, reference_audio_path, make_backup=False)
+
                     # Save to current
                     os.makedirs(current_dir, exist_ok=True)
                     current_path = os.path.join(current_dir, filename)
                     with open(current_path, 'wb') as f:
                         media_buffer.seek(0)
                         f.write(media_buffer.read())
+
+                    if media_type == 'video':
+                        with st.spinner("Normalizing audio..."):
+                            normalize_audio(current_path, reference_audio_path, make_backup=False)
 
                     st.success(
                         f"Saved to stored assets: {stored_path}\n"
@@ -773,13 +788,17 @@ class IllustratorPlugin(Plugin):
 
             # Créer un nom de fichier propre à partir du titre de la vidéo
             title = video_data['original_data']['title']
-            import re
             clean_title = re.sub(r'[^\w\-_\. ]', '_', title)[:100]  # Limite à 100 caractères
             filename = f"{clean_title}.mp4"
             filepath = os.path.join(target_dir, filename)
 
             with open(filepath, 'wb') as f:
                 f.write(st.session_state.processed_segment.getvalue())
+
+            # Normalisation audio pour les vidéos YouTube
+            reference_audio_path = self.config.get("movied", {}).get("movied_reference_audio", "")
+            with st.spinner("Normalizing audio..."):
+                normalize_audio(filepath, reference_audio_path, make_backup=False)
 
             st.success(f"Saved to {filepath}")
             return filepath

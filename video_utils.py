@@ -779,7 +779,7 @@ def remove_section(main_clip, start_sec, end_sec):
     return new_clip, -duration_change
 
 
-def normalize_audio(video_path, reference_audio_path):
+def normalize_audio(video_path, reference_audio_path, make_backup=True):
     """Normalise le son d'une vidéo en utilisant un fichier audio de référence."""
     import os
     import streamlit as st
@@ -814,13 +814,15 @@ def normalize_audio(video_path, reference_audio_path):
 
         # Recomposer la vidéo avec l'audio normalisé
         ffmpeg_cmd = (
-            f'ffmpeg -i "{backup_path}" -i "{temp_audio_path}" '
+            f'ffmpeg -y -i "{backup_path}" -i "{temp_audio_path}" '
             f'-c:v copy -map 0:v:0 -map 1:a:0 "{video_path}" -y'
         )
         os.system(ffmpeg_cmd)
 
         # Supprimer le fichier temporaire
         os.remove(temp_audio_path)
+        if not make_backup:
+            os.remove(backup_path)
 
         st.success(f"Audio normalized for {os.path.basename(video_path)}!")
     except Exception as e:
