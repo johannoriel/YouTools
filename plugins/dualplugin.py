@@ -76,8 +76,9 @@ class DualpluginPlugin(Plugin):
         ]
         return [{"name": name, "plugin": "dualplugin"} for name in tab_names]
 
-    def get_sidebar_config_ui(self, expander, config: Dict[str, Any]):
+    def get_sidebar_config_ui(self, root, config: Dict[str, Any]):
         """Configuration dans la sidebar pour gérer les onglets, presets et sélectionner les plugins"""
+        expander = root.expander("Dual Plugin")
         sidebar_config = {}
 
         # Récupérer la liste des plugins avec presets depuis la config
@@ -114,7 +115,7 @@ class DualpluginPlugin(Plugin):
         # Liste des plugins disponibles
         available_plugins = self.plugin_manager.available_plugins
         plugin_options = [(plugin, plugin.capitalize())
-                          for plugin in available_plugins]
+                        for plugin in available_plugins]
 
         # Sélection dynamique des plugins pour chaque onglet
         selected_plugins = st.session_state[f"{self.name}_selected_plugins"]
