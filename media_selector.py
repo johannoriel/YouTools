@@ -37,7 +37,7 @@ translations["fr"].update({
 
 # Constantes pour les extensions de fichiers
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
-VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi')
+VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv')
 AUDIO_EXTENSIONS = ('.mp3', '.wav')
 ALL_EXTENSIONS = IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + AUDIO_EXTENSIONS
 
