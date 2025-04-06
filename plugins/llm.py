@@ -41,6 +41,7 @@ translations["en"].update({
     "llm_send_prompt": "Send",
     "llm_response_label": "Response",
     "llm_llm_calling_error": "Error calling LLM: ",
+    "llm_no_v1_label": "No /v1 in endpoint",
 })
 
 translations["fr"].update({
@@ -74,6 +75,7 @@ translations["fr"].update({
     "llm_send_prompt": "Envoyer",
     "llm_response_label": "Réponse",
     "llm_llm_calling_error": "Erreur lors de l'appel au LLM : ",
+    "llm_no_v1_label": "Pas de /v1 dans l'endpoint",
 })
 
 
@@ -211,13 +213,17 @@ class LlmPlugin(Plugin):
                                            key=f"api_key_{i}")
                     if api_key == "":
                         api_key = st.text_input("Manual API Key", value="", key=f"manual_key_{i}")
+                    # Ajout du checkbox pour no_v1
+                    no_v1 = st.checkbox(t("llm_no_v1_label"),
+                                       value=api.get("no_v1", False),
+                                       key=f"no_v1_{i}")
                 if st.button("Remove", key=f"remove_api_{i}"):
                     del st.session_state.apis[i]
                     st.rerun()
-                st.session_state.apis[i] = {"name": name, "url": url, "api_key": api_key}
+                st.session_state.apis[i] = {"name": name, "url": url, "api_key": api_key, "no_v1": no_v1}
 
         if st.button(t("llm_add_api")):
-            st.session_state.apis.append({"name": "", "url": "", "api_key": ""})
+            st.session_state.apis.append({"name": "", "url": "", "api_key": "", "no_v1": False})
             st.rerun()
 
         if st.button("Save APIs"):
@@ -277,9 +283,9 @@ class LlmPlugin(Plugin):
         api_options = [f"{api['name']} ({api['url']})" for api in st.session_state.apis]
         selected_api = st.selectbox(t("llm_select_api"), api_options)
         api = next(a for a in st.session_state.apis if f"{a['name']} ({a['url']})" == selected_api)
-        url, api_key = api["url"], next((k["value"] for k in st.session_state.api_keys if k["name"] == api["api_key"]), "")
+        url, api_key = api["url"], api["api_key"]
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             if st.button(t("llm_get_models") + "/api/tags"):
                 st.session_state.available_models_cache[url] = self.get_available_models(url, api_key, "/api/tags")
@@ -289,6 +295,9 @@ class LlmPlugin(Plugin):
         with col3:
             if st.button(t("llm_get_models") + "/tags"):
                 st.session_state.available_models_cache[url] = self.get_available_models(url, api_key, "/tags")
+        with col4:
+            if st.button(t("llm_get_models") + "/models"):
+                st.session_state.available_models_cache[url] = self.get_available_models(url, api_key, "/models")
 
         if 'llm_api_model' not in st.session_state:
             st.session_state.llm_api_model = None
@@ -344,7 +353,7 @@ class LlmPlugin(Plugin):
             self.plugin_manager.save_config(config)
             st.success("Models saved successfully!")
 
-    def call_llm(self, url, api_key, model, prompt, temperature=0.7, max_tokens=4096, delay=0, max_retries=1):
+    def call_llm(self, url, api_key, model, prompt, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False):
         """Appelle l'API LLM avec gestion des retries et du délai."""
         print(f"Generating with model {model} at {url}")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -352,14 +361,19 @@ class LlmPlugin(Plugin):
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_tokens
+            #"temperature": temperature,
+            #"max_tokens": max_tokens,
         }
+
+        # Construction de l'URL en fonction de no_v1
+        endpoint = "/chat/completions" if no_v1 else "/v1/chat/completions"
+        full_url = f"{url}{endpoint}"
+
         attempts = 0
         while attempts < max_retries:
             try:
-                print("Calling LLM...")
-                response = requests.post(f"{url}/v1/chat/completions", headers=headers, data=json.dumps(payload), timeout=10)
+                print(f"Calling LLM...{model} at {full_url} with {api_key}")
+                response = requests.post(full_url, headers=headers, data=json.dumps(payload), timeout=10)
                 print(response)
                 response.raise_for_status()
                 data = response.json()
@@ -387,8 +401,12 @@ class LlmPlugin(Plugin):
         if not model:
             return f"{t('llm_llm_calling_error')}Selected model not found"
 
+        # Récupérer le paramètre no_v1 de l'API associée
+        api = next((a for a in st.session_state.apis if a["url"] == model["url"]), None)
+        no_v1 = api.get("no_v1", False) if api else False
+
         attempt = 0
-        max_delay = 60  # Maximum 1 minute entre appels
+        max_delay = 60
         api_key = next((k["value"] for k in st.session_state.api_keys if k["name"] == model["api_key"]), "")
         while attempt <= number_repeat:
             try:
@@ -400,20 +418,19 @@ class LlmPlugin(Plugin):
                     temperature=model["temperature"],
                     max_tokens=model["max_tokens"],
                     delay=0,
-                    max_retries=1
+                    max_retries=1,
+                    no_v1=no_v1
                 )
             except Exception as e:
                 if not repeat_on_failure or attempt == number_repeat:
                     return f"{t('llm_llm_calling_error')}{str(e)}"
-                # Calcul du délai exponentiel basé sur le delay par défaut du modèle
                 delay = min(2 ** attempt * model["delay"] if model["delay"] > 0 else 2 ** attempt, max_delay)
-                st.warning(
-                    f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay} seconds...")
+                st.warning(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay} seconds...")
                 time.sleep(delay)
                 attempt += 1
-        raise Exception()
         return f"{t('llm_llm_calling_error')}Max retries exceeded"
 
+    # Modifier chat_tab pour passer no_v1
     def chat_tab(self, config):
         st.header(t("llm_chat_header"))
         if 'models' not in st.session_state:
@@ -432,6 +449,12 @@ class LlmPlugin(Plugin):
             st.write("Selected model not found in the list.")
             return
 
+        # Récupérer le paramètre no_v1 de l'API associée
+        api = next((a for a in st.session_state.apis if a["url"] == model["url"]), None)
+        api_key = next((k["value"] for k in st.session_state.api_keys if k["name"] == model["api_key"]), "")
+        st.write(f"Api key : {api_key}")
+        no_v1 = api.get("no_v1", False) if api else False
+
         st.write(f"Current Model: {model['name']}")
         prompt = st.text_area(t("llm_prompt_label"), height=100)
 
@@ -439,13 +462,14 @@ class LlmPlugin(Plugin):
             with st.spinner("Generating response..."):
                 response = self.call_llm(
                     url=model["url"],
-                    api_key=next((k["value"] for k in st.session_state.api_keys if k["name"] == model["api_key"]), ""),
+                    api_key=api_key,
                     model=model["model"],
                     prompt=prompt,
                     temperature=model["temperature"],
                     max_tokens=model["max_tokens"],
                     delay=model["delay"],
-                    max_retries=model["max_retries"]
+                    max_retries=model["max_retries"],
+                    no_v1=no_v1
                 )
                 st.subheader(t("llm_response_label"))
                 st.write(response)
