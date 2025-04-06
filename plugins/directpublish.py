@@ -212,7 +212,7 @@ class DirectpublishPlugin(Plugin):
         )
 
         if 'rag_question' not in st.session_state:
-            st.session_state.rag_question = config['llm']['llm_prompt']
+            st.session_state.rag_question = config['ragllm']['llm_prompt']
 
         user_prompt = st.text_area(
             t("directpublish_preprompt"), value=st.session_state.rag_question, key="rag_prompt_key")

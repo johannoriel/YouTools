@@ -43,9 +43,11 @@ translations["en"].update({
     "rag_embedder_model": "Embedding Model",
     "rag_similarity_method": "Similarity Method",
     "rag_llm_sys_prompt": "System prompt for LLM",
+    "rag_llm_prompt": "Prompt for LLM",
     "rag_chunk_size": "Chunk size",
     "rag_top_k_chunks": "Number of chunks to use",
     "rag_default_sys_prompt": "You are an AI assistant. Your task is to analyze the provided context and answer questions based ONLY on this context. If the information is not in the context, clearly state that.",
+    "rag_default_prompt": "Prompt",
     "rag_error_fetching_models_ollama": "Error fetching Ollama models: ",
     "rag_error_calling_llm": "Error calling LLM: ",
     "rag_processing": "Processing...",
@@ -67,9 +69,11 @@ translations["fr"].update({
     "rag_embedder_model": "Modèle d'embedding",
     "rag_similarity_method": "Méthode de similarité",
     "rag_llm_sys_prompt": "Prompt système pour le LLM",
+    "rag_llm_prompt": "Prompt pour le LLM",
     "rag_chunk_size": "Taille des chunks",
     "rag_top_k_chunks": "Nombre de chunks à utiliser",
     "rag_default_sys_prompt": "Tu es un assistant IA. Ta tâche est d'analyser le contexte fourni et de répondre aux questions en te basant UNIQUEMENT sur ce contexte. Si l'information n'est pas dans le contexte, dis-le clairement.",
+    "rag_default_prompt": "Votre prompt",
     "rag_error_fetching_models_ollama": "Erreur lors de la récupération des modèles Ollama : ",
     "rag_error_calling_llm": "Erreur lors de l'appel au LLM : ",
     "rag_processing": "En cours de traitement...",
@@ -128,6 +132,11 @@ class RagllmPlugin(Plugin):
                 "label": t("rag_llm_sys_prompt"),
                 "default": t("rag_default_sys_prompt")
             },
+            "llm_prompt": {
+                "type": "textarea",
+                "label": t("rag_llm_prompt"),
+                "default": t("rag_default_prompt")
+            },
             "chunk_size": {
                 "type": "number",
                 "label": t("rag_chunk_size"),
@@ -137,7 +146,7 @@ class RagllmPlugin(Plugin):
                 "type": "number",
                 "label": t("rag_top_k_chunks"),
                 "default": 3
-            }
+            },
         }
 
     def get_config_ui(self, config):

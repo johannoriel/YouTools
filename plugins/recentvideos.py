@@ -219,7 +219,7 @@ class RecentvideosPlugin(Plugin):
                     st.success(t("recent_videos_save_success"))
             with col4:
                 llm_plugin = self.plugin_manager.get_plugin('llm')
-                llm_config = config.get('llm', {})
+                llm_config = config.get('ragllm', {})
                 prompt = llm_config.get('llm_prompt', '')
                 with st.expander("Prompt"):
                     st.markdown("Voulez-vous changer le prompt ?")

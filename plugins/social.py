@@ -351,7 +351,7 @@ Chaque tweet doit faire maximum 280 caractères."""
                 ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
                 llm_response = ragllm_plugin.process_with_llm(
                     prompt,
-                    config.get('llm', {}).get('llm_sys_prompt', ''),
+                    config.get('ragllm', {}).get('llm_sys_prompt', ''),
                     transcript
                 )
 
