@@ -11,7 +11,7 @@ torch.classes.__path__ = []
 
 # Constants
 CONFIG_FILE = "config.json"
-CORE_PLUGINS = {'common', 'ragllm'}  # Add your essential plugins here
+CORE_PLUGINS = {'common', 'ragllm', 'llm'}  # Add your essential plugins here
 
 
 def load_config() -> Dict[str, Any]:
@@ -78,6 +78,12 @@ class Plugin:
 
     def get_sidebar_config_ui(self, expander, config: Dict[str, Any]) -> Dict[str, Any]:
         return {}
+
+    def process_with_llm(self, prompt: str, sysprompt: str, context: str, repeat_on_failure: bool = True, number_repeat: int = 2) -> str:
+        print(f"Generating with internal plugin LLM")
+        llm = self.plugin_manager.get_plugin('llm')
+        response = llm.process_with_llm(prompt, sysprompt, context, repeat_on_failure, number_repeat)
+        return response
 
 
 class PluginManager:
@@ -187,6 +193,7 @@ class PluginManager:
 
 def main():
     # Load configuration
+    load_dotenv()
     config = load_config()
     # Initialize language
     if 'lang' not in st.session_state:
