@@ -88,6 +88,7 @@ translations["en"].update({
     "movied_format_column": "Format",
     "movied_transcript_column": "Transcript",
     "movied_suggestions": "Suggestions",
+    "movied_block_add": "Block Add",
 })
 
 translations["fr"].update({
@@ -162,6 +163,7 @@ translations["fr"].update({
     "movied_format_column": "Format",
     "movied_transcript_column": "Transcription",
     "movied_suggestions": "Suggestions",
+    "movied_block_add": "Ajout bloc",
 })
 
 
@@ -442,7 +444,7 @@ class MoviedPlugin(Plugin):
         return selected_video
 
     def handle_transcript(self, selected_video, video_df, selected_model):
-        # Step 1: Display all subtitles with "Add" and "Forced Add" buttons
+        # Step 1: Display all subtitles with "Add", "Block Add", "Forced Add", and "Suggestions" buttons
         if selected_video["selection"]["rows"]:
             idx = selected_video["selection"]["rows"][0]
             video_info = video_df.iloc[idx]
@@ -489,7 +491,7 @@ class MoviedPlugin(Plugin):
                     hide_index=True
                 )
 
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4 = st.columns(4)  # Adjusted to 4 columns
                 with col1:
                     if st.button(t("movied_add_to_interest")) and selected_subtitles["selection"]["rows"]:
                         selected_indices = selected_subtitles["selection"]["rows"]
@@ -510,6 +512,56 @@ class MoviedPlugin(Plugin):
                             st.rerun()
 
                 with col2:
+                    if st.button(t("movied_block_add"), key="movied_block_add") and selected_subtitles["selection"]["rows"]:
+                        selected_indices = sorted(selected_subtitles["selection"]["rows"])
+                        if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
+                            # Group consecutive selections into blocks
+                            blocks = []
+                            current_block = []
+                            prev_idx = None
+
+                            for idx in selected_indices:
+                                if prev_idx is None or idx == prev_idx + 1:
+                                    current_block.append(idx)
+                                else:
+                                    blocks.append(current_block)
+                                    current_block = [idx]
+                                prev_idx = idx
+                            if current_block:
+                                blocks.append(current_block)
+
+                            # Process each block
+                            new_entries = []
+                            for block in blocks:
+                                if len(block) == 1:
+                                    new_entries.append(subtitles_df.iloc[block[0]][["Start", "End", "Text"]])
+                                else:
+                                    start_time = subtitles_df.iloc[block[0]]["Start"]
+                                    end_time = subtitles_df.iloc[block[-1]]["End"]
+                                    merged_text = " ".join(subtitles_df.iloc[block]["Text"].tolist())
+                                    new_entries.append(pd.Series({
+                                        "Start": start_time,
+                                        "End": end_time,
+                                        "Text": merged_text
+                                    }))
+
+                            new_df = pd.DataFrame(new_entries)
+                            if "interest_subtitles_df" not in st.session_state:
+                                st.session_state["interest_subtitles_df"] = new_df
+                            else:
+                                existing = st.session_state["interest_subtitles_df"][["Start", "End", "Text"]]
+                                combined = pd.concat([existing, new_df]).drop_duplicates(subset=["Start", "End", "Text"]).reset_index(drop=True)
+                                if "Category" in st.session_state["interest_subtitles_df"].columns:
+                                    combined = combined.merge(
+                                        st.session_state["interest_subtitles_df"][["Start", "End", "Text", "Category", "Complement"]],
+                                        on=["Start", "End", "Text"],
+                                        how="left"
+                                    ).fillna({"Category": "", "Complement": ""})
+                                st.session_state["interest_subtitles_df"] = combined
+                            st.success(f"Added {len(blocks)} block(s) to interest subtitles")
+                            st.rerun()
+
+                with col3:
                     if st.button(t("movied_force_add")) and selected_subtitles["selection"]["rows"]:
                         selected_indices = selected_subtitles["selection"]["rows"]
                         if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
@@ -521,13 +573,9 @@ class MoviedPlugin(Plugin):
                                 st.session_state["interest_subtitles_df"] = combined
                             st.rerun()
 
-                with col3:
-                    if st.button("Suggestions", key="llm_suggestions_btn"):
-                        self.handle_llm_suggestions(video_info["Full Path"], vtt_path, subtitles_df)
-
                 with col4:
-                    if st.button("Deduplicate", key="deduplicate_step2"):
-                        self.remove_duplicates_step2()
+                    if st.button(t("movied_suggestions"), key="llm_suggestions_btn"):
+                        self.handle_llm_suggestions(video_info["Full Path"], vtt_path, subtitles_df)
 
                 return selected_subtitles, subtitles_df, vtt_path
             return None, None, None
