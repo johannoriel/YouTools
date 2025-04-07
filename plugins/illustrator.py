@@ -43,7 +43,7 @@ translations["en"].update({
     "illustrator_media_type": "Media Type",
     "illustrator_photos": "Photos",
     "illustrator_videos": "Videos",
-    "both": "Both",
+    "illustrator_both": "Both",
     "All": "All",
     "Images": "Images",
     "Videos": "Videos",
@@ -87,7 +87,7 @@ translations["fr"].update({
     "illustrator_media_type": "Type de média",
     "illustrator_photos": "Photos",
     "illustrator_videos": "Vidéos",
-    "both": "Les deux",
+    "illustrator_both": "Les deux",
     "All": "Tous",
     "Images": "Images",
     "Videos": "Vidéos",
@@ -367,6 +367,12 @@ class IllustratorPlugin(Plugin):
         cleaned_media_name = re.sub(r'[^\w\-_]', '-', media_name)
         cleaned_media_name = re.sub(r'-+', '-', cleaned_media_name)
         cleaned_media_name = cleaned_media_name.strip('-')
+
+        # Ajouter le mot-clé de recherche global si disponible et non présent
+        search_keyword = st.session_state.get('last_global_search', '')
+        if (search_keyword and
+            search_keyword.lower() not in cleaned_media_name.lower()):
+            cleaned_media_name = f"{cleaned_media_name}_{search_keyword.replace(' ', '_')}"
 
         ext = '.mp4' if media_type == 'video' else '.jpg'
         reference_audio_path = self.config.get("movied", {}).get("movied_reference_audio", "")
@@ -789,6 +795,13 @@ class IllustratorPlugin(Plugin):
             # Créer un nom de fichier propre à partir du titre de la vidéo
             title = video_data['original_data']['title']
             clean_title = re.sub(r'[^\w\-_\. ]', '_', title)[:100]  # Limite à 100 caractères
+
+            # Ajouter le mot-clé de recherche global si disponible et non présent
+            search_keyword = st.session_state.get('last_global_search', '')
+            if (search_keyword and
+                search_keyword.lower() not in clean_title.lower()):
+                clean_title = f"{clean_title}_{search_keyword.replace(' ', '_')}"
+
             filename = f"{clean_title}.mp4"
             filepath = os.path.join(target_dir, filename)
 
@@ -849,6 +862,89 @@ class IllustratorPlugin(Plugin):
         self.config = config
         st.header(t("illustrator_header"))
 
+        # Ajout de la recherche globale
+        with st.container():
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                global_search_query = st.text_input(
+                    "Recherche globale (appuyez sur Entrée ou cliquez le bouton)",
+                    key="global_search",
+                    help="Recherche sur tous les moteurs simultanément"
+                )
+            with col2:
+                if st.button("Lancer la recherche globale", use_container_width=True):
+                    st.session_state.global_search_triggered = True
+
+        # Si recherche globale déclenchée
+        if (st.session_state.get('global_search_triggered')):
+            st.session_state.global_search_triggered = False
+            if global_search_query:
+                with st.spinner("Lancement des recherches globales..."):
+                    # Stocker la requête pour l'ajout aux noms de fichiers
+                    st.session_state.last_global_search = global_search_query
+                    st.session_state.pexels_keywords = global_search_query
+                    st.session_state.google_keywords = global_search_query
+                    st.session_state.duckduckgo_keywords = global_search_query
+                    st.session_state.vlipsy_keywords = global_search_query
+                    st.session_state.youtube_keywords = global_search_query
+                    # Lancer les recherches sur tous les onglets
+                    try:
+                        st.write("Global search runing...")
+                        # Pexels
+                        if config.get(self.name, {}).get("pexels_api_key"):
+                            results = []
+                            st.write("Pexel search...")
+                            photos = self.apis["pexels"].search(
+                                remove_quotes(global_search_query),
+                                config.get(self.name, {}).get("pexels_api_key"),
+                                "photos"
+                            )
+                            results.extend(photos)
+                            videos = self.apis["pexels"].search(
+                                remove_quotes(global_search_query),
+                                config.get(self.name, {}).get("pexels_api_key"),
+                                "videos"
+                            )
+                            results.extend(videos)
+                            self._handle_search_results("pexels", results, config, prefix="pexels")
+
+                        # Google
+                        if (config.get('common', {}).get('youtube_api_key') and
+                            config.get(self.name, {}).get('google_cx')):
+                            st.write("Google search...")
+                            results = self.apis["google"].search(
+                                remove_quotes(global_search_query),
+                                config.get('common', {}).get('youtube_api_key'),
+                                config.get(self.name, {}).get('google_cx')
+                            )
+                            self._handle_search_results("google", results, config, prefix="google")
+
+                        # DuckDuckGo
+                        st.write("DuckDuckGo search...")
+                        results = self.apis["duckduckgo"].search(
+                            remove_quotes(global_search_query)
+                        )
+                        self._handle_search_results("duckduckgo", results, config, prefix="duckduckgo")
+
+                        # Vlipsy
+                        if config.get(self.name, {}).get("vlipsy_api_key"):
+                            st.write("Vlipsy search...")
+                            results = self.apis["vlipsy"].search(
+                                remove_quotes(global_search_query)
+                            )
+                            self._handle_search_results("vlipsy", results, config, prefix="vlipsy")
+
+                        # YouTube
+                        st.write("Youtube search...")
+                        youtube_api = YoutubeAPI(config)
+                        st.session_state.youtube_results = youtube_api.search_assets(
+                            global_search_query,
+                            creative_commons=True
+                        )
+
+                    except Exception as e:
+                        st.error(f"Erreur lors de la recherche globale: {str(e)}")
+
         # Navigation par onglets
         tabs = st.tabs([
             t("illustrator_current_tab"),
@@ -856,9 +952,10 @@ class IllustratorPlugin(Plugin):
             "Pexels",
             "Google",
             "DuckDuckGo",
-            "Vlipsy",  # Ajout du nouvel onglet
+            "Vlipsy",
             t("illustrator_youtube_tab")
         ])
+
 
         with tabs[0]:
             self.run_current_assets_tab(config)
