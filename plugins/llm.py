@@ -42,6 +42,7 @@ translations["en"].update({
     "llm_response_label": "Response",
     "llm_llm_calling_error": "Error calling LLM: ",
     "llm_no_v1_label": "No /v1 in endpoint",
+    "llm_timeout_label": "Timeout (seconds)",
 })
 
 translations["fr"].update({
@@ -76,6 +77,7 @@ translations["fr"].update({
     "llm_response_label": "Réponse",
     "llm_llm_calling_error": "Erreur lors de l'appel au LLM : ",
     "llm_no_v1_label": "Pas de /v1 dans l'endpoint",
+    "llm_timeout_label": "Timeout (secondes)",
 })
 
 
@@ -360,8 +362,8 @@ class LlmPlugin(Plugin):
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            #"temperature": temperature,
-            #"max_tokens": max_tokens,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
         }
 
         # Construction de l'URL en fonction de no_v1
@@ -371,8 +373,8 @@ class LlmPlugin(Plugin):
         attempts = 0
         while attempts < max_retries:
             try:
-                #print(f"Calling LLM...{model} at {full_url} with {api_key}")
-                response = requests.post(full_url, headers=headers, data=json.dumps(payload), timeout=10)
+                #print(f"Calling LLM...{model} at {full_url} with {api_key} wait {delay}s")
+                response = requests.post(full_url, headers=headers, data=json.dumps(payload), timeout=3)
                 #print(response)
                 response.raise_for_status()
                 data = response.json()
@@ -382,7 +384,7 @@ class LlmPlugin(Plugin):
                 #print(result)
                 return result
             except Exception as e:
-                st.warning(f"Failed to call {response}")
+                st.warning(f"Failed to call {model} at {full_url} with {api_key} wait {delay}s : {str(e)}")
                 attempts += 1
                 if attempts == max_retries:
                     return f"Error: Failed after {max_retries} attempts - {str(e)}"
@@ -462,7 +464,7 @@ class LlmPlugin(Plugin):
                     prompt=f"{context}\n\n{prompt}",
                     temperature=model["temperature"],
                     max_tokens=model["max_tokens"],
-                    delay=0,
+                    delay=int(model["delay"]),
                     max_retries=1,
                     no_v1=no_v1
                 )
