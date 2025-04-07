@@ -319,6 +319,9 @@ class LlmPlugin(Plugin):
         with col4:
             max_retries = st.number_input(t("llm_max_retries_label"), min_value=1, value=1, step=1)
 
+        # Ajout du champ timeout
+        timeout = st.number_input("Timeout (seconds)", min_value=1, value=3, step=1)
+
         if st.button(t("llm_add_model")) and model_name:
             st.session_state.models.append({
                 "name": model_name or default_name,
@@ -328,7 +331,8 @@ class LlmPlugin(Plugin):
                 "temperature": temp,
                 "max_tokens": max_tokens,
                 "delay": delay,
-                "max_retries": max_retries
+                "max_retries": max_retries,
+                "timeout": timeout  # Ajout du timeout
             })
             st.rerun()
 
@@ -342,12 +346,15 @@ class LlmPlugin(Plugin):
                 max_tokens = st.number_input(t("llm_max_tokens_label"), min_value=1, value=model.get("max_tokens", 4096), step=100, key=f"max_tokens_{i}")
                 delay = st.number_input(t("llm_delay_label"), min_value=0.0, value=model.get("delay", 0.0), step=0.1, key=f"delay_{i}")
                 max_retries = st.number_input(t("llm_max_retries_label"), min_value=1, value=model.get("max_retries", 3), step=1, key=f"max_retries_{i}")
+                # Ajout du champ timeout pour l'édition
+                timeout = st.number_input("Timeout (seconds)", min_value=1, value=model.get("timeout", 3), step=1, key=f"timeout_{i}")
                 if st.button("Remove", key=f"remove_model_{i}"):
                     del st.session_state.models[i]
                     st.rerun()
                 st.session_state.models[i] = {
                     "name": name, "url": url, "model": model_name, "api_key": api_key,
-                    "temperature": temp, "max_tokens": max_tokens, "delay": delay, "max_retries": max_retries
+                    "temperature": temp, "max_tokens": max_tokens, "delay": delay,
+                    "max_retries": max_retries, "timeout": timeout  # Ajout du timeout
                 }
 
         if st.button("Save Models"):
@@ -355,7 +362,7 @@ class LlmPlugin(Plugin):
             self.plugin_manager.save_config(config)
             st.success("Models saved successfully!")
 
-    def call_llm(self, url, api_key, model, prompt, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False):
+    def call_llm(self, url, api_key, model, prompt, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False, timeout=3):
         """Appelle l'API LLM avec gestion des retries et du délai."""
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         headers["Content-Type"] = "application/json"
@@ -374,7 +381,7 @@ class LlmPlugin(Plugin):
         while attempts < max_retries:
             try:
                 #print(f"Calling LLM...{model} at {full_url} with {api_key} wait {delay}s")
-                response = requests.post(full_url, headers=headers, data=json.dumps(payload), timeout=3)
+                response = requests.post(full_url, headers=headers, data=json.dumps(payload), timeout=timeout)
                 #print(response)
                 response.raise_for_status()
                 data = response.json()
@@ -384,7 +391,7 @@ class LlmPlugin(Plugin):
                 #print(result)
                 return result
             except Exception as e:
-                st.warning(f"Failed to call {model} at {full_url} with {api_key} wait {delay}s : {str(e)}")
+                st.warning(f"Failed to call {model} at {full_url} with {api_key} wait {delay}s timeout {timeout}s : {str(e)}")
                 attempts += 1
                 if attempts == max_retries:
                     return f"Error: Failed after {max_retries} attempts - {str(e)}"
@@ -414,7 +421,8 @@ class LlmPlugin(Plugin):
                     max_tokens=model["max_tokens"],
                     delay=model["delay"],
                     max_retries=model["max_retries"],
-                    no_v1=no_v1
+                    no_v1=no_v1,
+                    timeout=model.get("timeout", 3)
                 )
 
                 results.append({
@@ -466,7 +474,8 @@ class LlmPlugin(Plugin):
                     max_tokens=model["max_tokens"],
                     delay=int(model["delay"]),
                     max_retries=1,
-                    no_v1=no_v1
+                    no_v1=no_v1,
+                    timeout=model.get("timeout", 3)
                 )
             except Exception as e:
                 if not repeat_on_failure or attempt == number_repeat:
@@ -518,7 +527,8 @@ class LlmPlugin(Plugin):
                         max_tokens=model["max_tokens"],
                         delay=model["delay"],
                         max_retries=model["max_retries"],
-                        no_v1=no_v1
+                        no_v1=no_v1,
+                        timeout=model.get("timeout", 3)
                     )
                     st.subheader(t("llm_response_label"))
                     st.write(response)
