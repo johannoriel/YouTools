@@ -240,7 +240,9 @@ def main():
     # Ajouter le bouton "Clean session" dans la barre latérale
     col1, col2 = expander.columns([1, 1])
     if col1.button(t("Clean session")):
+        tab = st.session_state.selected_tab_id
         st.session_state.clear()  # Cela réinitialise st.session_state
+        st.session_state.selected_tab_id = tab
         st.rerun()  # Relancer l'application pour refléter les changements
     if col2.button(t("Rerun")):
         st.rerun()
