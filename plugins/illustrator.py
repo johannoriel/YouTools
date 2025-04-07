@@ -368,11 +368,16 @@ class IllustratorPlugin(Plugin):
         cleaned_media_name = re.sub(r'-+', '-', cleaned_media_name)
         cleaned_media_name = cleaned_media_name.strip('-')
 
-        # Ajouter le mot-clé de recherche global si disponible et non présent
-        search_keyword = st.session_state.get('last_global_search', '')
+        # Récupérer le dernier mot-clé utilisé pour cette recherche spécifique
+        search_keyword = st.session_state.get(f"last_search_keyword_{prefix}", "")
+
+        # Ajouter le mot-clé de recherche si disponible et non présent
         if (search_keyword and
             search_keyword.lower() not in cleaned_media_name.lower()):
-            cleaned_media_name = f"{cleaned_media_name}_{search_keyword.replace(' ', '_')}"
+            # Nettoyer le mot-clé pour le nom de fichier
+            clean_keyword = re.sub(r'[^\w\-_]', '-', search_keyword)
+            clean_keyword = re.sub(r'-+', '-', clean_keyword).strip('-')
+            cleaned_media_name = f"{cleaned_media_name}_{clean_keyword}"
 
         ext = '.mp4' if media_type == 'video' else '.jpg'
         reference_audio_path = self.config.get("movied", {}).get("movied_reference_audio", "")
@@ -450,8 +455,11 @@ class IllustratorPlugin(Plugin):
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
-    def _handle_search_results(self, api_name, results, config, prefix=""):
+    def _handle_search_results(self, api_name, results, config, prefix="", search_keyword=""):
         """Gère l'affichage et la sélection des résultats de recherche (commun à tous les moteurs)"""
+        # Stocker le mot-clé utilisé pour cette recherche
+        st.session_state[f"last_search_keyword_{prefix}"] = search_keyword
+
         stored_dir = self.expand_path(config.get(self.name, {}).get(
             "illustrator_stored_dir", t("illustrator_config_default_stored")))
         current_dir = self.expand_path(config.get(self.name, {}).get(
@@ -575,7 +583,7 @@ class IllustratorPlugin(Plugin):
                             )
                             results.extend(videos)
 
-                        self._handle_search_results("pexels", results, config, prefix="pexels")
+                        self._handle_search_results("pexels", results, config, prefix="pexels", search_keyword=keywords)
                     except Exception as e:
                         st.error(f"Search error: {str(e)}")
                         raise e
@@ -616,7 +624,7 @@ class IllustratorPlugin(Plugin):
                             config.get('common', {}).get('youtube_api_key'),
                             config.get(self.name, {}).get('google_cx')
                         )
-                        self._handle_search_results("google", results, config, prefix="google")
+                        self._handle_search_results("google", results, config, prefix="google", search_keyword=keywords)
                     except Exception as e:
                         st.error(f"Search error: {str(e)}")
                         raise e
@@ -648,7 +656,7 @@ class IllustratorPlugin(Plugin):
                         results = self.apis["duckduckgo"].search(
                             remove_quotes(keywords)
                         )
-                        self._handle_search_results("duckduckgo", results, config, prefix="duckduckgo")
+                        self._handle_search_results("duckduckgo", results, config, prefix="duckduckgo", search_keyword=keywords)
                     except Exception as e:
                         st.error(f"Search error: {str(e)}")
                         raise e
@@ -796,11 +804,13 @@ class IllustratorPlugin(Plugin):
             title = video_data['original_data']['title']
             clean_title = re.sub(r'[^\w\-_\. ]', '_', title)[:100]  # Limite à 100 caractères
 
-            # Ajouter le mot-clé de recherche global si disponible et non présent
-            search_keyword = st.session_state.get('last_global_search', '')
+            # Récupérer le dernier mot-clé utilisé pour YouTube
+            search_keyword = st.session_state.get('last_search_keyword_youtube', '')
             if (search_keyword and
                 search_keyword.lower() not in clean_title.lower()):
-                clean_title = f"{clean_title}_{search_keyword.replace(' ', '_')}"
+                clean_keyword = re.sub(r'[^\w\-_]', '_', search_keyword)
+                clean_keyword = re.sub(r'_+', '_', clean_keyword).strip('_')
+                clean_title = f"{clean_title}_{clean_keyword}"
 
             filename = f"{clean_title}.mp4"
             filepath = os.path.join(target_dir, filename)
@@ -849,7 +859,7 @@ class IllustratorPlugin(Plugin):
                         results = self.apis["vlipsy"].search(
                             remove_quotes(keywords)
                         )
-                        self._handle_search_results("vlipsy", results, config, prefix="vlipsy")
+                        self._handle_search_results("vlipsy", results, config, prefix="vlipsy", search_keyword=keywords)
                     except Exception as e:
                         st.error(f"Search error: {str(e)}")
                         raise e
@@ -906,7 +916,7 @@ class IllustratorPlugin(Plugin):
                                 "videos"
                             )
                             results.extend(videos)
-                            self._handle_search_results("pexels", results, config, prefix="pexels")
+                            self._handle_search_results("pexels", results, config, prefix="pexels", search_keyword=global_search_query)
 
                         # Google
                         if (config.get('common', {}).get('youtube_api_key') and
@@ -917,14 +927,14 @@ class IllustratorPlugin(Plugin):
                                 config.get('common', {}).get('youtube_api_key'),
                                 config.get(self.name, {}).get('google_cx')
                             )
-                            self._handle_search_results("google", results, config, prefix="google")
+                            self._handle_search_results("google", results, config, prefix="google", search_keyword=global_search_query)
 
                         # DuckDuckGo
                         st.write("DuckDuckGo search...")
                         results = self.apis["duckduckgo"].search(
                             remove_quotes(global_search_query)
                         )
-                        self._handle_search_results("duckduckgo", results, config, prefix="duckduckgo")
+                        self._handle_search_results("duckduckgo", results, config, prefix="duckduckgo", search_keyword=global_search_query)
 
                         # Vlipsy
                         if config.get(self.name, {}).get("vlipsy_api_key"):
@@ -932,7 +942,7 @@ class IllustratorPlugin(Plugin):
                             results = self.apis["vlipsy"].search(
                                 remove_quotes(global_search_query)
                             )
-                            self._handle_search_results("vlipsy", results, config, prefix="vlipsy")
+                            self._handle_search_results("vlipsy", results, config, prefix="vlipsy", search_keyword=global_search_query)
 
                         # YouTube
                         st.write("Youtube search...")
