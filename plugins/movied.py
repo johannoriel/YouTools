@@ -489,7 +489,7 @@ class MoviedPlugin(Plugin):
                     hide_index=True
                 )
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     if st.button(t("movied_add_to_interest")) and selected_subtitles["selection"]["rows"]:
                         selected_indices = selected_subtitles["selection"]["rows"]
@@ -524,6 +524,10 @@ class MoviedPlugin(Plugin):
                 with col3:
                     if st.button("Suggestions", key="llm_suggestions_btn"):
                         self.handle_llm_suggestions(video_info["Full Path"], vtt_path, subtitles_df)
+
+                with col4:
+                    if st.button("Deduplicate", key="deduplicate_step2"):
+                        self.remove_duplicates_step2()
 
                 return selected_subtitles, subtitles_df, vtt_path
             return None, None, None
@@ -648,7 +652,7 @@ class MoviedPlugin(Plugin):
             synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
             st.session_state["edited_subtitles_df"] = synced_df
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             if st.button(t("movied_refresh"), key="refresh_edit"):
                 refresh()
@@ -659,6 +663,9 @@ class MoviedPlugin(Plugin):
             edit_prompt = config.get(self.name, {}).get('edit_suggestion_prompt', "")
             if st.button(t("movied_suggestions"), key="llm_edit_suggestions_btn", help=edit_prompt):
                 self.handle_llm_edit_suggestions()
+        with col3:
+            if st.button("Deduplicate", key="deduplicate_step3"):
+                self.remove_duplicates_step3()
 
         # Bug bypass : https://github.com/streamlit/streamlit/issues/7749
         def update():
@@ -722,6 +729,79 @@ class MoviedPlugin(Plugin):
             hide_index=True
         )
         return selected_final, final_subtitles_df
+
+    def remove_duplicates_step2(self):
+        """Remove duplicates from interest_subtitles_df based on Start, End, and Text"""
+        if "interest_subtitles_df" not in st.session_state or st.session_state["interest_subtitles_df"].empty:
+            st.warning("No subtitles of interest to deduplicate.")
+            return
+
+        df = st.session_state["interest_subtitles_df"]
+        initial_count = len(df)
+        # Drop duplicates based on Start, End, Text
+        deduplicated_df = df.drop_duplicates(subset=["Start", "End", "Text"]).reset_index(drop=True)
+        st.session_state["interest_subtitles_df"] = deduplicated_df
+
+        # Sync with edited_subtitles_df
+        if "edited_subtitles_df" in st.session_state:
+            edited_df = st.session_state["edited_subtitles_df"]
+            synced_df = deduplicated_df.merge(
+                edited_df[["Start", "End", "Text", "Category", "Complement"]],
+                on=["Start", "End", "Text"],
+                how="left",
+                suffixes=("", "_edited")
+            ).fillna({"Category": "", "Complement": ""})
+            st.session_state["edited_subtitles_df"] = synced_df[["Start", "End", "Text", "Category", "Complement"]]
+
+        removed_count = initial_count - len(deduplicated_df)
+        if removed_count > 0:
+            st.success(f"Removed {removed_count} duplicates from interest subtitles")
+        else:
+            st.info("No duplicates found in interest subtitles")
+        st.rerun()
+
+    def remove_duplicates_step3(self):
+        """Remove duplicates from edited_subtitles_df based on Start, End, Text, and Category, merging Complement"""
+        if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
+            st.warning("No edited subtitles to deduplicate.")
+            return
+
+        df = st.session_state["edited_subtitles_df"]
+        initial_count = len(df)
+
+        # Clean trailing commas in Complement
+        df["Complement"] = df["Complement"].apply(lambda x: x.rstrip(',') if pd.notna(x) and isinstance(x, str) else x)
+
+        # Group by Start, End, Text, Category and merge Complement
+        def merge_complements(group):
+            if len(group) > 1:
+                # Split complements, remove duplicates, and join back
+                all_complements = []
+                for comp in group["Complement"]:
+                    if pd.notna(comp) and comp:
+                        all_complements.extend([c.strip() for c in comp.split(",")])
+                # Remove duplicates while preserving order
+                unique_complements = list(dict.fromkeys([c for c in all_complements if c]))
+                return ", ".join(unique_complements)
+            return group["Complement"].iloc[0]
+
+        deduplicated_df = df.groupby(["Start", "End", "Text", "Category"]).apply(
+            lambda g: pd.Series({
+                "Complement": merge_complements(g)
+            })
+        ).reset_index()
+
+        st.session_state["edited_subtitles_df"] = deduplicated_df[["Start", "End", "Text", "Category", "Complement"]]
+
+        # Sync back to interest_subtitles_df
+        st.session_state["interest_subtitles_df"] = deduplicated_df.copy()
+
+        removed_count = initial_count - len(deduplicated_df)
+        if removed_count > 0:
+            st.success(f"Removed {removed_count} duplicates from edited subtitles and merged complements")
+        else:
+            st.info("No duplicates found in edited subtitles")
+        st.rerun()
 
     def handle_llm_suggestions(self, video_path, vtt_path, subtitles_df):
         """Handle LLM suggestions for illustrations and memes with configurable prompts"""
@@ -1151,7 +1231,7 @@ class MoviedPlugin(Plugin):
         if "final_subtitle_selector" in st.session_state and st.session_state["final_subtitle_selector"]["selection"]["rows"]:
             selected_idx = st.session_state["final_subtitle_selector"]["selection"]["rows"][0]
             final_df = st.session_state["edited_subtitles_df"]
-            if final_df.iloc[selected_idx]["Category"] == "illustration":
+            if final_df.iloc[selected_idx]["Category"] in ["illustration", "meme"]:
                 initial_search = final_df.iloc[selected_idx]["Complement"]
 
         selected_media = media_selector(

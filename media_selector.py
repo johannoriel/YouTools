@@ -118,8 +118,12 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
     # Reste de la fonction inchangé...
     # Filter by search query
     if search_query:
-        filtered_indices = [i for i, name in enumerate(
-            media_names) if search_query.lower() in name.lower()]
+        # Split the search query by commas and strip whitespace
+        search_terms = [term.strip().lower() for term in search_query.split(',') if term.strip()]
+        filtered_indices = [
+            i for i, name in enumerate(media_names)
+            if any(term in name.lower() for term in search_terms)
+        ]
     else:
         filtered_indices = list(range(len(media_files)))
 
@@ -207,8 +211,12 @@ def remote_media_selector(media_items, suffix, streamlit_component=st, initial_s
 
     # Filtrer par requête de recherche
     if search_query:
-        filtered_indices = [i for i, name in enumerate(media_names)
-                            if search_query.lower() in name.lower()]
+        # Split the search query by commas and strip whitespace
+        search_terms = [term.strip().lower() for term in search_query.split(',') if term.strip()]
+        filtered_indices = [
+            i for i, name in enumerate(media_names)
+            if any(term in name.lower() for term in search_terms)
+        ]
     else:
         filtered_indices = list(range(len(media_items)))
 
