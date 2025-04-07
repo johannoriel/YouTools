@@ -87,6 +87,7 @@ translations["en"].update({
     "movied_apply_filters": "Apply Filters",
     "movied_format_column": "Format",
     "movied_transcript_column": "Transcript",
+    "movied_suggestions": "Suggestions",
 })
 
 translations["fr"].update({
@@ -160,6 +161,7 @@ translations["fr"].update({
     "movied_apply_filters": "Appliquer les filtres",
     "movied_format_column": "Format",
     "movied_transcript_column": "Transcription",
+    "movied_suggestions": "Suggestions",
 })
 
 
@@ -217,6 +219,23 @@ class MoviedPlugin(Plugin):
 
                     Voici la transcription :
                     {transcript}
+                """
+            },
+            "edit_suggestion_prompt": {
+                "type": "textarea",
+                "label": "Prompt pour suggestions d'édition (étape 3)",
+                "default": """
+                    Analyse la ligne suivante d'une transcription vidéo et propose :
+                    - Si aucune catégorie n'est fournie ("{category}" est vide) : une catégorie ('illustration', 'meme', ou 'texte') et des compléments (mots séparés par des virgules)
+                    - Si une catégorie est fournie ("{category}") : des compléments (mots séparés par des virgules) adaptés à la catégorie
+
+                    Entrée : {start} - {end} - "{text}" - Catégorie actuelle : "{category}" - Compléments actuels : "{complement}"
+
+                    Retourne ta réponse dans ce format exact :
+                    - Avec catégorie vide : [SUGGESTION] catégorie complément1, complément2, ...
+                    - Avec catégorie remplie : [SUGGESTION] complément1, complément2, ...
+
+                    Ne réponds qu'une seule ligne par suggestion.
                 """
             }
         }
@@ -629,9 +648,17 @@ class MoviedPlugin(Plugin):
             synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
             st.session_state["edited_subtitles_df"] = synced_df
 
-        if st.button(t("movied_refresh"), key="refresh_edit"):
-            refresh()
-            st.rerun()
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button(t("movied_refresh"), key="refresh_edit"):
+                refresh()
+                st.rerun()
+        with col2:
+            # Get the prompt for help text
+            config = self.plugin_manager.config
+            edit_prompt = config.get(self.name, {}).get('edit_suggestion_prompt', "")
+            if st.button(t("movied_suggestions"), key="llm_edit_suggestions_btn", help=edit_prompt):
+                self.handle_llm_edit_suggestions()
 
         # Bug bypass : https://github.com/streamlit/streamlit/issues/7749
         def update():
@@ -861,6 +888,108 @@ class MoviedPlugin(Plugin):
                 st.rerun()
             else:
                 st.info("No suggestions found by LLM")
+
+    def handle_llm_edit_suggestions(self):
+        """Handle LLM suggestions for Category and Complement in edited subtitles, appending to existing complements"""
+        if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
+            st.warning("No edited subtitles available for suggestions.")
+            return
+
+        edited_df = st.session_state["edited_subtitles_df"].copy()
+
+        # Get prompt from config
+        config = self.plugin_manager.config
+        edit_prompt = config.get(self.name, {}).get('edit_suggestion_prompt', """
+            Analyse la ligne suivante d'une transcription vidéo et propose :
+            - Si aucune catégorie n'est fournie ("{category}" est vide) : une catégorie ('illustration', 'meme', ou 'texte') et des compléments (mots séparés par des virgules)
+            - Si une catégorie est fournie ("{category}") : des compléments (mots séparés par des virgules) adaptés à la catégorie
+
+            Entrée : {start} - {end} - "{text}" - Catégorie actuelle : "{category}" - Compléments actuels : "{complement}"
+
+            Retourne ta réponse dans ce format exact :
+            - Avec catégorie vide : [SUGGESTION] catégorie complément1, complément2, ...
+            - Avec catégorie remplie : [SUGGESTION] complément1, complément2, ...
+
+            Ne réponds qu'une seule ligne par suggestion.
+        """)
+
+        # Process each line with LLM
+        with st.spinner("Getting LLM suggestions for edits..."):
+            suggestions = []
+            for _, row in edited_df.iterrows():
+                current_category = row["Category"] if pd.notna(row["Category"]) else ""
+                current_complement = row["Complement"] if pd.notna(row["Complement"]) else ""
+
+                # Prepare prompt
+                prompt = edit_prompt.format(
+                    start=row["Start"],
+                    end=row["End"],
+                    text=row["Text"],
+                    category=current_category,
+                    complement=current_complement
+                )
+                response = self.process_with_llm(
+                    prompt,
+                    config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                    row["Text"]
+                )
+
+                # Parse response
+                for line in response.split('\n'):
+                    if line.startswith('[SUGGESTION]'):
+                        try:
+                            parts = line.split(maxsplit=2)
+                            if len(parts) >= 2:
+                                # Case 1: Category is empty, expect category and complements
+                                if not current_category:
+                                    if len(parts) >= 3:
+                                        suggested_category = parts[1]
+                                        suggested_complements = parts[2]
+                                        new_complement = suggested_complements if not current_complement else f"{current_complement}, {suggested_complements}"
+                                        suggestions.append({
+                                            'Start': row['Start'],
+                                            'End': row['End'],
+                                            'Text': row['Text'],
+                                            'Category': suggested_category,
+                                            'Complement': new_complement
+                                        })
+                                # Case 2: Category exists, expect only complements
+                                else:
+                                    suggested_complements = parts[1]
+                                    new_complement = suggested_complements if not current_complement else f"{current_complement}, {suggested_complements}"
+                                    suggestions.append({
+                                        'Start': row['Start'],
+                                        'End': row['End'],
+                                        'Text': row['Text'],
+                                        'Category': current_category,
+                                        'Complement': new_complement
+                                    })
+                        except Exception as e:
+                            st.warning(f"Error parsing suggestion for '{row['Text']}': {line} - {str(e)}")
+
+            # Update edited subtitles with suggestions
+            if suggestions:
+                suggested_df = pd.DataFrame(suggestions)
+                # Merge with existing edited_df to update only relevant rows
+                updated_df = edited_df.merge(
+                    suggested_df[["Start", "End", "Text", "Category", "Complement"]],
+                    on=["Start", "End", "Text"],
+                    how="left",
+                    suffixes=("_old", "")
+                )
+                # Keep old values where no new suggestion was provided
+                for col in ["Category", "Complement"]:
+                    updated_df[col] = updated_df[col].fillna(updated_df[f"{col}_old"])
+                updated_df = updated_df.drop(columns=[f"{col}_old" for col in ["Category", "Complement"]])
+                st.session_state["edited_subtitles_df"] = updated_df[["Start", "End", "Text", "Category", "Complement"]]
+
+                # Sync back to interest_subtitles_df
+                st.session_state["interest_subtitles_df"] = updated_df.copy()
+
+                st.success(f"Applied {len(suggestions)} suggestions to edited subtitles")
+                st.rerun()
+            else:
+                st.info("No suggestions provided by LLM")
 
     def handle_section(self, selected_final, final_subtitles_df):
         if selected_final and selected_final["selection"]["rows"]:
