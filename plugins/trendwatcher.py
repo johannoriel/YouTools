@@ -30,11 +30,13 @@ translations["en"].update({
     "trendwatcher_debug_results": "Found {count} results ({vids} videos, {texts} texts)",
     "trendwatcher_debug_date": "Parsing date: {date_str} -> {result}",
     "trendwatcher_language_filter": "Filter by Language",
+    "trendwatcher_keyword_filter": "Filter by Keyword",
     "trendwatcher_table_title": "Title (Link)",
     "trendwatcher_table_views": "Views",
     "trendwatcher_table_days": "Days Old",
     "trendwatcher_table_type": "Type",
     "trendwatcher_table_language": "Language",
+    "trendwatcher_table_keyword": "Keyword",
     "trendwatcher_videos_table": "Videos",
     "trendwatcher_texts_table": "Text Articles"
 })
@@ -59,11 +61,13 @@ translations["fr"].update({
     "trendwatcher_debug_results": "Trouvé {count} résultats ({vids} vidéos, {texts} textes)",
     "trendwatcher_debug_date": "Analyse de la date : {date_str} -> {result}",
     "trendwatcher_language_filter": "Filtrer par langue",
+    "trendwatcher_keyword_filter": "Filtrer par mot-clé",
     "trendwatcher_table_title": "Titre (Lien)",
     "trendwatcher_table_views": "Vues",
     "trendwatcher_table_days": "Jours d'ancienneté",
     "trendwatcher_table_type": "Type",
     "trendwatcher_table_language": "Langue",
+    "trendwatcher_table_keyword": "Mot-clé",
     "trendwatcher_videos_table": "Vidéos",
     "trendwatcher_texts_table": "Articles Textes"
 })
@@ -117,8 +121,8 @@ class TrendwatcherPlugin(Plugin):
         for fmt in date_formats:
             try:
                 result = datetime.strptime(date_str, fmt)
-                #if debug:
-                #    st.write(t("trendwatcher_debug_date").format(date_str=date_str, result=result))
+                if debug:
+                    st.write(t("trendwatcher_debug_date").format(date_str=date_str, result=result))
                 return result
             except ValueError:
                 continue
@@ -129,8 +133,9 @@ class TrendwatcherPlugin(Plugin):
 
     def search_trends(self, keyword, debug=False):
         """Search for recent videos and web content"""
+        query = f"{keyword} site:youtube.com OR -inurl:(signup login)"
         if debug:
-            st.write(t("trendwatcher_debug_query").format(query=keyword))
+            st.write(t("trendwatcher_debug_query").format(query=query))
 
         try:
             video_results = self.ddgs.videos(
@@ -141,7 +146,7 @@ class TrendwatcherPlugin(Plugin):
             )
 
             text_results = self.ddgs.text(
-                keywords=keyword,
+                keywords=keyword,  # Corrected to use keyword directly
                 region="fr-fr",
                 timelimit="w",
                 max_results=5
@@ -155,21 +160,20 @@ class TrendwatcherPlugin(Plugin):
                 published_date = self.parse_date(video["published"], debug=debug)
                 if published_date and published_date > cutoff_date:
                     days_old = (datetime.now() - published_date).days
-                    title_link = f"[{video['title'].replace('|', '')}]({video['content']})"
-                    if debug:
-                        st.write(f"Video: {title_link}")
+                    title_link = f"[{video['title'].replace('|','')}]({video['content']})"
                     language = detect(video["title"]) if video["title"] else "unknown"
                     results.append({
                         "title_link": title_link,
                         "views": video["statistics"].get("viewCount", "N/A"),
                         "days_old": days_old,
                         "type": "video",
-                        "language": language
+                        "language": language,
+                        "keyword": keyword
                     })
 
             # Process text results
             for text in text_results:
-                title_link = f"[{text['title'].replace('|', '')}]({text['href']})"
+                title_link = f"[{text['title'].replace('|','')}]({text['href']})"
                 language = detect(text["title"]) if text["title"] else "unknown"
                 if debug:
                     st.write(f"Text article: {title_link}")
@@ -178,7 +182,8 @@ class TrendwatcherPlugin(Plugin):
                     "views": "N/A",
                     "days_old": "N/A",
                     "type": "web",
-                    "language": language
+                    "language": language,
+                    "keyword": keyword
                 })
 
             if debug:
@@ -241,7 +246,14 @@ class TrendwatcherPlugin(Plugin):
             video_results = [r for r in st.session_state.trendwatcher_results if r["type"] == "video"]
             text_results = [r for r in st.session_state.trendwatcher_results if r["type"] == "web"]
 
-            # Language filter
+            # Filters
+            all_keywords = list(set(r["keyword"] for r in st.session_state.trendwatcher_results))
+            selected_keywords = st.multiselect(
+                t("trendwatcher_keyword_filter"),
+                all_keywords,
+                default=all_keywords
+            )
+
             all_languages = list(set(r["language"] for r in st.session_state.trendwatcher_results))
             selected_language = st.selectbox(
                 t("trendwatcher_language_filter"),
@@ -252,6 +264,8 @@ class TrendwatcherPlugin(Plugin):
             # Filter and create DataFrames
             def filter_df(results):
                 df = pd.DataFrame(results)
+                if selected_keywords:
+                    df = df[df["keyword"].isin(selected_keywords)]
                 if selected_language != "All":
                     df = df[df["language"] == selected_language]
                 return df.rename(columns={
@@ -259,7 +273,8 @@ class TrendwatcherPlugin(Plugin):
                     "views": t("trendwatcher_table_views"),
                     "days_old": t("trendwatcher_table_days"),
                     "type": t("trendwatcher_table_type"),
-                    "language": t("trendwatcher_table_language")
+                    "language": t("trendwatcher_table_language"),
+                    "keyword": t("trendwatcher_table_keyword")
                 })
 
             # Videos table
@@ -269,7 +284,7 @@ class TrendwatcherPlugin(Plugin):
                 if not video_df.empty:
                     st.markdown(video_df.to_markdown(index=False), unsafe_allow_html=True)
                 else:
-                    st.info("No videos match the language filter.")
+                    st.info("No videos match the filters.")
 
             # Texts table
             if text_results:
@@ -278,7 +293,7 @@ class TrendwatcherPlugin(Plugin):
                 if not text_df.empty:
                     st.markdown(text_df.to_markdown(index=False), unsafe_allow_html=True)
                 else:
-                    st.info("No text articles match the language filter.")
+                    st.info("No text articles match the filters.")
 
             if not video_results and not text_results:
                 st.info(t("trendwatcher_no_results"))
