@@ -75,7 +75,6 @@ translations["fr"].update({
 class TrendwatcherPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
-        self.ddgs = DDGS()
 
     def get_config_fields(self):
         """Define configuration fields"""
@@ -121,8 +120,8 @@ class TrendwatcherPlugin(Plugin):
         for fmt in date_formats:
             try:
                 result = datetime.strptime(date_str, fmt)
-                if debug:
-                    st.write(t("trendwatcher_debug_date").format(date_str=date_str, result=result))
+                #if debug:
+                #    st.write(t("trendwatcher_debug_date").format(date_str=date_str, result=result))
                 return result
             except ValueError:
                 continue
@@ -131,22 +130,26 @@ class TrendwatcherPlugin(Plugin):
             st.write(t("trendwatcher_debug_date").format(date_str=date_str, result="Failed to parse"))
         return None
 
-    def search_trends(self, keyword, debug=False):
+    def search_trends(self, keyword, useragents, debug=False):
         """Search for recent videos and web content"""
         query = f"{keyword} site:youtube.com OR -inurl:(signup login)"
         if debug:
             st.write(t("trendwatcher_debug_query").format(query=query))
 
+        # Create new DDGS instance with random User-Agent
+        headers = {"User-Agent": random.choice(useragents)}
+        ddgs = DDGS(headers=headers)
+
         try:
-            video_results = self.ddgs.videos(
+            video_results = ddgs.videos(
                 keywords=keyword,
                 region="fr-fr",
                 timelimit="w",
                 max_results=5
             )
 
-            text_results = self.ddgs.text(
-                keywords=keyword,  # Corrected to use keyword directly
+            text_results = ddgs.text(
+                keywords=keyword,
                 region="fr-fr",
                 timelimit="w",
                 max_results=5
@@ -193,7 +196,7 @@ class TrendwatcherPlugin(Plugin):
                     texts=sum(1 for r in results if r["type"] == "web")
                 ))
 
-            return results
+            return results  # Return all results
 
         except Exception as e:
             return str(e)
@@ -232,7 +235,7 @@ class TrendwatcherPlugin(Plugin):
                 keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
                 all_results = []
                 for keyword in keywords:
-                    results = self.search_trends(keyword, debug=debug_mode)
+                    results = self.search_trends(keyword, useragents, debug=debug_mode)
                     if isinstance(results, list):
                         all_results.extend(results)
                     else:
