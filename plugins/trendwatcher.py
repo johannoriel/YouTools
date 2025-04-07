@@ -8,6 +8,9 @@ import time
 from datetime import datetime, timedelta
 from langdetect import detect
 import pandas as pd
+import os
+import re
+import csv
 
 # Translations
 translations["en"].update({
@@ -38,7 +41,14 @@ translations["en"].update({
     "trendwatcher_table_language": "Language",
     "trendwatcher_table_keyword": "Keyword",
     "trendwatcher_videos_table": "Videos",
-    "trendwatcher_texts_table": "Text Articles"
+    "trendwatcher_texts_table": "Text Articles",
+    "trendwatcher_working_dir": "Working Directory",
+    "trendwatcher_working_dir_default": "~/Videos",
+    "trendwatcher_results": "Results for '{keyword}':",
+    "trendwatcher_no_results": "No recent results found within 7 days",
+    "trendwatcher_error": "Error during search: {error}",
+    "trendwatcher_save_success": "Results saved to {dir}",
+    "trendwatcher_save_button": "Save Results",
 })
 
 translations["fr"].update({
@@ -69,7 +79,14 @@ translations["fr"].update({
     "trendwatcher_table_language": "Langue",
     "trendwatcher_table_keyword": "Mot-clé",
     "trendwatcher_videos_table": "Vidéos",
-    "trendwatcher_texts_table": "Articles Textes"
+    "trendwatcher_texts_table": "Articles Textes",
+    "trendwatcher_working_dir": "Répertoire de travail",
+    "trendwatcher_working_dir_default": "~/Vidéos",
+    "trendwatcher_results": "Résultats pour '{keyword}':",
+    "trendwatcher_no_results": "Aucun résultat récent trouvé dans les 7 derniers jours",
+    "trendwatcher_error": "Erreur pendant la recherche : {error}",
+    "trendwatcher_save_success": "Résultats sauvegardés dans {dir}",
+    "trendwatcher_save_button": "Sauvegarder les résultats",
 })
 
 class TrendwatcherPlugin(Plugin):
@@ -98,6 +115,11 @@ class TrendwatcherPlugin(Plugin):
                 "type": "number",
                 "label": t("trendwatcher_delay_max"),
                 "default": 3
+            },
+            "trendwatcher_working_dir": {
+                "type": "text",
+                "label": t("trendwatcher_working_dir"),
+                "default": t("trendwatcher_working_dir_default")
             }
         }
 
@@ -167,7 +189,10 @@ class TrendwatcherPlugin(Plugin):
                     language = detect(video["title"]) if video["title"] else "unknown"
                     results.append({
                         "title_link": title_link,
+                        "url": video['content'],
+                        "title" : video['title'].replace('|',''),
                         "views": video["statistics"].get("viewCount", "N/A"),
+                        "date" : published_date,
                         "days_old": days_old,
                         "type": "video",
                         "language": language,
@@ -182,8 +207,11 @@ class TrendwatcherPlugin(Plugin):
                     st.write(f"Text article: {title_link}")
                 results.append({
                     "title_link": title_link,
+                    "url": text['href'],
+                    "title" : text['title'].replace('|',''),
                     "views": "N/A",
                     "days_old": "N/A",
+                    "date": "N/A",
                     "type": "web",
                     "language": language,
                     "keyword": keyword
@@ -201,6 +229,53 @@ class TrendwatcherPlugin(Plugin):
         except Exception as e:
             return str(e)
 
+    def save_results_to_csv(self, working_dir, selected_keywords):
+        """Save only results for selected keywords to CSV files"""
+        # Expand ~ in working_dir
+        working_dir = os.path.expanduser(working_dir)
+        os.makedirs(working_dir, exist_ok=True)
+
+        video_file = os.path.join(working_dir, "video_list.csv")
+        article_file = os.path.join(working_dir, "article_list.csv")
+
+        # CSV headers
+        headers = ["Keyword", "URL", "Title", "Views", "Language", "Date"]
+
+        # Filter results based on selected_keywords
+        filtered_results = [r for r in st.session_state.trendwatcher_results if r["keyword"] in selected_keywords]
+        videos = [r for r in filtered_results if r["type"] == "video"]
+        articles = [r for r in filtered_results if r["type"] == "article"]
+
+        # Write videos CSV
+        with open(video_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for video in videos:
+                writer.writerow([
+                    video["keyword"],
+                    video["url"],
+                    video["title"],
+                    video["views"],
+                    video["language"],
+                    video["date"]
+                ])
+
+        # Write articles CSV
+        with open(article_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for article in articles:
+                writer.writerow([
+                    article["keyword"],
+                    article["url"],
+                    article["title"],
+                    article["views"],
+                    article["language"],
+                    article["date"]
+                ])
+
+        return working_dir
+
     def run(self, config):
         """Main plugin logic"""
         st.header(t("trendwatcher_header"))
@@ -209,6 +284,7 @@ class TrendwatcherPlugin(Plugin):
         useragents = config.get(self.name, {}).get("trendwatcher_useragents", t("trendwatcher_useragents_default")).split("\n")
         delay_min = float(config.get(self.name, {}).get("trendwatcher_delay_min", 1))
         delay_max = float(config.get(self.name, {}).get("trendwatcher_delay_max", 3))
+        working_dir = config.get(self.name, {}).get("working_dir", t("trendwatcher_working_dir_default"))
 
         keywords_input = st.text_area(
             t("trendwatcher_keywords_label"),
@@ -302,6 +378,14 @@ class TrendwatcherPlugin(Plugin):
                 st.info(t("trendwatcher_no_results"))
         else:
             st.info(t("trendwatcher_no_results"))
+
+        if st.button(t("trendwatcher_save_button")) and selected_keywords:
+            try:
+                saved_dir = self.save_results_to_csv(working_dir, selected_keywords)
+                st.success(t("trendwatcher_save_success").format(dir=saved_dir))
+            except Exception as e:
+                raise e
+                st.error(t("trendwatcher_error").format(error=str(e)))
 
 if __name__ == "__main__":
     st.write("Trendwatcher Plugin standalone test")
