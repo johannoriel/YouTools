@@ -355,7 +355,6 @@ class LlmPlugin(Plugin):
 
     def call_llm(self, url, api_key, model, prompt, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False):
         """Appelle l'API LLM avec gestion des retries et du délai."""
-        print(f"Generating with model {model} at {url}")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         headers["Content-Type"] = "application/json"
         payload = {
@@ -372,19 +371,65 @@ class LlmPlugin(Plugin):
         attempts = 0
         while attempts < max_retries:
             try:
-                print(f"Calling LLM...{model} at {full_url} with {api_key}")
+                #print(f"Calling LLM...{model} at {full_url} with {api_key}")
                 response = requests.post(full_url, headers=headers, data=json.dumps(payload), timeout=10)
-                print(response)
+                #print(response)
                 response.raise_for_status()
                 data = response.json()
+                #print(data)
                 time.sleep(delay)
-                return data["choices"][0]["message"]["content"] if "choices" in data else "Error: Unexpected response format"
+                result = data["choices"][0]["message"]["content"] if "choices" in data else "Error: Unexpected response format"
+                #print(result)
+                return result
             except Exception as e:
                 st.warning(f"Failed to call {response}")
                 attempts += 1
                 if attempts == max_retries:
                     return f"Error: Failed after {max_retries} attempts - {str(e)}"
         return "Error: No response"
+
+    def call_all_llms(self, prompt: str) -> List[Dict[str, str]]:
+        """Envoie le prompt à tous les modèles configurés et retourne les résultats."""
+        self.get_api_keys()
+        self.get_models()
+        self.get_apis()
+
+        results = []
+
+        for model in st.session_state.models:
+            try:
+                # Récupérer le paramètre no_v1 de l'API associée
+                api = next((a for a in st.session_state.apis if a["url"] == model["url"]), None)
+                no_v1 = api.get("no_v1", False) if api else False
+                api_key = next((k["value"] for k in st.session_state.api_keys if k["name"] == model["api_key"]), "")
+
+                response = self.call_llm(
+                    url=model["url"],
+                    api_key=api_key,
+                    model=model["model"],
+                    prompt=prompt,
+                    temperature=model["temperature"],
+                    max_tokens=model["max_tokens"],
+                    delay=model["delay"],
+                    max_retries=model["max_retries"],
+                    no_v1=no_v1
+                )
+
+                results.append({
+                    "model": model["name"],
+                    "response": response,
+                    "error": None
+                })
+            except Exception as e:
+                results.append({
+                    "model": model["name"],
+                    "response": None,
+                    "error": str(e)
+                })
+
+            time.sleep(0.1)  # Petit délai entre les appels
+
+        return results
 
     def process_with_llm(self, prompt: str, sysprompt: str, context: str, repeat_on_failure: bool = True, number_repeat: int = 1) -> str:
         self.get_api_keys()
@@ -458,21 +503,43 @@ class LlmPlugin(Plugin):
         st.write(f"Current Model: {model['name']}")
         prompt = st.text_area(t("llm_prompt_label"), height=100)
 
-        if st.button(t("llm_send_prompt")) and prompt:
-            with st.spinner("Generating response..."):
-                response = self.call_llm(
-                    url=model["url"],
-                    api_key=api_key,
-                    model=model["model"],
-                    prompt=prompt,
-                    temperature=model["temperature"],
-                    max_tokens=model["max_tokens"],
-                    delay=model["delay"],
-                    max_retries=model["max_retries"],
-                    no_v1=no_v1
-                )
-                st.subheader(t("llm_response_label"))
-                st.write(response)
+        col1, col2 = st.columns([1,4])
+        with col1:
+            if st.button(t("llm_send_prompt")) and prompt:
+                with st.spinner("Generating response..."):
+                    response = self.call_llm(
+                        url=model["url"],
+                        api_key=api_key,
+                        model=model["model"],
+                        prompt=prompt,
+                        temperature=model["temperature"],
+                        max_tokens=model["max_tokens"],
+                        delay=model["delay"],
+                        max_retries=model["max_retries"],
+                        no_v1=no_v1
+                    )
+                    st.subheader(t("llm_response_label"))
+                    st.write(response)
+
+        with col2:
+            if st.button("Envoyer à tous") and prompt:
+                with st.spinner("Envoi à tous les modèles en cours..."):
+                    results = self.call_all_llms(prompt)
+
+                    # Affichage des résultats sous forme de tableau
+                    st.subheader("Résultats de tous les modèles")
+
+                    # Création du tableau
+                    for result in results:
+                        with st.container():
+                            cols = st.columns([1, 3])
+                            with cols[0]:
+                                st.markdown(f"**{result['model']}**")
+                            with cols[1]:
+                                if result["error"]:
+                                    st.error(f"Erreur: {result['error']}")
+                                else:
+                                    st.markdown(result["response"])
 
 
 if __name__ == "__main__":
