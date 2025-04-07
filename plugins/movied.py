@@ -186,6 +186,38 @@ class MoviedPlugin(Plugin):
                 "type": "text",
                 "label": t("movied_reference_audio"),
                 "default": "/path/to/sample.mp3"
+            },
+            "illustration_prompt": {
+                "type": "textarea",
+                "label": "Prompt pour suggestions d'illustrations",
+                "default": """
+                    Analyse la transcription suivante d'une vidéo et identifie les sections qui bénéficieraient d'illustrations visuelles.
+                    Pour chaque section, fournis :
+                    1. Le timecode de début (format : HH:MM:SS.sss)
+                    2. Un seul mot décrivant le thème de l'illustration
+
+                    Retourne ta réponse dans ce format exact, une suggestion par ligne :
+                    [ILLUSTRATION] HH:MM:SS.sss thème
+
+                    Voici la transcription :
+                    {transcript}
+                """
+            },
+            "meme_prompt": {
+                "type": "textarea",
+                "label": "Prompt pour suggestions de mèmes",
+                "default": """
+                    Analyse la transcription suivante d'une vidéo et identifie les sections avec des émotions fortes adaptées à des mèmes.
+                    Pour chaque section, fournis :
+                    1. Le timecode de début (format : HH:MM:SS.sss)
+                    2. Un seul mot décrivant l'émotion principale
+
+                    Retourne ta réponse dans ce format exact, une suggestion par ligne :
+                    [MEME] HH:MM:SS.sss émotion
+
+                    Voici la transcription :
+                    {transcript}
+                """
             }
         }
 
@@ -438,7 +470,7 @@ class MoviedPlugin(Plugin):
                     hide_index=True
                 )
 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     if st.button(t("movied_add_to_interest")) and selected_subtitles["selection"]["rows"]:
                         selected_indices = selected_subtitles["selection"]["rows"]
@@ -470,6 +502,10 @@ class MoviedPlugin(Plugin):
                                 st.session_state["interest_subtitles_df"] = combined
                             st.rerun()
 
+                with col3:
+                    if st.button("Suggestions", key="llm_suggestions_btn"):
+                        self.handle_llm_suggestions(video_info["Full Path"], vtt_path, subtitles_df)
+
                 return selected_subtitles, subtitles_df, vtt_path
             return None, None, None
         return None, None, None
@@ -495,18 +531,28 @@ class MoviedPlugin(Plugin):
         with col1:
             if st.button(t("movied_remove_from_interest")) and selected_intermediate["selection"]["rows"]:
                 selected_indices = selected_intermediate["selection"]["rows"]
-                if "edited_subtitles_df" in st.session_state:
-                    edited = st.session_state["edited_subtitles_df"]
-                    intermediate_subtitles_df = intermediate_subtitles_df.merge(
-                        edited[["Category", "Complement", "Start", "End", "Text"]],
-                        on=["Start", "End", "Text"],
-                        how="left",
-                        suffixes=("", "_edited")
-                    ).fillna({"Category": "", "Complement": ""})
-                    intermediate_subtitles_df = intermediate_subtitles_df[["Start", "End", "Text", "Category", "Complement"]]
+                # Remove from interest subtitles
                 intermediate_subtitles_df = intermediate_subtitles_df.drop(selected_indices).reset_index(drop=True)
                 st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
-                st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
+
+                # Sync with edited subtitles (remove matching entries)
+                if "edited_subtitles_df" in st.session_state:
+                    edited_df = st.session_state["edited_subtitles_df"]
+                    # Keep only rows that still exist in interest_subtitles_df
+                    edited_df = edited_df.merge(
+                        intermediate_subtitles_df[["Start", "End", "Text"]],
+                        on=["Start", "End", "Text"],
+                        how="inner"
+                    ).reset_index(drop=True)
+                    # Preserve Category and Complement if they exist
+                    if "Category" not in edited_df.columns:
+                        edited_df["Category"] = ""
+                    if "Complement" not in edited_df.columns:
+                        edited_df["Complement"] = ""
+                    st.session_state["edited_subtitles_df"] = edited_df[["Start", "End", "Text", "Category", "Complement"]]
+                else:
+                    st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
+
                 st.rerun()
 
         with col2:
@@ -535,11 +581,11 @@ class MoviedPlugin(Plugin):
                             "Category": [category],
                             "Complement": [complement]
                         })
-                        # Ensure index is reset before dropping to avoid KeyError
-                        intermediate_subtitles_df = intermediate_subtitles_df.reset_index(drop=True)
                         intermediate_subtitles_df = intermediate_subtitles_df.drop(selected_indices).reset_index(drop=True)
                         intermediate_subtitles_df = pd.concat([intermediate_subtitles_df, merged_row]).reset_index(drop=True)
                         st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
+
+                        # Sync with edited subtitles
                         st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
                         st.rerun()
                     else:
@@ -550,6 +596,8 @@ class MoviedPlugin(Plugin):
                 intermediate_subtitles_df["Start_seconds"] = intermediate_subtitles_df["Start"].apply(self.parse_timecode)
                 intermediate_subtitles_df = intermediate_subtitles_df.sort_values("Start_seconds").drop(columns=["Start_seconds"]).reset_index(drop=True)
                 st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
+
+                # Sync with edited subtitles
                 st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
                 st.rerun()
 
@@ -648,6 +696,172 @@ class MoviedPlugin(Plugin):
         )
         return selected_final, final_subtitles_df
 
+    def handle_llm_suggestions(self, video_path, vtt_path, subtitles_df):
+        """Handle LLM suggestions for illustrations and memes with configurable prompts"""
+        if not os.path.exists(vtt_path):
+            st.warning("Please generate a transcript first.")
+            return
+
+        # Convert VTT to plain text transcript
+        transcript = ""
+        with open(vtt_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for line in lines:
+                if '-->' in line:
+                    continue
+                if line.strip() and not line.startswith('WEBVTT'):
+                    transcript += line.strip() + "\n"
+
+        # Get prompts from config (with French defaults)
+        config = self.plugin_manager.config
+        illustration_prompt = config.get(self.name, {}).get('illustration_prompt', """
+            Analyse la transcription suivante d'une vidéo et identifie les sections qui bénéficieraient d'illustrations visuelles.
+            Pour chaque section, fournis :
+            1. Le timecode de début (format : HH:MM:SS.sss)
+            2. Un seul mot décrivant le thème de l'illustration mais en anglais
+
+            Retourne ta réponse dans ce format exact, une suggestion par ligne :
+            [ILLUSTRATION] HH:MM:SS.sss thème
+
+            Voici la transcription :
+            {transcript}
+        """)
+
+        meme_prompt = config.get(self.name, {}).get('meme_prompt', """
+            Analyse la transcription suivante d'une vidéo et identifie les sections avec des émotions fortes adaptées à des mèmes.
+            Pour chaque section, fournis :
+            1. Le timecode de début (format : HH:MM:SS.sss)
+            2. Un seul mot décrivant l'émotion principale mais en anglais
+
+            Retourne ta réponse dans ce format exact, une suggestion par ligne :
+            [MEME] HH:MM:SS.sss émotion
+
+            Voici la transcription :
+            {transcript}
+        """)
+
+        # Process LLM suggestions
+        with st.spinner("Getting LLM suggestions..."):
+            # Get illustration suggestions
+            illustration_response = self.process_with_llm(
+                illustration_prompt.format(transcript=transcript),
+                config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                transcript
+            )
+
+            # Get meme suggestions
+            meme_response = self.process_with_llm(
+                meme_prompt.format(transcript=transcript),
+                config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                transcript
+            )
+
+            # Process responses
+            new_entries = []
+
+            # Parse illustration suggestions
+            for line in illustration_response.split('\n'):
+                if line.startswith('[ILLUSTRATION]'):
+                    try:
+                        parts = line.split(maxsplit=3)
+                        if len(parts) == 3:
+                            start, theme = parts[1], parts[2]
+                            # Try exact match
+                            matching_subs = subtitles_df[subtitles_df['Start'] == start]
+                            if matching_subs.empty:
+                                # Find closest previous subtitle
+                                start_sec = self.parse_timecode(start)
+                                subtitles_df['Start_sec'] = subtitles_df['Start'].apply(self.parse_timecode)
+                                previous_subs = subtitles_df[subtitles_df['Start_sec'] <= start_sec]
+                                if not previous_subs.empty:
+                                    matching_subs = previous_subs.iloc[[-1]]
+                                    st.warning(f"Imprecise illustration timecode {start}: using previous subtitle at {matching_subs.iloc[0]['Start']}")
+                                else:
+                                    st.warning(f"No matching subtitle found for illustration timecode {start}")
+                                    continue
+
+                            sub = matching_subs.iloc[0]
+                            print(sub)
+                            new_entries.append({
+                                'Start': sub['Start'],
+                                'End': sub['End'],
+                                'Text': sub['Text'],
+                                'Category': 'illustration',
+                                'Complement': theme
+                            })
+                    except Exception as e:
+                        st.warning(f"Error parsing illustration suggestion: {line} - {str(e)}")
+
+            # Parse meme suggestions
+            for line in meme_response.split('\n'):
+                if line.startswith('[MEME]'):
+                    try:
+                        parts = line.split(maxsplit=3)
+                        if len(parts) == 3:
+                            start, emotion = parts[1], parts[2]
+                            # Try exact match
+                            matching_subs = subtitles_df[subtitles_df['Start'] == start]
+                            if matching_subs.empty:
+                                # Find closest previous subtitle
+                                start_sec = self.parse_timecode(start)
+                                subtitles_df['Start_sec'] = subtitles_df['Start'].apply(self.parse_timecode)
+                                previous_subs = subtitles_df[subtitles_df['Start_sec'] <= start_sec]
+                                if not previous_subs.empty:
+                                    matching_subs = previous_subs.iloc[[-1]]
+                                    st.warning(f"Imprecise meme timecode {start}: using previous subtitle at {matching_subs.iloc[0]['Start']}")
+                                else:
+                                    st.warning(f"No matching subtitle found for meme timecode {start}")
+                                    continue
+
+                            sub = matching_subs.iloc[0]
+                            print(sub)
+                            new_entries.append({
+                                'Start': sub['Start'],
+                                'End': sub['End'],
+                                'Text': sub['Text'],
+                                'Category': 'meme',
+                                'Complement': emotion
+                            })
+                    except Exception as e:
+                        st.warning(f"Error parsing meme suggestion: {line} - {str(e)}")
+
+            # Clean up temporary column
+            if 'Start_sec' in subtitles_df.columns:
+                subtitles_df = subtitles_df.drop(columns=['Start_sec'])
+
+            # Add to interest subtitles (Step 2)
+            print(new_entries)
+            if new_entries:
+                new_df = pd.DataFrame(new_entries)
+                if "interest_subtitles_df" not in st.session_state:
+                    st.session_state["interest_subtitles_df"] = new_df
+                else:
+                    existing = st.session_state["interest_subtitles_df"]
+                    #combined = pd.concat([existing, new_df]).drop_duplicates(
+                    #    subset=["Start", "End", "Text"]
+                    #).reset_index(drop=True)
+                    combined = pd.concat([existing, new_df]).reset_index(drop=True)
+                    st.session_state["interest_subtitles_df"] = combined
+
+                # Sync with edited subtitles (Step 3)
+                if "edited_subtitles_df" in st.session_state:
+                    current_edited = st.session_state["edited_subtitles_df"]
+                    synced_df = st.session_state["interest_subtitles_df"].merge(
+                        current_edited[["Category", "Complement", "Start", "End", "Text"]],
+                        on=["Start", "End", "Text"],
+                        how="left",
+                        suffixes=("", "_edited")
+                    ).fillna({"Category": "", "Complement": ""})
+                    synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
+                    st.session_state["edited_subtitles_df"] = synced_df
+                else:
+                    st.session_state["edited_subtitles_df"] = st.session_state["interest_subtitles_df"].copy()
+
+                st.success(f"Added {len(new_entries)} suggestions from LLM")
+                st.rerun()
+            else:
+                st.info("No suggestions found by LLM")
+
     def handle_section(self, selected_final, final_subtitles_df):
         if selected_final and selected_final["selection"]["rows"]:
             selected_indices = selected_final["selection"]["rows"]
@@ -665,6 +879,7 @@ class MoviedPlugin(Plugin):
                 st.error("Selected final subtitle index out of bounds or DataFrame is empty.")
                 return None, None
         return None, None
+
     def list_media_files(self):
         # Clé pour stocker les vignettes dans session_state
         if "thumbnail_size" not in st.session_state:
@@ -720,7 +935,7 @@ class MoviedPlugin(Plugin):
             if media_path.lower().endswith(IMAGE_EXTENSIONS):
                 st.image(media_path, use_container_width=True)  # Ajuste à la largeur de la colonne
             elif media_path.lower().endswith(VIDEO_EXTENSIONS):
-                st.video(media_path, format="video/mp4", autoplay=True)
+                st.video(media_path, format="video/mp4", autoplay=True, muted=True)
 
     def verify_operations(self):
         """Verify if operations in the input text overlap."""
