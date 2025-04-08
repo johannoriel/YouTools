@@ -990,14 +990,10 @@ class YoutubeAPI:
             # Lire le fichier dans un buffer
             with open(filename, 'rb') as f:
                 buffer = BytesIO(f.read())
-
-        except Exception as e:
-            raise Exception(f"Échec du téléchargement: {str(e)}")
-        finally:
-            # Nettoyage du fichier temporaire
             if os.path.exists(filename):
                 os.unlink(filename)
-
+        except Exception as e:
+            raise Exception(f"Échec du téléchargement: {str(e)}")
         buffer.seek(0)
         return buffer
 
