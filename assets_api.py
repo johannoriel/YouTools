@@ -217,8 +217,6 @@ class DuckDuckGoImageAPI:
                 ('v7exp', 'a'),
             )
         response = requests.get(image_url, params=params, headers=headers)
-        import streamlit as st
-        st.write(response)
         if response.status_code != 200:
             raise Exception(f"DuckDuckGo image fetch error: {response.status_code}")
 
