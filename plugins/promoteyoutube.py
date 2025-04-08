@@ -409,10 +409,18 @@ class PromoteyoutubePlugin(Plugin):
         # Affichage des vidéos
         for display_index, original_index in enumerate(filtered_indices):
             video = st.session_state[f"{prefix}videos"][original_index]
-            published_at = datetime.strptime(
-                video['published_at'], "%Y-%m-%dT%H:%M:%SZ")
-            days_ago = (datetime.now(pytz.UTC) -
-                        published_at.replace(tzinfo=pytz.UTC)).days
+            published_at = video.get('published_at', '')
+            if published_at and 'T' in published_at and 'Z' in published_at:
+                published_display = published_at.split('T')[0]
+                # Parse the string back to a datetime object for the days_ago calculation
+                published_at_dt = datetime.strptime(published_at, "%Y-%m-%dT%H:%M:%SZ")
+            else:
+                published_display = str(published_at)[:10] if published_at else "--"
+                # Fallback: assume a default date or handle as needed
+                published_at_dt = datetime.strptime("1970-01-01T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ") if not published_at else datetime.strptime(published_at[:10] + "T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+
+            # Now calculate days_ago with the datetime object
+            days_ago = (datetime.now(pytz.UTC) - published_at_dt.replace(tzinfo=pytz.UTC)).days
 
             st.markdown(f"[**{video['title']}**]({video['url']})")
             st.markdown(

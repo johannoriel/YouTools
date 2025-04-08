@@ -6,6 +6,9 @@ from youtube_db import *
 from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any
 from plugins.promoteyoutube import PromoteyoutubePlugin
+import os
+import re
+import pandas as pd
 
 translations["en"].update({
     "marketyoutube_tab_videos": "Videos Database",
@@ -73,6 +76,7 @@ translations["en"].update({
     "marketyoutube_published": "Published",
     "marketyoutube_status": "Status",
     "marketyoutube_sync_transcripts": "Sync Transcripts",
+    "marketyoutube_target_source_csv": "Video list (CSV)",
 })
 
 translations["fr"].update({
@@ -141,8 +145,29 @@ translations["fr"].update({
     "marketyoutube_published": "Publié",
     "marketyoutube_status": "Statut",
     "marketyoutube_sync_transcripts": "Synchroniser les transcripts",
+    "marketyoutube_target_source_csv": "Liste de vidéos (CSV)",
 })
 
+def parse_date(date_str):
+    formats = [
+        "%Y-%m-%d %H:%M:%S",  # Format in your CSV
+        "%Y-%m-%dT%H:%M:%SZ",  # ISO format expected by the app
+        "%Y-%m-%d",           # Just date
+        "%d/%m/%Y %H:%M:%S",  # European format
+    ]
+
+    for fmt in formats:
+        try:
+            parsed_date = datetime.strptime(date_str, fmt)
+            return parsed_date.strftime("%Y-%m-%dT%H:%M:%SZ")  # Always return ISO format
+        except ValueError:
+            continue
+
+    # Fallback: Use the first part of the string as a date and assume midnight
+    try:
+        return f"{date_str.split(' ')[0]}T00:00:00Z"
+    except Exception as e:
+        raise ValueError(f"Could not parse date: {date_str}, error: {str(e)}")
 
 class MarketyoutubePlugin(Plugin):
     def __init__(self, name, plugin_manager):
@@ -558,13 +583,6 @@ class MarketyoutubePlugin(Plugin):
         with tab:
             st.header(t("marketyoutube_header_campaigns"))
 
-            target_source = st.radio(
-                "Target Source",
-                options=["Search by Keywords", "Target Channels"],
-                index=0,
-                key="campaign_target_source"
-            )
-
             # Récupérer toutes les vidéos
             videos = get_videos()
 
@@ -609,6 +627,13 @@ class MarketyoutubePlugin(Plugin):
             if "campaign_target_videos" not in st.session_state:
                 st.session_state["campaign_target_videos"] = []
 
+            target_source = st.radio(
+                "Target Source",
+                options=["Search by Keywords", "Target Channels", t("marketyoutube_target_source_csv")],
+                index=0,
+                key="campaign_target_source"
+            )
+
             if target_source == "Search by Keywords":
                 keywords = st.text_input(
                     t("marketyoutube_keywords"),
@@ -622,7 +647,7 @@ class MarketyoutubePlugin(Plugin):
                     value=int(config['marketyoutube']['max_campaign_videos']),
                     key="campaign_max_videos_search"
                 )
-            else:
+            elif target_source == "Target Channels":
                 target_channels = get_target_channels()
                 if not target_channels:
                     st.warning(
@@ -665,6 +690,60 @@ class MarketyoutubePlugin(Plugin):
                     value=5,
                     key="campaign_max_videos_per_channel"
                 )
+                keywords = f"trends_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            elif target_source == t("marketyoutube_target_source_csv"):
+                csv_file_path = os.path.join(config['common']['work_directory'], 'video_list.csv')
+                if os.path.exists(csv_file_path):
+                    try:
+                        df = pd.read_csv(csv_file_path)
+                        st.write(f"Found {len(df)} videos in CSV file")
+
+                        csv_videos = []
+                        for _, row in df.iterrows():
+                            try:
+                                video_id = row['URL'].split('v=')[-1].split('&')[0]
+                                # Ensure date is parsed correctly to ISO format
+                                published_at = parse_date(row['Date'])
+
+                                video = {
+                                    'video_id': video_id,
+                                    'id': video_id,
+                                    'title': row['Title'],
+                                    'url': row['URL'],
+                                    'views': int(row['Views']) if pd.notna(row['Views']) and str(row['Views']).isdigit() else 0,
+                                    'language': row['Language'],
+                                    'published_at': published_at,  # Already in ISO format
+                                    'keyword': row['Keyword']
+                                }
+                                video_complete = self.youtube_api.get_video_infos(video) | video
+                                csv_videos.append(video_complete)
+                            except Exception as e:
+                                st.warning(f"Error processing video {row['URL']}: {str(e)}")
+                                continue
+
+                        # Filtrer par mot-clé si nécessaire
+                        unique_keywords = df['Keyword'].unique().tolist()
+                        selected_csv_keywords = st.multiselect(
+                            "Filter by Keyword",
+                            options=unique_keywords,
+                            default=unique_keywords,
+                            key="csv_keyword_filter"
+                        )
+
+                        filtered_csv_videos = [v for v in csv_videos if v['keyword'] in selected_csv_keywords]
+                        keywords = unique_keywords[0]
+
+                        # Afficher les vidéos disponibles avec leurs mots-clés
+                        st.subheader("Videos from CSV")
+                        st.dataframe(df)
+
+                    except Exception as e:
+                        raise e
+                        st.error(f"Error reading CSV file: {str(e)}")
+                        filtered_csv_videos = []
+                else:
+                    st.warning(f"CSV file not found at: {csv_file_path}")
+                    filtered_csv_videos = []
 
             max_comments = st.number_input(
                 t("marketyoutube_max_comments"),
@@ -682,7 +761,7 @@ class MarketyoutubePlugin(Plugin):
                         if target_source == "Search by Keywords":
                             target_videos = self.youtube_api.search_videos(
                                 keywords, max_videos)
-                        else:
+                        elif target_source == "Target Channels":
                             target_videos = []
                             for channel in filtered_channels:
                                 if f"{channel['channel_title']} ({', '.join(channel['keywords']) if channel['keywords'] else '--'}) ({channel['subscriber_count']} subscribers)" in selected_channels:
@@ -691,6 +770,9 @@ class MarketyoutubePlugin(Plugin):
                                         max_results=max_videos_per_channel
                                     )
                                     target_videos.extend(channel_videos)
+                        else:  # Video list (CSV)
+                            target_videos = filtered_csv_videos
+
                         st.session_state["campaign_target_videos"] = target_videos
                         prefix = "campaign_"
                         if f"{prefix}videos" in st.session_state:
@@ -720,7 +802,8 @@ class MarketyoutubePlugin(Plugin):
                     target_videos=st.session_state["campaign_target_videos"],
                     campaign_video=campaign_video,
                     max_comments=max_comments,
-                    prefix="campaign_"
+                    prefix="campaign_",
+                    keywords=keywords
                 )
 
     def run(self, config):
