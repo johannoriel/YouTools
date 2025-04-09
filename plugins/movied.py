@@ -533,6 +533,7 @@ class MoviedPlugin(Plugin):
                     del st.session_state.operations_log
                 if 'generated_video_path' in st.session_state:
                     del st.session_state.generated_video_path
+                st.rerun()
 
         # Chargement ou récupération des sous-titres
         if os.path.exists(vtt_path):
