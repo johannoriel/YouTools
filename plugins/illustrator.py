@@ -211,14 +211,14 @@ class IllustratorPlugin(Plugin):
                 if media_type == 'photo':
                     st.image(media_data)
                 elif media_type == 'video':
-                    st.video(media_data, format="video/mp4", autoplay=True)
+                    st.video(media_data, format="video/mp4", autoplay=True, muted=True)
 
             # Cas des chemins de fichiers locaux
             elif isinstance(media_data, str):
                 if media_data.lower().endswith(IMAGE_EXTENSIONS):
                     st.image(media_data)
                 elif media_data.lower().endswith(VIDEO_EXTENSIONS):
-                    st.video(media_data, format="video/mp4", autoplay=True)
+                    st.video(media_data, format="video/mp4", autoplay=True, muted=True)
                 elif media_data.lower().endswith(AUDIO_EXTENSIONS):
                     st.audio(media_data)
 
@@ -227,7 +227,7 @@ class IllustratorPlugin(Plugin):
                 if media_data['original_data']['type'] == 'photo':
                     st.image(media_data['url'])
                 else:
-                    st.video(media_data['url'], format="video/mp4", autoplay=True)
+                    st.video(media_data['url'], format="video/mp4", autoplay=True, muted=True)
 
     def folder_selector_with_creation(self, base_dir, key=None):
         """Sélection de dossier avec option de création de nouveau dossier"""
