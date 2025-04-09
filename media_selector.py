@@ -112,7 +112,7 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
         st.write("")  # Espacement vertical
         if st.button("🔄", key=f"refresh_{suffix}", help=t("media_selector_refresh_tooltip")):
             # Effacer le cache des thumbnails
-            #st.cache_data.clear()
+            st.cache_data.clear()
             #scan_media_files.clear()
             # Rescanner les fichiers
             media_files, media_paths = scan_media_files()
