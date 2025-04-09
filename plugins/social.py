@@ -348,8 +348,8 @@ Chaque tweet doit faire maximum 280 caractères."""
         if st.button(t("social_generate")) and transcript:
             st.session_state.has_generated = True
             with st.spinner(t("social_generating")):
-                ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
-                llm_response = ragllm_plugin.process_with_llm(
+                #ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
+                llm_response = self.process_with_llm(
                     prompt,
                     config.get('ragllm', {}).get('llm_sys_prompt', ''),
                     transcript
