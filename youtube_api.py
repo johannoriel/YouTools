@@ -854,7 +854,7 @@ class YoutubeAPI:
             try:
                 transcript = YouTubeTranscriptApi.get_transcript(video_id)
             except Exception as e:
-                return f"{t('recent_videos_transcript_error')}{str(e)}", "N/A"
+                return f"get_transcript error {str(e)}"
 
         full_transcript = " ".join([entry['text'] for entry in transcript])
 
