@@ -14,6 +14,7 @@ from moviepy import VideoFileClip
 from media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from datetime import datetime
 import glob
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
 
 # Translations
 translations["en"].update({
@@ -33,7 +34,7 @@ translations["en"].update({
     "movied_end_time": "End Time",
     "movied_operations": "Operations Queue",
     "movied_replace_image": "Replace with Image",
-    "movied_insert_video": "Insert Video at Start",
+    "movied_insert_video": "Insert Video before",
     "movied_replace_video": "Replace with Video",
     "movied_generate": "Generate Video",
     "movied_model_label": "Transcription Model",
@@ -108,7 +109,7 @@ translations["fr"].update({
     "movied_end_time": "Heure de fin",
     "movied_operations": "File d'opérations",
     "movied_replace_image": "Remplacer par une image",
-    "movied_insert_video": "Insérer une vidéo au début",
+    "movied_insert_video": "Insérer une vidéo avant",
     "movied_replace_video": "Remplacer par une vidéo",
     "movied_generate": "Générer la vidéo",
     "movied_model_label": "Modèle de transcription",
@@ -166,6 +167,12 @@ translations["fr"].update({
     "movied_block_add": "Ajout bloc",
 })
 
+def time_to_seconds(time_str):
+    h, m, s = map(float, time_str.replace(",", ".").split(":"))
+    return h * 3600 + m * 60 + s
+def time_to_milliseconds(time_str):
+    h, m, s = map(float, time_str.replace(",", ".").split(":"))
+    return int((h * 3600 + m * 60 + s) * 1000)
 
 class MoviedPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -247,6 +254,12 @@ class MoviedPlugin(Plugin):
 
     def setup_header(self):
         st.header(t("movied_header"))
+
+    def refresh_grid_key(self):
+        operations_hash = hash(st.session_state.get("operations", "")) if "operations" in st.session_state else 0
+        grid_key = f"subtitles_grid_{operations_hash}"
+        st.session_state.grid_key = grid_key
+
 
     def setup_controls(self):
         with st.sidebar.expander("Options"):
@@ -344,6 +357,42 @@ class MoviedPlugin(Plugin):
                 key="text_style_select"
             )
             return selected_model, thumbnail_size, font, font_size, text_background, text_style
+
+    def setup_grid_options(self, df):
+        """Configure les options de la grille AgGrid"""
+        grid_options = {
+            "defaultColDef": {
+                "filter": True,
+                "sortable": True,
+                "editable": False,
+            },
+            "columnDefs": [
+                {"field": "Start", "headerName": "Start", "width": 110, "editable": False, "checkboxSelection": True,},
+                {"field": "End", "headerName": "End", "width": 100, "editable": False},
+                {"field": "Text", "headerName": "Text", "flex": 3, "editable": False,
+                    "tooltipValueGetter": JsCode("""function(p) {return p.value}"""),
+                    "headerTooltip": "Tooltip for caption",
+                },
+                {
+                    "field": "Category",
+                    "width": 100,
+                    "headerName": "Category",
+                    "editable": True,
+                    "cellEditor": "agSelectCellEditor",
+                    "cellEditorParams": {"values": ["", "illustration", "meme", "texte"]},
+                },
+                {"field": "Complement", "width" : 150, "headerName": "Complement", "editable": True },
+                {"field": "Operation", "flex" :2, "headerName": "Operation", "editable": True,
+                    "tooltipValueGetter": JsCode(
+                        """function(p) {return p.value}"""
+                    ),
+                    "headerTooltip": "Tooltip for Operations",},
+            ],
+            "rowSelection": "multiple",  # Sélection multiple
+            "tooltipShowDelay": 100,
+            #"rowMultiSelectWithClick": True,  # Permet la sélection multiple par clic
+        }
+        return grid_options
 
     def list_videos(self):
         with st.sidebar.expander(t("movied_filter_videos")):
@@ -444,617 +493,117 @@ class MoviedPlugin(Plugin):
         return selected_video
 
     def handle_transcript(self, selected_video, video_df, selected_model):
-        # Step 1: Display all subtitles with "Add", "Block Add", "Forced Add", and "Suggestions" buttons
-        if selected_video["selection"]["rows"]:
-            idx = selected_video["selection"]["rows"][0]
-            video_info = video_df.iloc[idx]
-            vtt_path = os.path.splitext(video_info["Full Path"])[0] + ".vtt"
-
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(t("movied_generate_transcript")):
-                    with st.spinner(t("movied_processing")):
-                        try:
-                            generate_subtitles(video_info["Full Path"], selected_model)
-                            subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
-                            st.session_state["subtitles_df"] = subtitles_df
-                            st.session_state["current_vtt_path"] = vtt_path
-                            st.success(t("movied_success").format(video=os.path.basename(video_info["Full Path"])))
-                            st.rerun()
-                        except Exception as e:
-                            st.error(t("movied_error").format(error=str(e)))
-                            return None, None, None
-
-            with col2:
-                if st.button(t("movied_normalize_audio")):
-                    with st.spinner(t("movied_normalizing")):
-                        try:
-                            normalize_audio(video_info["Full Path"], self.reference_audio_path)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(t("movied_error").format(error=str(e)))
-
-            if os.path.exists(vtt_path):
-                if "subtitles_df" not in st.session_state or st.session_state.get("current_vtt_path") != vtt_path:
-                    subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
-                    st.session_state["subtitles_df"] = subtitles_df
-                    st.session_state["current_vtt_path"] = vtt_path
-                else:
-                    subtitles_df = st.session_state["subtitles_df"]
-
-                st.write(t("movied_subtitles").format(video=video_info["Video"]))
-                selected_subtitles = st.dataframe(
-                    subtitles_df[["Start", "End", "Text"]],
-                    selection_mode="multi-row",
-                    on_select="rerun",
-                    key="subtitle_selector",
-                    hide_index=True
-                )
-
-                col1, col2, col3, col4 = st.columns(4)  # Adjusted to 4 columns
-                with col1:
-                    if st.button(t("movied_add_to_interest")) and selected_subtitles["selection"]["rows"]:
-                        selected_indices = selected_subtitles["selection"]["rows"]
-                        if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
-                            new_entries = subtitles_df.iloc[selected_indices][["Start", "End", "Text"]]
-                            if "interest_subtitles_df" not in st.session_state:
-                                st.session_state["interest_subtitles_df"] = new_entries
-                            else:
-                                existing = st.session_state["interest_subtitles_df"][["Start", "End", "Text"]]
-                                combined = pd.concat([existing, new_entries]).drop_duplicates(subset=["Start", "End", "Text"]).reset_index(drop=True)
-                                if "Category" in st.session_state["interest_subtitles_df"].columns:
-                                    combined = combined.merge(
-                                        st.session_state["interest_subtitles_df"][["Start", "End", "Text", "Category", "Complement"]],
-                                        on=["Start", "End", "Text"],
-                                        how="left"
-                                    ).fillna({"Category": "", "Complement": ""})
-                                st.session_state["interest_subtitles_df"] = combined
-                            st.rerun()
-
-                with col2:
-                    if st.button(t("movied_block_add"), key="movied_block_add") and selected_subtitles["selection"]["rows"]:
-                        selected_indices = sorted(selected_subtitles["selection"]["rows"])
-                        if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
-                            # Group consecutive selections into blocks
-                            blocks = []
-                            current_block = []
-                            prev_idx = None
-
-                            for idx in selected_indices:
-                                if prev_idx is None or idx == prev_idx + 1:
-                                    current_block.append(idx)
-                                else:
-                                    blocks.append(current_block)
-                                    current_block = [idx]
-                                prev_idx = idx
-                            if current_block:
-                                blocks.append(current_block)
-
-                            # Process each block
-                            new_entries = []
-                            for block in blocks:
-                                if len(block) == 1:
-                                    new_entries.append(subtitles_df.iloc[block[0]][["Start", "End", "Text"]])
-                                else:
-                                    start_time = subtitles_df.iloc[block[0]]["Start"]
-                                    end_time = subtitles_df.iloc[block[-1]]["End"]
-                                    merged_text = " ".join(subtitles_df.iloc[block]["Text"].tolist())
-                                    new_entries.append(pd.Series({
-                                        "Start": start_time,
-                                        "End": end_time,
-                                        "Text": merged_text
-                                    }))
-
-                            new_df = pd.DataFrame(new_entries)
-                            if "interest_subtitles_df" not in st.session_state:
-                                st.session_state["interest_subtitles_df"] = new_df
-                            else:
-                                existing = st.session_state["interest_subtitles_df"][["Start", "End", "Text"]]
-                                combined = pd.concat([existing, new_df]).drop_duplicates(subset=["Start", "End", "Text"]).reset_index(drop=True)
-                                if "Category" in st.session_state["interest_subtitles_df"].columns:
-                                    combined = combined.merge(
-                                        st.session_state["interest_subtitles_df"][["Start", "End", "Text", "Category", "Complement"]],
-                                        on=["Start", "End", "Text"],
-                                        how="left"
-                                    ).fillna({"Category": "", "Complement": ""})
-                                st.session_state["interest_subtitles_df"] = combined
-                            st.success(f"Added {len(blocks)} block(s) to interest subtitles")
-                            st.rerun()
-
-                with col3:
-                    if st.button(t("movied_force_add")) and selected_subtitles["selection"]["rows"]:
-                        selected_indices = selected_subtitles["selection"]["rows"]
-                        if not subtitles_df.empty and all(idx < len(subtitles_df) for idx in selected_indices):
-                            new_entries = subtitles_df.iloc[selected_indices][["Start", "End", "Text"]]
-                            if "interest_subtitles_df" not in st.session_state:
-                                st.session_state["interest_subtitles_df"] = new_entries
-                            else:
-                                combined = pd.concat([st.session_state["interest_subtitles_df"], new_entries]).reset_index(drop=True)
-                                st.session_state["interest_subtitles_df"] = combined
-                            st.rerun()
-
-                with col4:
-                    if st.button(t("movied_suggestions"), key="llm_suggestions_btn"):
-                        self.handle_llm_suggestions(video_info["Full Path"], vtt_path, subtitles_df)
-
-                return selected_subtitles, subtitles_df, vtt_path
+        """Gère l'affichage et l'édition des sous-titres avec AgGrid"""
+        if not selected_video["selection"]["rows"]:
             return None, None, None
-        return None, None, None
 
-    def handle_intermediate_subtitles(self, selected_subtitles, subtitles_df):
-        # Step 2: Manage interest subtitles with Remove, Merge, and Sort
-        if "interest_subtitles_df" not in st.session_state or st.session_state["interest_subtitles_df"].empty:
-            st.write("No subtitles of interest selected yet.")
-            return None, None
+        idx = selected_video["selection"]["rows"][0]
+        video_info = video_df.iloc[idx]
+        vtt_path = os.path.splitext(video_info["Full Path"])[0] + ".vtt"
+        video_path = video_info["Full Path"]
 
-        intermediate_subtitles_df = st.session_state["interest_subtitles_df"].copy()
-
-        st.write("Subtitles of Interest (Manage):")
-        selected_intermediate = st.dataframe(
-            intermediate_subtitles_df[["Start", "End", "Text"]],
-            selection_mode="multi-row",
-            on_select="rerun",
-            key="intermediate_subtitle_selector",
-            hide_index=True
-        )
-
+        # Boutons de contrôle
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button(t("movied_remove_from_interest")) and selected_intermediate["selection"]["rows"]:
-                selected_indices = selected_intermediate["selection"]["rows"]
-                # Remove from interest subtitles
-                intermediate_subtitles_df = intermediate_subtitles_df.drop(selected_indices).reset_index(drop=True)
-                st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
-
-                # Sync with edited subtitles (remove matching entries)
-                if "edited_subtitles_df" in st.session_state:
-                    edited_df = st.session_state["edited_subtitles_df"]
-                    # Keep only rows that still exist in interest_subtitles_df
-                    edited_df = edited_df.merge(
-                        intermediate_subtitles_df[["Start", "End", "Text"]],
-                        on=["Start", "End", "Text"],
-                        how="inner"
-                    ).reset_index(drop=True)
-                    # Preserve Category and Complement if they exist
-                    if "Category" not in edited_df.columns:
-                        edited_df["Category"] = ""
-                    if "Complement" not in edited_df.columns:
-                        edited_df["Complement"] = ""
-                    st.session_state["edited_subtitles_df"] = edited_df[["Start", "End", "Text", "Category", "Complement"]]
-                else:
-                    st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
-
-                st.rerun()
-
-        with col2:
-            if st.button(t("movied_merge_subtitles")) and selected_intermediate["selection"]["rows"]:
-                selected_indices = sorted(selected_intermediate["selection"]["rows"])
-                if len(selected_indices) > 1:
-                    is_continuous = True
-                    for i in range(len(selected_indices) - 1):
-                        current_end = self.parse_timecode(intermediate_subtitles_df.iloc[selected_indices[i]]["End"])
-                        next_start = self.parse_timecode(intermediate_subtitles_df.iloc[selected_indices[i + 1]]["Start"])
-                        if current_end != next_start:
-                            if abs(next_start - current_end) > 0.5:
-                                is_continuous = False
-                                break
-
-                    if is_continuous:
-                        start_time = intermediate_subtitles_df.iloc[selected_indices[0]]["Start"]
-                        end_time = intermediate_subtitles_df.iloc[selected_indices[-1]]["End"]
-                        merged_text = " ".join(intermediate_subtitles_df.iloc[selected_indices]["Text"].tolist())
-                        category = intermediate_subtitles_df.iloc[selected_indices[0]].get("Category", "")
-                        complement = intermediate_subtitles_df.iloc[selected_indices[0]].get("Complement", "")
-                        merged_row = pd.DataFrame({
-                            "Start": [start_time],
-                            "End": [end_time],
-                            "Text": [merged_text],
-                            "Category": [category],
-                            "Complement": [complement]
-                        })
-                        intermediate_subtitles_df = intermediate_subtitles_df.drop(selected_indices).reset_index(drop=True)
-                        intermediate_subtitles_df = pd.concat([intermediate_subtitles_df, merged_row]).reset_index(drop=True)
-                        st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
-
-                        # Sync with edited subtitles
-                        st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
+            if st.button(t("movied_generate_transcript")):
+                with st.spinner(t("movied_processing")):
+                    try:
+                        generate_subtitles(video_path, selected_model)
+                        subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
+                        st.session_state["subtitles_df"] = subtitles_df
+                        st.session_state["current_vtt_path"] = vtt_path
+                        st.success(t("movied_success").format(video=os.path.basename(video_path)))
                         st.rerun()
-                    else:
-                        st.error(t("movied_merge_error_not_continuous"))
+                    except Exception as e:
+                        st.error(t("movied_error").format(error=str(e)))
+                        return None, None, None
 
-        with col3:
-            if st.button(t("movied_sort_subtitles")):
-                intermediate_subtitles_df["Start_seconds"] = intermediate_subtitles_df["Start"].apply(self.parse_timecode)
-                intermediate_subtitles_df = intermediate_subtitles_df.sort_values("Start_seconds").drop(columns=["Start_seconds"]).reset_index(drop=True)
-                st.session_state["interest_subtitles_df"] = intermediate_subtitles_df
-
-                # Sync with edited subtitles
-                st.session_state["edited_subtitles_df"] = intermediate_subtitles_df.copy()
-                st.rerun()
-
-        return selected_intermediate, intermediate_subtitles_df
-
-    def handle_edit_subtitles(self):
-        # Step 3: Edit subtitles with st.data_editor and Refresh button
-        if "interest_subtitles_df" not in st.session_state or st.session_state["interest_subtitles_df"].empty:
-            st.write("No subtitles available for editing.")
-            return None
-
-        st.write(t("movied_edit_subtitles"))
-        if "edited_subtitles_df" not in st.session_state:
-            st.session_state["edited_subtitles_df"] = st.session_state["interest_subtitles_df"].copy()
-            if "Category" not in st.session_state["edited_subtitles_df"].columns:
-                st.session_state["edited_subtitles_df"]["Category"] = ""
-            if "Complement" not in st.session_state["edited_subtitles_df"].columns:
-                st.session_state["edited_subtitles_df"]["Complement"] = ""
-
-        def refresh():
-            current_edited = st.session_state["edited_subtitles_df"]
-            new_base = st.session_state["interest_subtitles_df"].copy()
-            synced_df = new_base.merge(
-                current_edited[["Category", "Complement", "Start", "End", "Text"]],
-                on=["Start", "End", "Text"],
-                how="left",
-                suffixes=("", "_edited")
-            ).fillna({"Category": "", "Complement": ""})
-            synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
-            st.session_state["edited_subtitles_df"] = synced_df
-
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            if st.button(t("movied_refresh"), key="refresh_edit"):
-                refresh()
-                st.rerun()
         with col2:
-            # Get the prompt for help text
-            config = self.plugin_manager.config
-            edit_prompt = config.get(self.name, {}).get('edit_suggestion_prompt', "")
-            if st.button(t("movied_suggestions"), key="llm_edit_suggestions_btn", help=edit_prompt):
-                self.handle_llm_edit_suggestions()
+            if st.button(t("movied_normalize_audio")):
+                with st.spinner(t("movied_normalizing")):
+                    try:
+                        normalize_audio(video_path, self.reference_audio_path)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(t("movied_error").format(error=str(e)))
+
         with col3:
-            if st.button("Deduplicate", key="deduplicate_step3"):
-                self.remove_duplicates_step3()
+            if st.button("Clean up operations"):
+                if 'oprations_log' in st.session_state:
+                    del st.session_state.operations_log
+                if 'generated_video_path' in st.session_state:
+                    del st.session_state.generated_video_path
 
-        # Bug bypass : https://github.com/streamlit/streamlit/issues/7749
-        def update():
-            for idx, change in st.session_state.subtitle_editor["edited_rows"].items():
-                #print(f"idx : {idx} / change : {change}")
-                for label, value in change.items():
-                    print(f"label : {label} / value : {value}")
-                    st.session_state.edited_subtitles_df.loc[idx, label] = value
-                    refresh() #needed to key idx in sync
-
-        edited_df = st.data_editor(
-            st.session_state["edited_subtitles_df"],
-            column_config={
-                "Start": st.column_config.TextColumn("Start", disabled=True),
-                "End": st.column_config.TextColumn("End", disabled=True),
-                "Text": st.column_config.TextColumn("Text", disabled=True),
-                "Category": st.column_config.SelectboxColumn(
-                    "Category",
-                    options=["", "meme", "illustration", "texte"],
-                    default=""
-                ),
-                "Complement": st.column_config.TextColumn("Complement", default="")
-            },
-            #hide_index=True,
-            key="subtitle_editor",
-            on_change=update
-        )
-        st.session_state["edited_subtitles_df"] = edited_df
-        return edited_df
-
-    def handle_final_selection(self):
-        # Step 4: Final selection with single-row mode and Refresh button
-        if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
-            st.write("No edited subtitles available for final selection.")
-            return None, None
-
-        st.write(t("movied_final_selection"))
-        col1, col2 = st.columns(2)
-        multiple_selection = col1.checkbox(t("movied_multiple_selection"), value=False, key="multiple_selection_final")
-        selection_mode = "multi-row" if multiple_selection else "single-row"
-        if col2.button(t("movied_refresh"), key="refresh_final"):
-            if "interest_subtitles_df" in st.session_state:
-                current_edited = st.session_state["edited_subtitles_df"]
-                new_base = st.session_state["interest_subtitles_df"].copy()
-                synced_df = new_base.merge(
-                    current_edited[["Category", "Complement", "Start", "End", "Text"]],
-                    on=["Start", "End", "Text"],
-                    how="left",
-                    suffixes=("", "_edited")
-                ).fillna({"Category": "", "Complement": ""})
-                synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
-                st.session_state["edited_subtitles_df"] = synced_df
-            st.rerun()
-
-        final_subtitles_df = st.session_state["edited_subtitles_df"]
-        selected_final = st.dataframe(
-            final_subtitles_df[["Category", "Complement", "Start", "End", "Text"]],
-            selection_mode=selection_mode,
-            on_select="rerun",
-            key="final_subtitle_selector",
-            hide_index=True
-        )
-        return selected_final, final_subtitles_df
-
-    def remove_duplicates_step2(self):
-        """Remove duplicates from interest_subtitles_df based on Start, End, and Text"""
-        if "interest_subtitles_df" not in st.session_state or st.session_state["interest_subtitles_df"].empty:
-            st.warning("No subtitles of interest to deduplicate.")
-            return
-
-        df = st.session_state["interest_subtitles_df"]
-        initial_count = len(df)
-        # Drop duplicates based on Start, End, Text
-        deduplicated_df = df.drop_duplicates(subset=["Start", "End", "Text"]).reset_index(drop=True)
-        st.session_state["interest_subtitles_df"] = deduplicated_df
-
-        # Sync with edited_subtitles_df
-        if "edited_subtitles_df" in st.session_state:
-            edited_df = st.session_state["edited_subtitles_df"]
-            synced_df = deduplicated_df.merge(
-                edited_df[["Start", "End", "Text", "Category", "Complement"]],
-                on=["Start", "End", "Text"],
-                how="left",
-                suffixes=("", "_edited")
-            ).fillna({"Category": "", "Complement": ""})
-            st.session_state["edited_subtitles_df"] = synced_df[["Start", "End", "Text", "Category", "Complement"]]
-
-        removed_count = initial_count - len(deduplicated_df)
-        if removed_count > 0:
-            st.success(f"Removed {removed_count} duplicates from interest subtitles")
-        else:
-            st.info("No duplicates found in interest subtitles")
-        st.rerun()
-
-    def remove_duplicates_step3(self):
-        """Remove duplicates from edited_subtitles_df based on Start, End, Text, and Category, merging Complement"""
-        if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
-            st.warning("No edited subtitles to deduplicate.")
-            return
-
-        df = st.session_state["edited_subtitles_df"]
-        initial_count = len(df)
-
-        # Clean trailing commas in Complement
-        df["Complement"] = df["Complement"].apply(lambda x: x.rstrip(',') if pd.notna(x) and isinstance(x, str) else x)
-
-        # Group by Start, End, Text, Category and merge Complement
-        def merge_complements(group):
-            if len(group) > 1:
-                # Split complements, remove duplicates, and join back
-                all_complements = []
-                for comp in group["Complement"]:
-                    if pd.notna(comp) and comp:
-                        all_complements.extend([c.strip() for c in comp.split(",")])
-                # Remove duplicates while preserving order
-                unique_complements = list(dict.fromkeys([c for c in all_complements if c]))
-                return ", ".join(unique_complements)
-            return group["Complement"].iloc[0]
-
-        deduplicated_df = df.groupby(["Start", "End", "Text", "Category"]).apply(
-            lambda g: pd.Series({
-                "Complement": merge_complements(g)
-            })
-        ).reset_index()
-
-        st.session_state["edited_subtitles_df"] = deduplicated_df[["Start", "End", "Text", "Category", "Complement"]]
-
-        # Sync back to interest_subtitles_df
-        st.session_state["interest_subtitles_df"] = deduplicated_df.copy()
-
-        removed_count = initial_count - len(deduplicated_df)
-        if removed_count > 0:
-            st.success(f"Removed {removed_count} duplicates from edited subtitles and merged complements")
-        else:
-            st.info("No duplicates found in edited subtitles")
-        st.rerun()
-
-    def handle_llm_suggestions(self, video_path, vtt_path, subtitles_df):
-        """Handle LLM suggestions for illustrations and memes with configurable prompts"""
-        if not os.path.exists(vtt_path):
-            st.warning("Please generate a transcript first.")
-            return
-
-        # Convert VTT to plain text transcript
-        transcript = ""
-        with open(vtt_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            for line in lines:
-                if '-->' in line:
-                    continue
-                if line.strip() and not line.startswith('WEBVTT'):
-                    transcript += line.strip() + "\n"
-
-        # Get prompts from config (with French defaults)
-        config = self.plugin_manager.config
-        illustration_prompt = config.get(self.name, {}).get('illustration_prompt', """
-            Analyse la transcription suivante d'une vidéo et identifie les sections qui bénéficieraient d'illustrations visuelles.
-            Pour chaque section, fournis :
-            1. Le timecode de début (format : HH:MM:SS.sss)
-            2. Un seul mot décrivant le thème de l'illustration mais en anglais
-
-            Retourne ta réponse dans ce format exact, une suggestion par ligne :
-            [ILLUSTRATION] HH:MM:SS.sss thème
-
-            Voici la transcription :
-            {transcript}
-        """)
-
-        meme_prompt = config.get(self.name, {}).get('meme_prompt', """
-            Analyse la transcription suivante d'une vidéo et identifie les sections avec des émotions fortes adaptées à des mèmes.
-            Pour chaque section, fournis :
-            1. Le timecode de début (format : HH:MM:SS.sss)
-            2. Un seul mot décrivant l'émotion principale mais en anglais
-
-            Retourne ta réponse dans ce format exact, une suggestion par ligne :
-            [MEME] HH:MM:SS.sss émotion
-
-            Voici la transcription :
-            {transcript}
-        """)
-
-        # Process LLM suggestions
-        with st.spinner("Getting LLM suggestions..."):
-            # Get illustration suggestions
-            illustration_response = self.process_with_llm(
-                illustration_prompt.format(transcript=transcript),
-                config.get('ragllm', {}).get('llm_sys_prompt', ''),
-                transcript
-            )
-
-            # Get meme suggestions
-            meme_response = self.process_with_llm(
-                meme_prompt.format(transcript=transcript),
-                config.get('ragllm', {}).get('llm_sys_prompt', ''),
-                transcript
-            )
-
-            # Process responses
-            new_entries = []
-
-            # Parse illustration suggestions
-            for line in illustration_response.split('\n'):
-                if line.startswith('[ILLUSTRATION]'):
-                    try:
-                        parts = line.split(maxsplit=3)
-                        if len(parts) == 3:
-                            start, theme = parts[1], parts[2]
-                            # Try exact match
-                            matching_subs = subtitles_df[subtitles_df['Start'] == start]
-                            if matching_subs.empty:
-                                # Find closest previous subtitle
-                                start_sec = self.parse_timecode(start)
-                                subtitles_df['Start_sec'] = subtitles_df['Start'].apply(self.parse_timecode)
-                                previous_subs = subtitles_df[subtitles_df['Start_sec'] <= start_sec]
-                                if not previous_subs.empty:
-                                    matching_subs = previous_subs.iloc[[-1]]
-                                    st.warning(f"Imprecise illustration timecode {start}: using previous subtitle at {matching_subs.iloc[0]['Start']}")
-                                else:
-                                    st.warning(f"No matching subtitle found for illustration timecode {start}")
-                                    continue
-
-                            sub = matching_subs.iloc[0]
-                            print(sub)
-                            new_entries.append({
-                                'Start': sub['Start'],
-                                'End': sub['End'],
-                                'Text': sub['Text'],
-                                'Category': 'illustration',
-                                'Complement': theme
-                            })
-                    except Exception as e:
-                        st.warning(f"Error parsing illustration suggestion: {line} - {str(e)}")
-
-            # Parse meme suggestions
-            for line in meme_response.split('\n'):
-                if line.startswith('[MEME]'):
-                    try:
-                        parts = line.split(maxsplit=3)
-                        if len(parts) == 3:
-                            start, emotion = parts[1], parts[2]
-                            # Try exact match
-                            matching_subs = subtitles_df[subtitles_df['Start'] == start]
-                            if matching_subs.empty:
-                                # Find closest previous subtitle
-                                start_sec = self.parse_timecode(start)
-                                subtitles_df['Start_sec'] = subtitles_df['Start'].apply(self.parse_timecode)
-                                previous_subs = subtitles_df[subtitles_df['Start_sec'] <= start_sec]
-                                if not previous_subs.empty:
-                                    matching_subs = previous_subs.iloc[[-1]]
-                                    st.warning(f"Imprecise meme timecode {start}: using previous subtitle at {matching_subs.iloc[0]['Start']}")
-                                else:
-                                    st.warning(f"No matching subtitle found for meme timecode {start}")
-                                    continue
-
-                            sub = matching_subs.iloc[0]
-                            print(sub)
-                            new_entries.append({
-                                'Start': sub['Start'],
-                                'End': sub['End'],
-                                'Text': sub['Text'],
-                                'Category': 'meme',
-                                'Complement': emotion
-                            })
-                    except Exception as e:
-                        st.warning(f"Error parsing meme suggestion: {line} - {str(e)}")
-
-            # Clean up temporary column
-            if 'Start_sec' in subtitles_df.columns:
-                subtitles_df = subtitles_df.drop(columns=['Start_sec'])
-
-            # Add to interest subtitles (Step 2)
-            print(new_entries)
-            if new_entries:
-                new_df = pd.DataFrame(new_entries)
-                if "interest_subtitles_df" not in st.session_state:
-                    st.session_state["interest_subtitles_df"] = new_df
-                else:
-                    existing = st.session_state["interest_subtitles_df"]
-                    #combined = pd.concat([existing, new_df]).drop_duplicates(
-                    #    subset=["Start", "End", "Text"]
-                    #).reset_index(drop=True)
-                    combined = pd.concat([existing, new_df]).reset_index(drop=True)
-                    st.session_state["interest_subtitles_df"] = combined
-
-                # Sync with edited subtitles (Step 3)
-                if "edited_subtitles_df" in st.session_state:
-                    current_edited = st.session_state["edited_subtitles_df"]
-                    synced_df = st.session_state["interest_subtitles_df"].merge(
-                        current_edited[["Category", "Complement", "Start", "End", "Text"]],
-                        on=["Start", "End", "Text"],
-                        how="left",
-                        suffixes=("", "_edited")
-                    ).fillna({"Category": "", "Complement": ""})
-                    synced_df = synced_df[["Start", "End", "Text", "Category", "Complement"]]
-                    st.session_state["edited_subtitles_df"] = synced_df
-                else:
-                    st.session_state["edited_subtitles_df"] = st.session_state["interest_subtitles_df"].copy()
-
-                st.success(f"Added {len(new_entries)} suggestions from LLM")
-                st.rerun()
+        # Chargement ou récupération des sous-titres
+        if os.path.exists(vtt_path):
+            if "subtitles_df" not in st.session_state or st.session_state.get("current_vtt_path") != vtt_path:
+                subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
+                if "Category" not in subtitles_df.columns:
+                    subtitles_df["Category"] = ""
+                if "Complement" not in subtitles_df.columns:
+                    subtitles_df["Complement"] = ""
+                st.session_state["subtitles_df"] = subtitles_df
+                st.session_state["current_vtt_path"] = vtt_path
             else:
-                st.info("No suggestions found by LLM")
+                subtitles_df = st.session_state["subtitles_df"]
 
-    def handle_llm_edit_suggestions(self):
-        """Handle LLM suggestions for Category and Complement in edited subtitles, appending to existing complements"""
-        if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
-            st.warning("No edited subtitles available for suggestions.")
+            st.write(t("movied_subtitles").format(video=video_info["Video"]))
+
+            # Configuration et affichage de la grille AgGrid
+            grid_options = self.setup_grid_options(subtitles_df)
+
+            if "grid_key" not in st.session_state:
+                self.refresh_grid_key()
+
+            grid_response = AgGrid(
+                subtitles_df,
+                gridOptions=grid_options,
+                height=400,
+                fit_columns_on_grid_load=True,
+                allow_unsafe_jscode=True,
+                update_mode=GridUpdateMode.VALUE_CHANGED | GridUpdateMode.SELECTION_CHANGED,
+                key=st.session_state.grid_key
+            )
+
+            # Mise à jour du DataFrame dans session_state
+            st.session_state["subtitles_df"] = grid_response['data']
+            selected_rows = pd.DataFrame(grid_response['selected_rows'])
+
+            # Boutons pour les suggestions uniquement
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("Suggest All", key="suggest_all_btn"):
+                    self.handle_llm_suggestions(video_path, vtt_path, subtitles_df)
+            with col2:
+                if st.button("Suggest for Selection", key="suggest_selection_btn", disabled=selected_rows.empty):
+                    self.handle_llm_suggestions_for_selection(video_path, vtt_path, selected_rows)
+            with col3:
+                if st.button("Rafraîchir les opérations", key="refresh_ops_btn"):
+                    st.session_state["subtitles_df"] = self.update_operations_in_grid(st.session_state["subtitles_df"])
+                    #st.rerun()
+
+            return selected_rows, subtitles_df, vtt_path
+        return None, None, None
+
+    def handle_llm_suggestions_for_selection(self, video_path, vtt_path, selected_rows):
+        """Gère les suggestions LLM pour les lignes sélectionnées uniquement"""
+        if selected_rows.empty:
+            st.warning("Please select at least one subtitle row.")
             return
 
-        edited_df = st.session_state["edited_subtitles_df"].copy()
-
-        # Get prompt from config
         config = self.plugin_manager.config
-        edit_prompt = config.get(self.name, {}).get('edit_suggestion_prompt', """
-            Analyse la ligne suivante d'une transcription vidéo et propose :
-            - Si aucune catégorie n'est fournie ("{category}" est vide) : une catégorie ('illustration', 'meme', ou 'texte') et des compléments (mots séparés par des virgules)
-            - Si une catégorie est fournie ("{category}") : des compléments (mots séparés par des virgules) adaptés à la catégorie
+        edit_prompt = config.get(self.name, {}).get('edit_suggestion_prompt', self.get_config_fields()["edit_suggestion_prompt"]["default"])
 
-            Entrée : {start} - {end} - "{text}" - Catégorie actuelle : "{category}" - Compléments actuels : "{complement}"
+        with st.spinner("Getting LLM suggestions for selection..."):
+            subtitles_df = st.session_state["subtitles_df"]
 
-            Retourne ta réponse dans ce format exact :
-            - Avec catégorie vide : [SUGGESTION] catégorie complément1, complément2, ...
-            - Avec catégorie remplie : [SUGGESTION] complément1, complément2, ...
-
-            Ne réponds qu'une seule ligne par suggestion.
-        """)
-
-        # Process each line with LLM
-        with st.spinner("Getting LLM suggestions for edits..."):
-            suggestions = []
-            for _, row in edited_df.iterrows():
-                current_category = row["Category"] if pd.notna(row["Category"]) else ""
-                current_complement = row["Complement"] if pd.notna(row["Complement"]) else ""
-
-                # Prepare prompt
+            for _, row in selected_rows.iterrows():
                 prompt = edit_prompt.format(
                     start=row["Start"],
                     end=row["End"],
                     text=row["Text"],
-                    category=current_category,
-                    complement=current_complement
+                    category=row["Category"],
+                    complement=row["Complement"]
                 )
                 response = self.process_with_llm(
                     prompt,
@@ -1062,62 +611,116 @@ class MoviedPlugin(Plugin):
                     row["Text"]
                 )
 
-                # Parse response
                 for line in response.split('\n'):
                     if line.startswith('[SUGGESTION]'):
                         try:
                             parts = line.split(maxsplit=2)
                             if len(parts) >= 2:
-                                # Case 1: Category is empty, expect category and complements
-                                if not current_category:
+                                if not row["Category"]:
                                     if len(parts) >= 3:
-                                        suggested_category = parts[1]
-                                        suggested_complements = parts[2]
-                                        new_complement = suggested_complements if not current_complement else f"{current_complement}, {suggested_complements}"
-                                        suggestions.append({
-                                            'Start': row['Start'],
-                                            'End': row['End'],
-                                            'Text': row['Text'],
-                                            'Category': suggested_category,
-                                            'Complement': new_complement
-                                        })
-                                # Case 2: Category exists, expect only complements
+                                        category = parts[1]
+                                        complement = parts[2]
+                                        # Localiser la ligne par Start et End
+                                        mask = (subtitles_df["Start"] == row["Start"]) & (subtitles_df["End"] == row["End"])
+                                        subtitles_df.loc[mask, "Category"] = category
+                                        subtitles_df.loc[mask, "Complement"] = complement
                                 else:
-                                    suggested_complements = parts[1]
-                                    new_complement = suggested_complements if not current_complement else f"{current_complement}, {suggested_complements}"
-                                    suggestions.append({
-                                        'Start': row['Start'],
-                                        'End': row['End'],
-                                        'Text': row['Text'],
-                                        'Category': current_category,
-                                        'Complement': new_complement
-                                    })
+                                    complement = parts[1]
+                                    current_complement = row["Complement"]
+                                    new_complement = f"{current_complement}, {complement}" if current_complement else complement
+                                    # Localiser la ligne par Start et End
+                                    mask = (subtitles_df["Start"] == row["Start"]) & (subtitles_df["End"] == row["End"])
+                                    subtitles_df.loc[mask, "Complement"] = new_complement
                         except Exception as e:
-                            st.warning(f"Error parsing suggestion for '{row['Text']}': {line} - {str(e)}")
+                            st.warning(f"Error parsing suggestion: {line} - {str(e)}")
 
-            # Update edited subtitles with suggestions
-            if suggestions:
-                suggested_df = pd.DataFrame(suggestions)
-                # Merge with existing edited_df to update only relevant rows
-                updated_df = edited_df.merge(
-                    suggested_df[["Start", "End", "Text", "Category", "Complement"]],
-                    on=["Start", "End", "Text"],
-                    how="left",
-                    suffixes=("_old", "")
-                )
-                # Keep old values where no new suggestion was provided
-                for col in ["Category", "Complement"]:
-                    updated_df[col] = updated_df[col].fillna(updated_df[f"{col}_old"])
-                updated_df = updated_df.drop(columns=[f"{col}_old" for col in ["Category", "Complement"]])
-                st.session_state["edited_subtitles_df"] = updated_df[["Start", "End", "Text", "Category", "Complement"]]
+            st.session_state["subtitles_df"] = subtitles_df
+            st.success(f"Applied suggestions to {len(selected_rows)} selected rows")
+            st.rerun()
 
-                # Sync back to interest_subtitles_df
-                st.session_state["interest_subtitles_df"] = updated_df.copy()
+    def handle_llm_suggestions(self, video_path, vtt_path, subtitles_df):
+        """Gère les suggestions globales LLM pour illustrations et mèmes dans l'AgGrid"""
+        config = self.plugin_manager.config
 
-                st.success(f"Applied {len(suggestions)} suggestions to edited subtitles")
-                st.rerun()
-            else:
-                st.info("No suggestions provided by LLM")
+        # Récupérer les prompts depuis la configuration
+        illustration_prompt = config.get(self.name, {}).get('illustration_prompt',
+            "Analyze the following subtitles and suggest where to add illustrations. Format: [ILLUSTRATION] start_time complement")
+        meme_prompt = config.get(self.name, {}).get('meme_prompt',
+            "Analyze the following subtitles and suggest where to add memes. Format: [MEME] start_time complement")
+
+        with st.spinner("Getting LLM suggestions..."):
+            # Préparer le texte des sous-titres pour le LLM
+            subtitles_text = "\n".join(
+                f"{row['Start']} - {row['End']}: {row['Text']}"
+                for _, row in subtitles_df.iterrows()
+            )
+
+            # Générer les suggestions pour les illustrations
+            illustration_response = self.process_with_llm(
+                illustration_prompt,
+                config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                subtitles_text
+            )
+
+            # Générer les suggestions pour les mèmes
+            meme_response = self.process_with_llm(
+                meme_prompt,
+                config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                subtitles_text
+            )
+
+            # Réinitialiser les colonnes Category et Complement pour éviter les conflits
+            subtitles_df["Category"] = ""
+            subtitles_df["Complement"] = ""
+
+            # Traiter les suggestions d'illustrations
+            for line in illustration_response.split('\n'):
+                if line.startswith('[ILLUSTRATION]'):
+                    try:
+                        parts = line.split(maxsplit=2)
+                        if len(parts) < 2:
+                            continue
+                        start_time_str = parts[1]
+                        complement = parts[2] if len(parts) > 2 else ""
+                        start_time_sec = time_to_seconds(start_time_str)
+
+                        # Trouver le sous-titre correspondant
+                        for idx, row in subtitles_df.iterrows():
+                            start_sec = time_to_seconds(row["Start"])
+                            end_sec = time_to_seconds(row["End"])
+                            if start_sec <= start_time_sec <= end_sec:
+                                subtitles_df.at[idx, "Category"] = "illustration"
+                                subtitles_df.at[idx, "Complement"] = complement
+                                break
+                    except Exception as e:
+                        st.warning(f"Error parsing illustration suggestion: {line} - {str(e)}")
+
+            # Traiter les suggestions de mèmes
+            for line in meme_response.split('\n'):
+                if line.startswith('[MEME]'):
+                    try:
+                        parts = line.split(maxsplit=2)
+                        if len(parts) < 2:
+                            continue
+                        start_time_str = parts[1]
+                        complement = parts[2] if len(parts) > 2 else ""
+                        start_time_sec = time_to_seconds(start_time_str)
+
+                        # Trouver le sous-titre correspondant
+                        for idx, row in subtitles_df.iterrows():
+                            start_sec = time_to_seconds(row["Start"])
+                            end_sec = time_to_seconds(row["End"])
+                            if start_sec <= start_time_sec <= end_sec:
+                                subtitles_df.at[idx, "Category"] = "meme"
+                                subtitles_df.at[idx, "Complement"] = complement
+                                break
+                    except Exception as e:
+                        st.warning(f"Error parsing meme suggestion: {line} - {str(e)}")
+
+            # Mettre à jour st.session_state pour refléter les changements dans l'AgGrid
+            st.session_state["subtitles_df"] = subtitles_df
+            st.success("Applied global LLM suggestions to subtitles.")
+            st.rerun()  # Rafraîchir l'interface pour afficher les changements
 
     def handle_section(self, selected_final, final_subtitles_df):
         if selected_final and selected_final["selection"]["rows"]:
@@ -1185,14 +788,11 @@ class MoviedPlugin(Plugin):
 
     def show_media_preview(self, media_path):
         """Affiche une prévisualisation du média dans une colonne centrale (1/3 de la largeur)."""
-        st.markdown("---")
-        col1, col2, col3 = st.columns([1, 1, 1])  # 3 colonnes égales
-        with col2:  # Colonne centrale pour la prévisualisation
-            st.subheader("Preview")
-            if media_path.lower().endswith(IMAGE_EXTENSIONS):
-                st.image(media_path, use_container_width=True)  # Ajuste à la largeur de la colonne
-            elif media_path.lower().endswith(VIDEO_EXTENSIONS):
-                st.video(media_path, format="video/mp4", autoplay=True, muted=True)
+        st.subheader("Preview")
+        if media_path.lower().endswith(IMAGE_EXTENSIONS):
+            st.image(media_path, use_container_width=True)  # Ajuste à la largeur de la colonne
+        elif media_path.lower().endswith(VIDEO_EXTENSIONS):
+            st.video(media_path, format="video/mp4", autoplay=True, muted=True)
 
     def verify_operations(self):
         """Verify if operations in the input text overlap."""
@@ -1232,25 +832,154 @@ class MoviedPlugin(Plugin):
         if not overlaps and ops_list:
             st.success(t("movied_all_ok"))
 
-    def handle_operations(self, start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size):
+    def update_operations_in_grid(self, subtitles_df):
+        """Met à jour la colonne Operation dans subtitles_df en fonction des opérations"""
+        if "operations" not in st.session_state or not st.session_state["operations"]:
+            subtitles_df["Operation"] = ""  # Réinitialiser si aucune opération
+            return subtitles_df
+
+        # Initialiser la colonne Operation si elle n'existe pas
+        if "Operation" not in subtitles_df.columns:
+            subtitles_df["Operation"] = ""
+
+        # Réinitialiser toutes les opérations
+        subtitles_df["Operation"] = ""
+
+        # Parser les opérations
+        operations = st.session_state["operations"].split("\n")
+        for op in operations:
+            if not op.strip():
+                continue
+            # Extraire le start_time (premier timecode après le type d'opération)
+            parts = op.split()
+            if len(parts) < 2:
+                continue
+            op_type = parts[0]
+            start_time_str = parts[1]
+            start_time_sec = time_to_milliseconds(start_time_str)
+
+            # Trouver le sous-titre correspondant
+            found = False
+            for idx, row in subtitles_df.iterrows():
+                start_sec = time_to_milliseconds(row["Start"])
+                end_sec = time_to_milliseconds(row["End"])
+                if start_sec <= start_time_sec < end_sec:
+                    # Ajouter l'opération à la colonne, en concaténant si nécessaire
+                    current_op = subtitles_df.at[idx, "Operation"]
+                    new_op = f"{current_op}; {op}" if current_op else op
+                    subtitles_df.at[idx, "Operation"] = op
+                    found = True
+                    break
+            if not found:
+                st.warning(f"Not found : {op}")
+        self.refresh_grid_key()
+        return subtitles_df
+
+    def handle_operation(self, operation_type, selected_rows):
+        """Gère l'ajout d'opérations basées sur les lignes sélectionnées, avec fusion des consécutifs"""
+        if selected_rows.empty:
+            st.warning("Please select at least one subtitle row.")
+            return
+
+        # Récupérer les informations de média et texte
+        media_path = st.session_state.get("movied_media_selector", None)
+        text_input = st.session_state.get("text_input", "")
+
+        # Vérifications préliminaires
+        if operation_type in ["replace_image", "replace_video", "replace_video_keep_audio"] and not media_path:
+            st.warning("Please select a media file first.")
+            return
+        if operation_type in ["addtext", "addBottomText"] and not text_input:
+            st.warning("Please enter text first.")
+            return
+        if operation_type == "insertVideoWithText" and (not media_path or not text_input):
+            st.warning("Please select a video and enter text first.")
+            return
+
+        # Récupérer subtitles_df pour vérifier l'ordre
+        subtitles_df = st.session_state["subtitles_df"]
+
+        # Trier selected_rows par Start pour garantir l'ordre chronologique
+        selected_rows = selected_rows.sort_values("Start")
+
+        # Regrouper les lignes consécutives
+        groups = []
+        current_group = [selected_rows.iloc[0]]
+
+        for i in range(1, len(selected_rows)):
+            prev_end = time_to_seconds(current_group[-1]["End"])
+            curr_start = time_to_seconds(selected_rows.iloc[i]["Start"])
+
+            # Vérifier si les timecodes se suivent (pas de trou significatif)
+            if abs(curr_start - prev_end) < 0.8:  # Tolérance de 0.1s pour les petites différences
+                current_group.append(selected_rows.iloc[i])
+            else:
+                groups.append(current_group)
+                current_group = [selected_rows.iloc[i]]
+        groups.append(current_group)  # Ajouter le dernier groupe
+
+        # Générer les opérations pour chaque groupe
+        for group in groups:
+            start_time = group[0]["Start"]
+            end_time = group[-1]["End"] if operation_type not in ["insert_video", "insertVideoWithText"] else None
+
+            # Construire la commande
+            if operation_type == "replace_image":
+                operation = f"replace_image {start_time} {end_time} {media_path}"
+            elif operation_type == "insert_video":
+                operation = f"insert_video {start_time} {media_path}"
+            elif operation_type == "insert_video_after":
+                operation = f"insert_video {end_time} {media_path}"
+            elif operation_type == "replace_video":
+                operation = f"replace_video {start_time} {end_time} {media_path}"
+            elif operation_type == "replace_video_keep_audio":
+                operation = f"replace_video_keep_audio {start_time} {end_time} {media_path}"
+            elif operation_type in ["addtext", "addBottomText"]:
+                text_command = text_input.replace("\n", "\\")
+                operation = f"{operation_type} {start_time} {end_time} fromLeft 1s {text_command}"
+            elif operation_type == "insertVideoWithText":
+                text_command = text_input.replace("\n", "\\")
+                operation = f"insertVideoWithText {start_time} {media_path} | {text_command}"
+            elif operation_type == "remove_section":
+                operation = f"remove_section {start_time} {end_time}"
+
+            self.add_to_operations(operation)
+
+
+    def handle_operations(self, selected_rows, video_path, vtt_path, thumbnail_size, font, font_size):
+        """Gère la sélection de médias, l'entrée de texte et les opérations"""
         if not video_path:
             st.warning("Please select a video to edit first.")
             return
 
         st.subheader("Media Selection and Operations")
 
-        col1, col2 = st.columns(2)
 
-        # Directory selection
-        media_dir_options = [t("movied_all_directories")] + self.media_dirs
-        selected_dirs = col1.multiselect(
-            t("movied_filter_media_dir"),
-            options=media_dir_options,
-            default=[t("movied_all_directories")],
-            key="media_dir_select"
-        )
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            # Directory selection
+            media_dir_options = [t("movied_all_directories")] + self.media_dirs
+            selected_dirs = st.multiselect(
+                t("movied_filter_media_dir"),
+                options=media_dir_options,
+                default=[t("movied_all_directories")],
+                key="media_dir_select",
+                label_visibility="collapsed"  # Réduit l'espace du label
+            )
+        with col2:
+            # Extension selection
+            all_extensions = ALL_EXTENSIONS
+            selected_extensions = st.multiselect(
+                "Filter by File Extensions",
+                options=all_extensions,
+                default=ALL_EXTENSIONS,
+                key="extension_select",
+                label_visibility="collapsed"  # Réduit l'espace du label
+            )
 
-        # Determine which directories to pass to media_selector
+        # Ligne pour les filtres, le sélecteur et la prévisualisation
+        col_selector, col_preview = st.columns([1, 1])
+
         if t("movied_all_directories") in selected_dirs:
             dirs_to_scan = self.media_dirs
         else:
@@ -1260,44 +989,34 @@ class MoviedPlugin(Plugin):
             st.warning("Please select at least one directory.")
             return
 
-        # Extension selection
-        all_extensions = ALL_EXTENSIONS
-        selected_extensions = col2.multiselect(
-            "Filter by File Extensions",
-            options=all_extensions,
-            default=ALL_EXTENSIONS,
-            key="extension_select"
-        )
-
         if not selected_extensions:
             st.warning("Please select at least one file extension.")
             return
 
-        # Single media selector for images and videos
-        # Use Complement as initial_search if Category is "illustration"
-        initial_search = None
-        if "final_subtitle_selector" in st.session_state and st.session_state["final_subtitle_selector"]["selection"]["rows"]:
-            selected_idx = st.session_state["final_subtitle_selector"]["selection"]["rows"][0]
-            final_df = st.session_state["edited_subtitles_df"]
-            if final_df.iloc[selected_idx]["Category"] in ["illustration", "meme"]:
-                initial_search = final_df.iloc[selected_idx]["Complement"]
+        # Media selector
+        with col_selector:
+            initial_search = None
+            if not selected_rows.empty and "Category" in selected_rows.columns:
+                # Filtrer les lignes avec Category "illustration" ou "meme" et concaténer les Complement
+                valid_rows = selected_rows[selected_rows["Category"].isin(["illustration", "meme"])]
+                if not valid_rows.empty:
+                    initial_search = ", ".join(valid_rows["Complement"].dropna().astype(str))
 
-        selected_media = media_selector(
-            media_dirs=dirs_to_scan,
-            extensions=selected_extensions,
-            suffix="movied",
-            initial_search=initial_search
-        )
+            selected_media = media_selector(
+                media_dirs=dirs_to_scan,
+                extensions=selected_extensions,
+                suffix="movied",
+                initial_search=initial_search
+            )
 
-        # Prévisualisation si un média est sélectionné
-        if selected_media:
-            self.show_media_preview(selected_media)
 
-        # Determine media type
-        is_image = selected_media and any(selected_media.lower().endswith(ext) for ext in IMAGE_EXTENSIONS)
-        is_video = selected_media and any(selected_media.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
-        has_media = bool(selected_media)
-
+        # Prévisualisation
+        with col_preview:
+            if selected_media:
+                self.show_media_preview(selected_media)
+            else:
+                plugin = self.plugin_manager.get_plugin('illustrator')
+                plugin.run(self.plugin_manager.config)
         # Text input for operations that need it
         st.write(t("movied_text_operations"))
         text_input = st.text_input(
@@ -1305,77 +1024,63 @@ class MoviedPlugin(Plugin):
             key="text_input"
         )
 
-        # All operations in a single row below text input
-        st.write("Available Operations:")
-        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
+        # Stocker le média dans session_state
+        st.session_state["movied_media_selector"] = selected_media
+
+        # Déterminer le type de média
+        is_image = False
+        is_video = False
+        if selected_media:
+            ext = os.path.splitext(selected_media)[1].lower()
+            image_extensions = IMAGE_EXTENSIONS
+            video_extensions = VIDEO_EXTENSIONS
+            is_image = ext in image_extensions
+            is_video = ext in video_extensions
+
+        # Boutons d'opérations après le media_selector et le texte
+        st.write("Operations:")
+        col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns(9)
+
+        # Conditions pour activer/désactiver les boutons
+        has_text = bool(text_input.strip())
+        has_selection = not selected_rows.empty
 
         with col1:
-            if st.button(t("movied_replace_image"), key="replace_image_btn", disabled=not is_image):
-                if has_media:
-                    operation = f"replace_image {start_time} {end_time} {selected_media}"
-                    self.add_to_operations(operation)
-                else:
-                    st.warning("Please select an image.")
+            if st.button(t("movied_replace_image"), key="replace_image_btn", disabled=not (is_image and has_selection)):
+                self.handle_operation("replace_image", selected_rows)
 
         with col2:
-            if st.button(t("movied_insert_video"), key="insert_video_btn", disabled=not is_video):
-                if has_media:
-                    operation = f"insert_video {start_time} {selected_media}"
-                    self.add_to_operations(operation)
-                else:
-                    st.warning("Please select a video.")
+            if st.button(t("movied_insert_video"), key="insert_video_btn", disabled=not (is_video and has_selection)):
+                self.handle_operation("insert_video", selected_rows)
 
-        with col3:
-            if st.button(t("movied_replace_video"), key="replace_video_btn", disabled=not is_video):
-                if has_media:
-                    operation = f"replace_video {start_time} {end_time} {selected_media}"
-                    self.add_to_operations(operation)
-                else:
-                    st.warning("Please select a video.")
+        with col3:  # Nouveau bouton
+            if st.button("Insérer une vidéo après", key="insert_video_after_btn", disabled=not (is_video and has_selection)):
+                self.handle_operation("insert_video_after", selected_rows)
 
         with col4:
-            if st.button(t("movied_replace_video_keep_audio"), key="replace_video_keep_audio_btn", disabled=not is_video):
-                if has_media:
-                    operation = f"replace_video_keep_audio {start_time} {end_time} {selected_media}"
-                    self.add_to_operations(operation)
-                else:
-                    st.warning("Please select a video.")
+            if st.button(t("movied_replace_video"), key="replace_video_btn", disabled=not (is_video and has_selection)):
+                self.handle_operation("replace_video", selected_rows)
 
         with col5:
-            if st.button(t("movied_animate_text"), key="animate_text_btn", disabled=not text_input):
-                if text_input:
-                    text_command = text_input.replace("\n", "\\")
-                    operation = f"addtext {start_time} {end_time} fromLeft 1s {text_command}"
-                    self.add_to_operations(operation)
-                else:
-                    st.warning("Please enter text first.")
+            if st.button(t("movied_replace_video_keep_audio"), key="replace_video_keep_audio_btn", disabled=not (is_video and has_selection)):
+                self.handle_operation("replace_video_keep_audio", selected_rows)
 
         with col6:
-            if st.button(t("movied_add_bottom_text"), key="add_bottom_text_btn", disabled=not text_input):
-                if text_input:
-                    text_command = text_input.replace("\n", "\\")
-                    operation = f"addBottomText {start_time} {end_time} fromLeft 1s {text_command}"
-                    self.add_to_operations(operation)
-                else:
-                    st.warning("Please enter text first.")
+            if st.button(t("movied_animate_text"), key="animate_text_btn", disabled=not (has_text and has_selection)):
+                self.handle_operation("addtext", selected_rows)
 
         with col7:
-            if st.button(t("movied_insert_video_with_text"), key="insert_video_with_text_btn", disabled=not (is_video and text_input)):
-                if has_media and text_input:
-                    text_command = text_input.replace("\n", "\\")
-                    operation = f"insertVideoWithText {start_time} {selected_media} | {text_command}"
-                    self.add_to_operations(operation)
-                else:
-                    st.warning("Please select a video and enter text first.")
+            if st.button(t("movied_add_bottom_text"), key="add_bottom_text_btn", disabled=not (has_text and has_selection)):
+                self.handle_operation("addBottomText", selected_rows)
 
         with col8:
-            if st.button(t("movied_remove_section"), key="remove_section_btn", disabled=not (start_time and end_time)):
-                operation = f"remove_section {start_time} {end_time}"
-                self.add_to_operations(operation)
+            if st.button(t("movied_insert_video_with_text"), key="insert_video_with_text_btn", disabled=not (is_video and has_text and has_selection)):
+                self.handle_operation("insertVideoWithText", selected_rows)
 
-        # Operations queue
-        operations = st.text_area(t("movied_operations"), value=st.session_state.get("operations", ""), key="operations_area")
-        st.session_state["operations"] = operations
+        with col9:
+            if st.button(t("movied_remove_section"), key="remove_section_btn", disabled=not has_selection):
+                self.handle_operation("remove_section", selected_rows)
+
 
     def add_to_operations(self, operation):
         current_ops = st.session_state.get("operations", "")
@@ -1467,10 +1172,14 @@ class MoviedPlugin(Plugin):
                     remaining_args = " ".join(parts[2:])
                 else:
                     start_time, end_time = parts[1], parts[2]
-                    start_sec = self.parse_timecode(
-                        start_time) + duration_offset
-                    end_sec = self.parse_timecode(
-                        end_time) + duration_offset
+                    if start_time.endswith("F"):
+                        start_sec = self.parse_timecode(start_time.rstrip("F"))
+                    else:
+                        start_sec = self.parse_timecode(start_time) + duration_offset
+                    if end_time.endswith("F"):
+                        end_sec = self.parse_timecode(end_time.rstrip("F"))
+                    else:
+                        end_sec = self.parse_timecode(end_time) + duration_offset
                     remaining_args = " ".join(
                         parts[3:]) if len(parts) > 3 else ""
 
@@ -1610,12 +1319,12 @@ class MoviedPlugin(Plugin):
         return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
     def export_data(self, video_name):
-        if "edited_subtitles_df" not in st.session_state or st.session_state["edited_subtitles_df"].empty:
-            st.sidebar.warning("No data to export.")
+        if "subtitles_df" not in st.session_state or st.session_state["subtitles_df"].empty:
+            st.warning("No subtitles to export.")
             return
 
         # Prepare data for export
-        subtitles_data = st.session_state["edited_subtitles_df"].to_dict(orient="records")
+        subtitles_data = st.session_state["subtitles_df"].to_dict(orient="records")
         operations = st.session_state.get("operations", "")
 
         export_data = {
@@ -1634,32 +1343,57 @@ class MoviedPlugin(Plugin):
 
         st.sidebar.success(f"Data exported to {filename}")
 
-    def _import_data_json(self, data):
-        subtitles_data = data.get("subtitles", [])
-        operations_data = data.get("operations", [])
+    def _import_data(self, imported_data, video_name):
+        try:
+            # Charger les données exportées
 
-        # Validate and convert subtitles data to DataFrame
-        if subtitles_data:
-            imported_df = pd.DataFrame(subtitles_data)
-            required_columns = ["Start", "End", "Text"]
-            optional_columns = ["Category", "Complement"]
-            if all(col in imported_df.columns for col in required_columns):
-                # Ensure optional columns exist
-                for col in optional_columns:
-                    if col not in imported_df.columns:
-                        imported_df[col] = ""
-                imported_df = imported_df[["Start", "End", "Text", "Category", "Complement"]]
-                st.session_state["interest_subtitles_df"] = imported_df.copy()
-                st.session_state["edited_subtitles_df"] = imported_df.copy()
-            else:
-                st.sidebar.error("Imported JSON missing required subtitle columns.")
+            # Extraire les opérations et les données des sous-titres
+            operations = imported_data.get("operations", "")
+            subtitles_data = pd.DataFrame(imported_data.get("subtitles", []))
+
+            if subtitles_data.empty:
+                st.warning("No subtitle data found in the imported file.")
                 return
 
-        # Import operations
-        if operations_data:
-            st.session_state["operations"] = "\n".join(operations_data)
-        else:
-            st.session_state["operations"] = ""
+            # Vérifier que subtitles_df existe dans session_state
+            if "subtitles_df" not in st.session_state or st.session_state["subtitles_df"].empty:
+                st.warning("No current subtitles to merge with. Please load a video first.")
+                return
+
+            # Récupérer le subtitles_df actuel
+            subtitles_df = st.session_state["subtitles_df"].copy()
+
+            # Colonnes attendues
+            expected_cols = ["Start", "End", "Category", "Complement", "Operation"]
+            # Sélectionner uniquement les colonnes présentes dans subtitles_data
+            available_cols = [col for col in expected_cols if col in subtitles_data.columns]
+            merge_data = subtitles_data[available_cols]
+
+            # Fusionner avec subtitles_df
+            subtitles_df = subtitles_df.drop(columns=available_cols[2:], errors="ignore")  # Supprimer Category, Complement, Operation si présentes
+            subtitles_df = subtitles_df.merge(
+                merge_data,
+                on=["Start", "End"],
+                how="left"
+            )
+
+            # Remplacer les NaN par des chaînes vides pour les colonnes importées
+            for col in ["Category", "Complement", "Operation"]:
+                subtitles_df[col] = subtitles_df[col].fillna("")
+
+            # Mettre à jour st.session_state
+            st.session_state["subtitles_df"] = subtitles_df
+            st.session_state["operations"] = "\n".join(operations)
+            if 'operations_log' in st.session_state:
+                del st.session_state.operations_log
+            if 'generated_video_path' in st.session_state:
+                del st.session_state.generated_video_path
+
+            st.success(f"Imported data for {video_name} successfully.")
+            st.rerun()  # Rafraîchir l'interface pour afficher les changements
+
+        except Exception as e:
+            st.error(f"Error importing data: {str(e)}")
 
     def import_data(self):
         # Use Streamlit file uploader in sidebar
@@ -1668,11 +1402,7 @@ class MoviedPlugin(Plugin):
             try:
                 # Read and parse JSON
                 data = json.load(uploaded_file)
-                self._import_data_json(data)
-                if 'operation_log' in st.session_state:
-                    del st.session_state.operations_log
-                if 'generated_video_path' in st.session_state:
-                    del st.session_state.generated_video_path
+                self._import_data(data, "uploaded file")
                 st.sidebar.success("Data imported successfully.")
                 st.rerun()
             except Exception as e:
@@ -1687,24 +1417,17 @@ class MoviedPlugin(Plugin):
             return
 
         latest_file = max(json_files, key=os.path.getctime)
-        try:
-            with open(latest_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                self._import_data_json(data)
-                if 'operation_log' in st.session_state:
-                    del st.session_state.operations_log
-                if 'generated_video_path' in st.session_state:
-                    del st.session_state.generated_video_path
-                st.sidebar.success(f"Imported last export: {os.path.basename(latest_file)}")
-                st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"Error importing last file: {str(e)}")
+        with open(latest_file, 'r', encoding='utf-8') as f:
+            imported_data = json.load(f)
+        self._import_data(imported_data, video_name)
+        st.rerun()
 
     def run(self, config):
         self.working_dir = config.get(self.name, {}).get("movied_workdir", t("movied_workdir_default"))
         self.media_dirs = config.get(self.name, {}).get("movied_media_dirs", t("movied_media_dirs_default")).split("\n")
         self.reference_audio_path = config.get(self.name, {}).get("movied_reference_audio", "/path/to/sample.mp3")
 
+        # Initialisation des états de filtre
         if "exclude_edited" not in st.session_state:
             st.session_state.exclude_edited = True
         if "exclude_chroma" not in st.session_state:
@@ -1725,13 +1448,45 @@ class MoviedPlugin(Plugin):
             return
 
         selected_video = self.display_videos(video_df)
-        selected_subtitles, subtitles_df, vtt_path = self.handle_transcript(selected_video, video_df, selected_model)
-        selected_intermediate, intermediate_subtitles_df = self.handle_intermediate_subtitles(selected_subtitles, subtitles_df)
-        edited_subtitles_df = self.handle_edit_subtitles()
-        selected_final, final_subtitles_df = self.handle_final_selection()
-        start_time, end_time = self.handle_section(selected_final, final_subtitles_df)
+        selected_rows, subtitles_df, vtt_path = self.handle_transcript(selected_video, video_df, selected_model)
 
-        # Sidebar buttons for Export and Import
+        # Gestion des opérations
+        video_path = video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"] if selected_video["selection"]["rows"] else None
+        self.handle_operations(selected_rows, video_path, vtt_path, thumbnail_size, font, font_size)
+
+        # Zone de texte pour afficher et éditer les opérations
+        operations = st.text_area(
+            t("movied_operations"),
+            value=st.session_state.get("operations", ""),
+            height=150,
+            key="operations_area"
+        )
+        st.session_state["operations"] = operations  # Met à jour les opérations avec les modifications manuelles
+
+        # Boutons de génération et vérification
+        col1, col2, col3, col4 = st.columns(4)  # Ajout d'une colonne pour "Ordonner"
+        if col1.button(t("movied_generate"), key="generate_btn", type="primary") and st.session_state.get("operations"):
+            self.execute_operations(video_path, vtt_path, st.session_state.operations, font, font_size)
+        if col2.button(t("movied_verify")):
+            self.verify_operations()
+        if col3.button("Ordonner", key="sort_ops_btn"):  # Nouveau bouton
+            if st.session_state.get("operations"):
+                # Convertir les opérations en liste pour trier
+                ops_list = st.session_state["operations"].split("\n")
+                # Filtrer les lignes vides
+                ops_list = [op.strip() for op in ops_list if op.strip()]
+                # Trier par timecode (deuxième élément de chaque ligne)
+                def get_start_time(op):
+                    parts = op.split()
+                    return time_to_milliseconds(parts[1]) if len(parts) > 1 else float('inf')
+                ops_list.sort(key=get_start_time)
+                # Rejoindre les opérations triées
+                st.session_state["operations"] = "\n".join(ops_list)
+                st.rerun()  # Rafraîchir pour afficher les opérations triées
+        if col4.button("Preview"):
+            self.preview(video_path, vtt_path, st.session_state.operations, font, font_size)
+
+        # Gestion des données export/import
         with st.sidebar:
             st.header("Data Management")
             if selected_video["selection"]["rows"]:
@@ -1742,24 +1497,7 @@ class MoviedPlugin(Plugin):
                     self.import_last(video_name)
             self.import_data()
 
-        if selected_video["selection"]["rows"]:
-            video_path = video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"]
-            if selected_final and selected_final["selection"]["rows"]:
-                self.handle_operations(start_time, end_time, video_path, vtt_path, thumbnail_size, font, font_size)
-            else:
-                self.handle_operations(None, None, video_path, vtt_path, thumbnail_size, font, font_size)
-        else:
-            self.handle_operations(None, None, None, None, thumbnail_size, font, font_size)
-
-        # Generate button
-        col1, col2, col3 = st.columns(3)
-        if col1.button(t("movied_generate"), key="generate_btn", type="primary") and st.session_state.operations:
-            self.execute_operations(video_path, vtt_path, st.session_state.operations, font, font_size)
-        if col2.button(t("movied_verify")):
-            self.verify_operations()
-        if col3.button("Preview"):
-            self.preview(video_path, vtt_path, st.session_state.operations, font, font_size)
-
+        # Affichage du résultat
         if "operations_log" in st.session_state:
             st.write("Operations with Real Timecodes:")
             selected_operation = st.dataframe(

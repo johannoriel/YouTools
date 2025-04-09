@@ -40,3 +40,4 @@ selenium
 stem
 streamlit-image-select
 duckduckgo_search
+streamlit-aggrid
