@@ -300,9 +300,7 @@ class IllustratorPlugin(Plugin):
             if st.button(t("illustrator_refresh")):
                 st.rerun()
 
-        # Prévisualisation
-        if selected:
-            self.show_media_preview(selected)
+        return selected
 
     def run_stored_assets_tab(self, config):
         """Onglet des assets stockés"""
@@ -354,9 +352,8 @@ class IllustratorPlugin(Plugin):
                 dest_path = self.copy_to_current(selected_media)
                 st.success(f"Added to current assets: {dest_path}")
 
-            # Prévisualisation
-            if selected_media:
-                self.show_media_preview(selected_media)
+            return selected_media
+
 
     def _save_media_options(self, media_buffer, media_name, media_type, stored_dir, current_dir, prefix=""):
         """Affiche les options de sauvegarde communes pour tous les moteurs de recherche"""
@@ -966,11 +963,11 @@ class IllustratorPlugin(Plugin):
             t("illustrator_youtube_tab")
         ])
 
-
+        media = None
         with tabs[0]:
-            self.run_current_assets_tab(config)
+            media = self.run_current_assets_tab(config)
         with tabs[1]:
-            self.run_stored_assets_tab(config)
+            media = self.run_stored_assets_tab(config)
         with tabs[2]:
             self.run_pexels_tab(config)
         with tabs[3]:
@@ -981,3 +978,5 @@ class IllustratorPlugin(Plugin):
             self.run_vlipsy_tab(config)  # Nouvelle méthode
         with tabs[6]:
             self.run_youtube_assets_tab(config)
+        if media:
+            self.show_media_preview(media)

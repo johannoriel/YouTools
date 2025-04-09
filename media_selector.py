@@ -62,7 +62,6 @@ def get_thumbnail(media_path):
             img = Image.new('RGB', (200, 200), color='gray')
     return img
 
-
 def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initial_search=None):
     # Normalize input to a list of directories
     if isinstance(media_dirs, str):
@@ -71,6 +70,7 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
         raise ValueError("media_dirs must be a string or a list of strings")
 
     # List files from all selected directories (no recursion)
+    @st.cache_data
     def scan_media_files():
         media_files = []
         media_paths = []
@@ -157,6 +157,7 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
                 images=thumbnails,
                 captions=filtered_media_names,
                 use_container_width=True,
+                key=f"image_select_{suffix}"
             )
             if selected_thumb:
                 selected_idx = thumbnails.index(selected_thumb)
