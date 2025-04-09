@@ -70,7 +70,7 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
         raise ValueError("media_dirs must be a string or a list of strings")
 
     # List files from all selected directories (no recursion)
-    @st.cache_data
+    #@st.cache_data
     def scan_media_files():
         media_files = []
         media_paths = []
@@ -85,8 +85,12 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
 
     # Initial scan
     media_files, media_paths = scan_media_files()
-    media_names = [os.path.splitext(f)[0] for f in media_files]
-    media_dates = [os.path.getmtime(path) for path in media_paths]
+    try:
+        media_names = [os.path.splitext(f)[0] for f in media_files]
+        media_dates = [os.path.getmtime(path) for path in media_paths]
+    except Exception as e:
+        #scan_media_files.clear()
+        st.warning("Error scanning media files")
 
     # Filter and sort UI - now with 3 columns
     search_col, sort_col, refresh_col = streamlit_component.columns([4, 3, 1])
@@ -108,7 +112,8 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
         st.write("")  # Espacement vertical
         if st.button("🔄", key=f"refresh_{suffix}", help=t("media_selector_refresh_tooltip")):
             # Effacer le cache des thumbnails
-            st.cache_data.clear()
+            #st.cache_data.clear()
+            #scan_media_files.clear()
             # Rescanner les fichiers
             media_files, media_paths = scan_media_files()
             media_names = [os.path.splitext(f)[0] for f in media_files]
