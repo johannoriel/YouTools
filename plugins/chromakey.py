@@ -101,6 +101,7 @@ class ChromakeyPlugin(Plugin):
         # Convertir la couleur hexadécimale en RGB
         target_color_rgb = [int(target_color_rgb.lstrip('#')[
                                 i:i+2], 16) for i in (0, 2, 4)]
+        exact = st.checkbox("Exact chromakey", value=True)
 
         if st.button(t("chromakey_apply_button")):
             if selected_video and selected_background:
@@ -112,11 +113,10 @@ class ChromakeyPlugin(Plugin):
                 with st.spinner(t("chromakey_processing_spinner")):
                     try:
                         # Passer la couleur cible à la fonction replace_background
-                        replace_background(
-                            video_path, background_path, result_path, target_color_rgb)
+                        replace_background(video_path, background_path, result_path, target_color_rgb, exact_color=exact)
                         st.success(
                             f"{t('chromakey_success_message')}{result_filename}")
-                        st.rerun()
+                        st.video(result_path, autoplay=True, muted=True)
                     except Exception as e:
                         st.error(f"{t('chromakey_error_message')}{str(e)}")
             else:

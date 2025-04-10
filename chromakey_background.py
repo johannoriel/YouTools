@@ -12,8 +12,8 @@ import tempfile
 import argparse
 import logging
 
-#logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logging.basicConfig(level=logging.CRITICAL + 1)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+#logging.basicConfig(level=logging.CRITICAL + 1)
 logger = logging.getLogger(__name__)
 
 def progress_bar(i, total):
@@ -65,6 +65,7 @@ def suppress_color_spill(frame, mask, target_hue=60, hue_shift=50):
     hsv[:, :, 0] = np.where(spill_mask > 0, (hue + hue_shift) % 180, hue)
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
+
 def chroma_key(foreground_path, background_path, output_path, color_to_replace=[0, 255, 0], exact_color=False):
     if not foreground_path:
         print("Aucune vidéo admissible trouvée.")
@@ -78,17 +79,16 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
     # Synchroniser le framerate
     background_iterator = iter(background_clip.iter_frames(fps=foreground_clip.fps))
 
-    # Configurer la sortie vidéo
+    # Configurer la sortie vidéo avec les dimensions exactes
+    output_size = (foreground_clip.size[0], foreground_clip.size[1])  # (1920, 1080)
     output_video = cv2.VideoWriter(
-        output_path, cv2.VideoWriter_fourcc(*'mp4v'), foreground_clip.fps, foreground_clip.size
+        output_path, cv2.VideoWriter_fourcc(*'mp4v'), foreground_clip.fps, output_size
     )
 
     # Définir la plage HSV
     if exact_color:
-        # Utiliser la couleur exacte avec marge minimale
         lower_color, upper_color = rgb_to_hsv_range(color_to_replace, exact_color=True)
     else:
-        # Mode robuste avec détection dynamique
         lower_color, upper_color = rgb_to_hsv_range(color_to_replace)
 
     i = 0
@@ -99,23 +99,15 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
 
         bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
+        original_shape = bgr_frame.shape  # (1080, 1920, 3)
 
         # Créer le masque
         mask = cv2.inRange(hsv, lower_color, upper_color)
 
-        # Post-traitement du masque
-        if exact_color:
-            # Moins de post-traitement car couleur précise
-            kernel = np.ones((3, 3), np.uint8)
-            mask = cv2.dilate(mask, kernel, iterations=2)
-            mask = cv2.erode(mask, kernel, iterations=1)
-        else:
-            # Post-traitement robuste pour zones incertaines
-            kernel = np.ones((5, 5), np.uint8)
-            mask = cv2.dilate(mask, kernel, iterations=5)
-            mask = cv2.erode(mask, kernel, iterations=2)
-            kernel_right = np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype=np.uint8)
-            mask = cv2.dilate(mask, kernel_right, iterations=3)
+        # Post-traitement du masque (même traitement pour les deux cas, car exact_color=True ne rogne pas)
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.dilate(mask, kernel, iterations=2)
+        mask = cv2.erode(mask, kernel, iterations=1)
 
         mask_inv = cv2.bitwise_not(mask)
 
@@ -125,10 +117,16 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
         except StopIteration:
             background_iterator = iter(background_clip.iter_frames(fps=foreground_clip.fps))
             background_frame = next(background_iterator)
-        background_bgr_resized = cv2.resize(
-            background_frame, (bgr_frame.shape[1], bgr_frame.shape[0])
+
+        # Redimensionner le background avec précision
+        background_resized = cv2.resize(
+            background_frame, (foreground_clip.size[0], foreground_clip.size[1]), interpolation=cv2.INTER_LINEAR
         )
-        background_bgr_resized = cv2.cvtColor(background_bgr_resized, cv2.COLOR_RGB2BGR)
+        # S’assurer que le background est en RGB (car iter_frames retourne du RGB)
+        if background_resized.shape[-1] == 3:  # Vérifier que c’est bien une image couleur
+            background_rgb = background_resized  # Déjà en RGB
+        else:
+            background_rgb = cv2.cvtColor(background_resized, cv2.COLOR_BGR2RGB)
 
         # Supprimer les reflets verts
         frame_rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
@@ -136,12 +134,19 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
 
         # Appliquer les masques
         foreground = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask_inv.astype(np.uint8))
-        background = cv2.bitwise_and(background_bgr_resized, background_bgr_resized, mask=mask.astype(np.uint8))
+        background = cv2.bitwise_and(background_rgb, background_rgb, mask=mask.astype(np.uint8))
 
-        # Combiner
+        # Combiner (les deux sont en RGB)
         combined = cv2.add(foreground, background)
-        combined_rgb = cv2.cvtColor(combined, cv2.COLOR_RGB2BGR)
-        output_video.write(combined_rgb)
+        combined_bgr = cv2.cvtColor(combined, cv2.COLOR_RGB2BGR)
+
+        # S’assurer que la taille finale est correcte
+        if combined_bgr.shape != original_shape:
+            combined_bgr = cv2.resize(
+                combined_bgr, (foreground_clip.size[0], foreground_clip.size[1]), interpolation=cv2.INTER_LINEAR
+            )
+
+        output_video.write(combined_bgr)
 
     output_video.release()
 
@@ -149,7 +154,12 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
     _, temp_output_path = tempfile.mkstemp(suffix='.mp4')
     final_clip_no_audio = VideoFileClip(output_path)
     final_clip = final_clip_no_audio.with_audio(audio)
-    final_clip.write_videofile(temp_output_path, codec="libx264", audio_codec="aac")
+    final_clip.write_videofile(
+        temp_output_path,
+        codec="libx264",
+        audio_codec="aac",
+        ffmpeg_params=["-vf", f"scale={foreground_clip.size[0]}:{foreground_clip.size[1]}:force_original_aspect_ratio=disable", "-strict", "-2"]
+    )
 
     # Nettoyage
     final_clip_no_audio.close()
@@ -287,6 +297,3 @@ if __name__ == "__main__":
         print(f"Le fichier '{result_file}' a été supprimé.")
 
     replace_background(args.foreground_video, args.background_video, result_file, exact_color=args.exact_color)
-
-if __name__ == "__main__":
-    main()
