@@ -10,7 +10,11 @@ import cv2
 import numpy as np
 import tempfile
 import argparse
+import logging
 
+#logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.CRITICAL + 1)
+logger = logging.getLogger(__name__)
 
 def progress_bar(i, total):
     # Calculer le pourcentage terminé
@@ -40,65 +44,52 @@ def find_latest_video(directory, exclude='output.mp4'):
 
 
 # Augmentation de la tolérance pour plus de flexibilité
-def rgb_to_hsv_range(color_rgb, tolerance_hue=7, tolerance_sat=25, tolerance_val=25):
-    """
-    Convert RGB color to HSV and define a range for pure green #00FF00 with slightly wider tolerances.
-    """
+def rgb_to_hsv_range(color_rgb, tolerance_hue=15, tolerance_sat=50, tolerance_val=50, exact_color=False):
     color_hsv = cv2.cvtColor(np.uint8([[color_rgb]]), cv2.COLOR_RGB2HSV)[0][0]
-    print(f"Dominant color HSV: {color_hsv}")
-
-    lower_saturation = max(0, color_hsv[1] - tolerance_sat)
-    upper_saturation = min(255, color_hsv[1] + tolerance_sat)
-    lower_value = max(0, color_hsv[2] - tolerance_val)
-    upper_value = min(255, color_hsv[2] + tolerance_val)
-
+    if exact_color:
+        # Pas de tolérance si couleur exacte
+        tolerance_hue = tolerance_sat = tolerance_val = 2  # Petite marge pour bruit minime
     lower = np.array([max(0, color_hsv[0] - tolerance_hue),
-                     lower_saturation, lower_value])
+                      max(0, color_hsv[1] - tolerance_sat),
+                      max(0, color_hsv[2] - tolerance_val)])
     upper = np.array([min(179, color_hsv[0] + tolerance_hue),
-                     upper_saturation, upper_value])
+                      min(255, color_hsv[1] + tolerance_sat),
+                      min(255, color_hsv[2] + tolerance_val)])
     return lower, upper
 
-
 def suppress_color_spill(frame, mask, target_hue=60, hue_shift=50):
-    """
-    Suppress green color spill by shifting the hue of affected pixels.
-    """
     hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
     hue = hsv[:, :, 0]
-
-    # Wider range to catch faint green tints
     spill_mask = cv2.inRange(hue, target_hue - 25, target_hue + 25)
     spill_mask = cv2.bitwise_and(spill_mask, cv2.bitwise_not(mask))
-
     hsv[:, :, 0] = np.where(spill_mask > 0, (hue + hue_shift) % 180, hue)
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
-
-def chroma_key(foreground_path, background_path, output_path, color_to_replace=[0, 255, 0]):
+def chroma_key(foreground_path, background_path, output_path, color_to_replace=[0, 255, 0], exact_color=False):
     if not foreground_path:
         print("Aucune vidéo admissible trouvée.")
         return
 
-    # Use a slightly wider range to capture anti-aliased edge pixels
-    lower_color, upper_color = rgb_to_hsv_range(
-        color_to_replace, tolerance_hue=7, tolerance_sat=25, tolerance_val=25
-    )
-    print(f"Color range HSV: {lower_color}, {upper_color}")
-
-    # Load video clips
+    # Charger les clips
     background_clip = VideoFileClip(background_path)
     foreground_clip = VideoFileClip(foreground_path)
     audio = foreground_clip.audio
 
-    # Prepare background iterator
-    background_iterator = iter(
-        background_clip.iter_frames(fps=foreground_clip.fps))
+    # Synchroniser le framerate
+    background_iterator = iter(background_clip.iter_frames(fps=foreground_clip.fps))
 
-    # Set up output video writer
+    # Configurer la sortie vidéo
     output_video = cv2.VideoWriter(
-        output_path, cv2.VideoWriter_fourcc(
-            *'mp4v'), foreground_clip.fps, foreground_clip.size
+        output_path, cv2.VideoWriter_fourcc(*'mp4v'), foreground_clip.fps, foreground_clip.size
     )
+
+    # Définir la plage HSV
+    if exact_color:
+        # Utiliser la couleur exacte avec marge minimale
+        lower_color, upper_color = rgb_to_hsv_range(color_to_replace, exact_color=True)
+    else:
+        # Mode robuste avec détection dynamique
+        lower_color, upper_color = rgb_to_hsv_range(color_to_replace)
 
     i = 0
     m = int(foreground_clip.duration * foreground_clip.fps)
@@ -106,67 +97,61 @@ def chroma_key(foreground_path, background_path, output_path, color_to_replace=[
         i += 1
         progress_bar(i, m)
 
-        # Convert frame to BGR for OpenCV processing
         bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
 
-        # Create the initial mask
+        # Créer le masque
         mask = cv2.inRange(hsv, lower_color, upper_color)
 
-        # Post-process the mask to capture green edges and clean up noise
-        kernel = np.ones((3, 3), np.uint8)
-        # More aggressive dilation to capture green edges, especially on the right
-        mask = cv2.dilate(mask, kernel, iterations=3)
-        # Light erosion to remove small noise without shrinking too much
-        mask = cv2.erode(mask, kernel, iterations=1)
+        # Post-traitement du masque
+        if exact_color:
+            # Moins de post-traitement car couleur précise
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.dilate(mask, kernel, iterations=2)
+            mask = cv2.erode(mask, kernel, iterations=1)
+        else:
+            # Post-traitement robuste pour zones incertaines
+            kernel = np.ones((5, 5), np.uint8)
+            mask = cv2.dilate(mask, kernel, iterations=5)
+            mask = cv2.erode(mask, kernel, iterations=2)
+            kernel_right = np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype=np.uint8)
+            mask = cv2.dilate(mask, kernel_right, iterations=3)
 
-        # Directional dilation to target right-side edges
-        kernel_right = np.array([[0, 0, 1],
-                                 [0, 0, 1],
-                                 [0, 0, 1]], dtype=np.uint8)
-        mask = cv2.dilate(mask, kernel_right, iterations=2)
-
-        # Create inverse mask
         mask_inv = cv2.bitwise_not(mask)
 
-        # Get the background frame and resize it
+        # Récupérer et redimensionner le background
         try:
             background_frame = next(background_iterator)
         except StopIteration:
-            background_iterator = iter(background_clip.iter_frames())
+            background_iterator = iter(background_clip.iter_frames(fps=foreground_clip.fps))
             background_frame = next(background_iterator)
         background_bgr_resized = cv2.resize(
             background_frame, (bgr_frame.shape[1], bgr_frame.shape[0])
         )
+        background_bgr_resized = cv2.cvtColor(background_bgr_resized, cv2.COLOR_RGB2BGR)
 
-        # Suppress green spill on the foreground
+        # Supprimer les reflets verts
         frame_rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
         frame_rgb = suppress_color_spill(frame_rgb, mask)
 
-        # Apply the mask to separate foreground and background
-        foreground = cv2.bitwise_and(
-            frame_rgb, frame_rgb, mask=mask_inv.astype(np.uint8))
-        background = cv2.bitwise_and(
-            background_bgr_resized, background_bgr_resized, mask=mask.astype(
-                np.uint8)
-        )
+        # Appliquer les masques
+        foreground = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask_inv.astype(np.uint8))
+        background = cv2.bitwise_and(background_bgr_resized, background_bgr_resized, mask=mask.astype(np.uint8))
 
-        # Combine foreground and background
+        # Combiner
         combined = cv2.add(foreground, background)
         combined_rgb = cv2.cvtColor(combined, cv2.COLOR_RGB2BGR)
-
         output_video.write(combined_rgb)
 
     output_video.release()
 
-    # Add audio to the final video
+    # Ajouter l’audio
     _, temp_output_path = tempfile.mkstemp(suffix='.mp4')
     final_clip_no_audio = VideoFileClip(output_path)
     final_clip = final_clip_no_audio.with_audio(audio)
-    final_clip.write_videofile(
-        temp_output_path, codec="libx264", audio_codec="aac")
+    final_clip.write_videofile(temp_output_path, codec="libx264", audio_codec="aac")
 
-    # Clean up
+    # Nettoyage
     final_clip_no_audio.close()
     final_clip.close()
     audio.close()
@@ -285,42 +270,23 @@ def sample_video_colors_kmeans(video_path, samples=10):
     return np.mean(dominant_colors, axis=0)
 
 
-def replace_background(video_file, background, result_file, target_color_rgb=[0, 255, 0]):
-    print(
-        f"Chromakey background replacement : {video_file}, {background}, {result_file}")
-    dominant_color = sample_video_colors(
-        video_file, target_color_rgb=target_color_rgb, samples=10, threshold=30)
+def replace_background(video_file, background, result_file, target_color_rgb=[0, 255, 0], exact_color=False):
+    print(f"Chromakey background replacement: {video_file}, {background}, {result_file}")
+    chroma_key(video_file, background, result_file, color_to_replace=target_color_rgb, exact_color=exact_color)
 
-    # Utiliser une valeur par défaut si la couleur cible n'est pas détectée
-    if dominant_color is None:
-        print(
-            f"Impossible de détecter la couleur cible {target_color_rgb}. Utilisation de la couleur par défaut.")
-        # Utiliser la couleur cible fournie par l'utilisateur
-        dominant_color = target_color_rgb
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Appliquer un effet chroma key.')
+    parser.add_argument('foreground_video', type=str, help='Chemin vers la vidéo de premier plan.')
+    parser.add_argument('background_video', type=str, help='Chemin vers la vidéo de fond.')
+    parser.add_argument('--exact_color', action='store_true', help='Utiliser une couleur exacte sans marge large.')
+    args = parser.parse_args()
 
-    print(f"Couleur dominante trouvée : {dominant_color}")
-    chroma_key(video_file, background, result_file, dominant_color)
+    result_file = 'video YT.mp4'
+    if os.path.exists(result_file):
+        os.remove(result_file)
+        print(f"Le fichier '{result_file}' a été supprimé.")
 
+    replace_background(args.foreground_video, args.background_video, result_file, exact_color=args.exact_color)
 
-"""
-parser = argparse.ArgumentParser(description='Appliquer un effet chroma key sur une vidéo en utilisant une vidéo de fond spécifiée.')
-parser.add_argument('foreground_video', type=str, help='Le chemin vers la vidéo de premier plan à traiter.')
-parser.add_argument('background_video', type=str, help='Le chemin vers la vidéo de fond à utiliser.')
-args = parser.parse_args()
-
-# Utilisation
-result_file = 'video YT.mp4'
-
-# Vérifier si le fichier existe dans le répertoire courant
-if os.path.exists(result_file):
-    os.remove(result_file)  # Supprimer le fichier
-    print(f"Le fichier '{result_file}' a été supprimé.")
-
-video_path = find_latest_video('.')
-directory = '.'
-foreground_path = find_latest_video(directory)
-print(foreground_path)
-
-#args.foreground_video, args.background_video
-replace_background(foreground_path, 'background.mp4', result_file)
-"""
+if __name__ == "__main__":
+    main()
