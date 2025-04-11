@@ -729,6 +729,100 @@ class PromoteyoutubePlugin(Plugin):
         except Exception as e:
             st.error(t("promoteyoutube_export_error").format(str(e)))
 
+    def import_channels_list(self, config):
+        """Importe une liste de chaînes depuis un fichier CSV et retourne les données."""
+        try:
+            import pandas as pd
+            uploaded_file = st.file_uploader(
+                t("promoteyoutube_import_file"),
+                type=["csv"],
+                key="import_channels_file"
+            )
+
+            if uploaded_file is not None:
+                df = pd.read_csv(uploaded_file)
+                required_columns = {'channel_id', 'channel_title', 'subscriber_count'}
+                if not required_columns.issubset(df.columns):
+                    raise ValueError("Le fichier ne contient pas les colonnes requises")
+
+                # Convertir le DataFrame en liste de dictionnaires
+                channels = []
+                for _, row in df.iterrows():
+                    channels.append({
+                        'channel_id': row['channel_id'],
+                        'channel_title': row['channel_title'],
+                        'subscriber_count': row['subscriber_count'],
+                        'video_id': '',  # Champ vide car c'est une chaîne
+                        'title': '',     # Champ vide car c'est une chaîne
+                        'url': f"https://www.youtube.com/channel/{row['channel_id']}",
+                        'view_count': 0,
+                        'comment_count': 0,
+                        'published_at': '',
+                        'language': row.get('language', ''),
+                        'relevance_score': 0
+                    })
+
+                st.success(t("promoteyoutube_import_success").format(uploaded_file.name))
+                return channels
+        except Exception as e:
+            st.error(t("promoteyoutube_import_error").format(str(e)))
+        return None
+
+    def import_videos_list(self, config, file):
+        try:
+            import pandas as pd
+            df = pd.read_csv(file)
+            required_columns = {'video_id', 'title', 'channel_id', 'channel_title'}
+            if not required_columns.issubset(df.columns):
+                raise ValueError("Le fichier ne contient pas les colonnes requises")
+            videos = []
+            for _, row in df.iterrows():
+                videos.append({
+                    'video_id': row['video_id'],
+                    'title': row['title'],
+                    'url': row.get('url', f"https://www.youtube.com/watch?v={row['video_id']}"),
+                    'channel_id': row['channel_id'],
+                    'channel_title': row['channel_title'],
+                    'view_count': row.get('view_count', 0),
+                    'comment_count': row.get('comment_count', 0),
+                    'published_at': row.get('published_at', ''),
+                    'language': row.get('language', 'unknown'),
+                    'relevance_score': row.get('relevance_score', 0),
+                    'subscriber_count': row.get('subscriber_count', 0)
+                })
+            st.success(t("promoteyoutube_import_success").format(file.name))
+            return videos
+        except Exception as e:
+            st.error(t("promoteyoutube_import_error").format(str(e)))
+            return None
+
+    def import_comments_list(self, config, file):
+        try:
+            import pandas as pd
+            df = pd.read_csv(file)
+            required_columns = {'comment_id', 'comment_text', 'video_id', 'video_title', 'channel_title'}
+            if not required_columns.issubset(df.columns):
+                raise ValueError("Le fichier ne contient pas les colonnes requises")
+            comments = []
+            for _, row in df.iterrows():
+                comments.append({
+                    'id': row['comment_id'],
+                    'text': row['comment_text'],
+                    'author': row.get('author', 'Unknown'),
+                    'published_at': row.get('published_at', ''),
+                    'like_count': row.get('like_count', 0),
+                    'video_id': row['video_id'],
+                    'video_title': row['video_title'],
+                    'channel_title': row['channel_title'],
+                    'channel_id': row.get('channel_id', 'unknown')
+                })
+            st.success(t("promoteyoutube_import_success").format(file.name))
+            return comments
+        except Exception as e:
+            st.error(t("promoteyoutube_import_error").format(str(e)))
+            return None
+
+
     def run_campaign(self, config, target_videos, campaign_video, max_comments, prefix="promo_", keywords=""):
         """Exécute une campagne en deux étapes : sélection des vidéos puis des commentaires."""
         if f"{prefix}selected_video_indices" not in st.session_state:
