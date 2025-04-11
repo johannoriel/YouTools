@@ -71,6 +71,11 @@ translations["en"].update({
     "promoteyoutube_language": "Langue",
     "promoteyoutube_filter_language": "Filtrer par langue",
     "promoteyoutube_show_all_languages": "Toutes les langues",
+    "promoteyoutube_export_channels": "Export Selected Channels List",
+    "promoteyoutube_export_videos": "Export Selected Videos List",
+    "promoteyoutube_export_comments": "Export Selected Comments List",
+    "promoteyoutube_export_success": "Exported successfully to {}",
+    "promoteyoutube_export_error": "Error during export: {}",
 })
 
 translations["fr"].update({
@@ -129,6 +134,11 @@ translations["fr"].update({
     "promoteyoutube_language": "Langue",
     "promoteyoutube_filter_language": "Filtrer par langue",
     "promoteyoutube_show_all_languages": "Toutes les langues",
+    "promoteyoutube_export_channels": "Exporter la liste des chaînes sélectionnées",
+    "promoteyoutube_export_videos": "Exporter la liste des vidéos sélectionnées",
+    "promoteyoutube_export_comments": "Exporter la liste des commentaires sélectionnés",
+    "promoteyoutube_export_success": "Exporté avec succès vers {}",
+    "promoteyoutube_export_error": "Erreur lors de l'export : {}",
 })
 
 
@@ -463,6 +473,15 @@ class PromoteyoutubePlugin(Plugin):
 
         # Paramètres pour les commentaires
         st.subheader("Recherche des commentaires")
+
+        if selected_video_indices:
+            if st.button(t("promoteyoutube_export_channels"), key=f"{prefix}export_channels"):
+                self.export_selected_channels(config, selected_video_indices, prefix)
+
+            # Ajout du bouton d'export des vidéos sélectionnées
+            if st.button(t("promoteyoutube_export_videos"), key=f"{prefix}export_videos"):
+                self.export_selected_videos(config, selected_video_indices, prefix)
+
         max_comments_per_video = st.number_input(
             t("promoteyoutube_adjust_comments"),
             min_value=1,
@@ -544,6 +563,11 @@ class PromoteyoutubePlugin(Plugin):
                         )
                     st.session_state[f"{prefix}campaign_id"] = campaign_id
 
+            selected_comment_indices = [i for i, sel in st.session_state[f"{prefix}selected_comments"].items() if sel]
+            if selected_comment_indices:
+                if st.button(t("promoteyoutube_export_comments"), key=f"{prefix}export_comments"):
+                    self.export_selected_comments(config, selected_comment_indices, prefix)
+
             # Affichage et publication des réponses
             if st.session_state.get(f"{prefix}generated_responses"):
                 st.subheader(t("promoteyoutube_responses"))
@@ -602,6 +626,108 @@ class PromoteyoutubePlugin(Plugin):
                         automarket.post_responses(
                             config, selected_responses, campaign_id)
                         st.success(t("promoteyoutube_success"))
+
+    # Ajouter ces nouvelles méthodes dans la classe PromoteyoutubePlugin
+    def export_selected_channels(self, config, selected_video_indices, prefix="promo_"):
+        """Exporte les chaînes sélectionnées dans un fichier CSV."""
+        try:
+            work_dir = config['common']['work_directory']
+            output_path = os.path.join(work_dir, "channel_list.csv")
+
+            # Récupérer les vidéos sélectionnées
+            selected_videos = [st.session_state[f"{prefix}videos"][i] for i in selected_video_indices]
+
+            # Créer un dictionnaire pour éliminer les doublons (par channel_id)
+            unique_channels = {}
+            for video in selected_videos:
+                channel_id = video.get('channel_id', 'unknown')
+                if channel_id not in unique_channels:
+                    unique_channels[channel_id] = {
+                        'channel_id': channel_id,
+                        'channel_title': video.get('channel_title', ''),
+                        'subscriber_count': video.get('subscriber_count', 0),
+                        'video_count': video.get('video_count', 0),
+                        'keywords': st.session_state.get('keywords', '')
+                    }
+
+            # Créer le DataFrame et exporter
+            import pandas as pd
+            df = pd.DataFrame(list(unique_channels.values()))
+            df.to_csv(output_path, index=False)
+
+            st.success(t("promoteyoutube_export_success").format(output_path))
+        except Exception as e:
+            st.error(t("promoteyoutube_export_error").format(str(e)))
+
+    def export_selected_videos(self, config, selected_video_indices, prefix="promo_"):
+        """Exporte les vidéos sélectionnées dans un fichier CSV."""
+        try:
+            work_dir = config['common']['work_directory']
+            output_path = os.path.join(work_dir, "video_list.csv")
+
+            # Récupérer les vidéos sélectionnées
+            selected_videos = [st.session_state[f"{prefix}videos"][i] for i in selected_video_indices]
+
+            # Préparer les données
+            videos_data = []
+            for video in selected_videos:
+                videos_data.append({
+                    'video_id': video.get('video_id', ''),
+                    'title': video.get('title', ''),
+                    'url': video.get('url', ''),
+                    'channel_id': video.get('channel_id', ''),
+                    'channel_title': video.get('channel_title', ''),
+                    'view_count': video.get('view_count', 0),
+                    'comment_count': video.get('comment_count', 0),
+                    'published_at': video.get('published_at', ''),
+                    'language': video.get('language', ''),
+                    'relevance_score': video.get('relevance_score', 0),
+                    'keywords': st.session_state.get('keywords', '')
+                })
+
+            # Créer le DataFrame et exporter
+            import pandas as pd
+            df = pd.DataFrame(videos_data)
+            df.to_csv(output_path, index=False)
+
+            st.success(t("promoteyoutube_export_success").format(output_path))
+        except Exception as e:
+            st.error(t("promoteyoutube_export_error").format(str(e)))
+
+    def export_selected_comments(self, config, selected_comment_indices, prefix="promo_"):
+        """Exporte les commentaires sélectionnés dans un fichier CSV."""
+        try:
+            work_dir = config['common']['work_directory']
+            output_path = os.path.join(work_dir, "comment_list.csv")
+
+            # Récupérer les commentaires sélectionnés
+            selected_comments = [st.session_state[f"{prefix}comments"][i] for i in selected_comment_indices]
+
+            # Préparer les données
+            comments_data = []
+            for comment in selected_comments:
+                comments_data.append({
+                    'comment_id': comment.get('id', ''),
+                    'comment_text': comment.get('text', ''),
+                    'author': comment.get('author', ''),
+                    'published_at': comment.get('published_at', ''),
+                    'like_count': comment.get('like_count', 0),
+                    'video_id': comment.get('video_id', ''),
+                    'video_title': comment.get('video_title', ''),
+                    'channel_id': comment.get('channel_id', ''),
+                    'channel_title': comment.get('channel_title', ''),
+                    'comment_url': f"https://www.youtube.com/watch?v={comment.get('video_id', '')}&lc={comment.get('id', '')}",
+                    'keywords': st.session_state.get('keywords', '')
+                })
+
+            # Créer le DataFrame et exporter
+            import pandas as pd
+            df = pd.DataFrame(comments_data)
+            df.to_csv(output_path, index=False)
+
+            st.success(t("promoteyoutube_export_success").format(output_path))
+        except Exception as e:
+            st.error(t("promoteyoutube_export_error").format(str(e)))
 
     def run_campaign(self, config, target_videos, campaign_video, max_comments, prefix="promo_", keywords=""):
         """Exécute une campagne en deux étapes : sélection des vidéos puis des commentaires."""
