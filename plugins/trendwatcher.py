@@ -14,6 +14,9 @@ import csv
 from youtube_api import YoutubeAPI
 from datetime import datetime
 import pytz
+#from brave import Brave
+import requests
+import yt_dlp
 
 # Translations
 translations["en"].update({
@@ -56,6 +59,21 @@ translations["en"].update({
     "trendwatcher_table_relevance_score": "Relevance Score",
     "trendwatcher_select_all_videos": "Select/Deselect All Videos",
     "trendwatcher_select_all_texts": "Select/Deselect All Articles",
+    "trendwatcher_search_mode_label": "Search Mode",
+    "trendwatcher_search_mode_or": "OR (Combine keywords with OR)",
+    "trendwatcher_search_mode_subsearches": "Subsearches (Separate search for each keyword)",
+    "trendwatcher_search_engine_label": "Search Engine",
+    "trendwatcher_search_engine_duckduckgo": "DuckDuckGo",
+    "trendwatcher_search_engine_brave": "Brave Search",
+    "trendwatcher_brave_api_key_label": "Brave Search API Key",
+    "trendwatcher_brave_api_key_help": "Enter your Brave Search API key (get it from api.brave.com)",
+    "trendwatcher_search_engine_google": "Google Custom Search",
+    "trendwatcher_search_engine_ytdlp": "yt-dlp",
+    "trendwatcher_google_api_key_label": "Google API Key",
+    "trendwatcher_google_api_key_help": "Enter your Google Custom Search API key (get it from console.cloud.google.com)",
+    "trendwatcher_google_cx_id_label": "Google Custom Search Engine ID",
+    "trendwatcher_google_cx_id_help": "Enter your Google Custom Search Engine ID (CX ID)",
+
 })
 
 translations["fr"].update({
@@ -98,6 +116,21 @@ translations["fr"].update({
     "trendwatcher_table_relevance_score": "Score de pertinence",
     "trendwatcher_select_all_videos": "Tout sélectionner/désélectionner les vidéos",
     "trendwatcher_select_all_texts": "Tout sélectionner/désélectionner les articles",
+    "trendwatcher_search_mode_label": "Mode de recherche",
+    "trendwatcher_search_mode_or": "OU (Combiner les mots-clés avec OU)",
+    "trendwatcher_search_mode_subsearches": "Sous-recherches (Recherche séparée pour chaque mot-clé)",
+    "trendwatcher_search_engine_label": "Moteur de recherche",
+    "trendwatcher_search_engine_duckduckgo": "DuckDuckGo",
+    "trendwatcher_search_engine_brave": "Brave Search",
+    "trendwatcher_brave_api_key_label": "Clé API Brave Search",
+    "trendwatcher_brave_api_key_help": "Entrez votre clé API Brave Search (obtenez-la sur api.brave.com)",
+    "trendwatcher_search_engine_google": "Google Custom Search",
+    "trendwatcher_search_engine_ytdlp": "yt-dlp",
+    "trendwatcher_google_api_key_label": "Clé API Google",
+    "trendwatcher_google_api_key_help": "Entrez votre clé API Google Custom Search (obtenez-la sur console.cloud.google.com)",
+    "trendwatcher_google_cx_id_label": "ID du moteur de recherche personnalisé Google",
+    "trendwatcher_google_cx_id_help": "Entrez votre ID de moteur de recherche personnalisé Google (CX ID)",
+
 })
 
 # Official CSV headers
@@ -109,6 +142,36 @@ VIDEO_CSV_HEADERS = [
 class TrendwatcherPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
+        # Define search engines and their methods
+        self.SEARCH_ENGINES = {
+            "duckduckgo": {
+                "name": t("trendwatcher_search_engine_duckduckgo"),
+                "search_videos": self.search_videos_duckduckgo,
+                "search_texts": self.search_texts_duckduckgo,
+                "config": {}  # Pas de config supplémentaire pour DDG
+            },
+            #"brave": {
+            #    "name": t("trendwatcher_search_engine_brave"),
+            #    "search_videos": self.search_videos_brave,
+            #    "search_texts": self.search_texts_brave,
+            #    "config": {"api_key": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_brave_api_key", "")}
+            #},
+            "google": {
+                "name": t("trendwatcher_search_engine_google"),
+                "search_videos": self.search_videos_google,
+                "search_texts": self.search_texts_google,
+                "config": {
+                    "api_key": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_api_key", ""),
+                    "cx_id": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_cx_id", "")
+                }
+            },
+            "ytdlp": {
+                "name": t("trendwatcher_search_engine_ytdlp"),
+                "search_videos": self.search_videos_ytdlp,
+                "search_texts": self.search_texts_ytdlp,  # Ne renvoie rien pour textes
+                "config": {}
+            }
+        }
 
     def get_config_fields(self):
         """Define configuration fields"""
@@ -137,6 +200,24 @@ class TrendwatcherPlugin(Plugin):
                 "type": "text",
                 "label": t("trendwatcher_working_dir"),
                 "default": t("trendwatcher_working_dir_default")
+            },
+            "trendwatcher_brave_api_key": {
+                "type": "text",
+                "label": t("trendwatcher_brave_api_key_label"),
+                "default": "",
+                "help": t("trendwatcher_brave_api_key_help")
+            },
+            "trendwatcher_google_api_key": {
+                "type": "text",
+                "label": t("trendwatcher_google_api_key_label"),
+                "default": "",
+                "help": t("trendwatcher_google_api_key_help")
+            },
+            "trendwatcher_google_cx_id": {
+                "type": "text",
+                "label": t("trendwatcher_google_cx_id_label"),
+                "default": "",
+                "help": t("trendwatcher_google_cx_id_help")
             }
         }
 
@@ -169,8 +250,8 @@ class TrendwatcherPlugin(Plugin):
             st.write(t("trendwatcher_debug_date").format(date_str=date_str, result="Failed to parse"))
         return None
 
-    def search_videos(self, keyword, useragents, valid_video_domains, debug=False):
-        """Search for recent videos with URL validation"""
+    def search_videos_duckduckgo(self, query, keyword, useragents, valid_video_domains, debug=False):
+        """Search for recent videos with URL validation using DuckDuckGo"""
         from urllib.parse import urlparse
 
         # Create new DDGS instance with random User-Agent
@@ -178,7 +259,7 @@ class TrendwatcherPlugin(Plugin):
         ddgs = DDGS(headers=headers)
 
         video_results = ddgs.videos(
-            keywords=keyword,
+            keywords=query,
             region="fr-fr",
             timelimit="w",
             max_results=5
@@ -187,9 +268,7 @@ class TrendwatcherPlugin(Plugin):
         results = []
         cutoff_date = datetime.now() - timedelta(days=7)
 
-        # Process video results
         for video in video_results:
-            # Validate URL
             try:
                 parsed_url = urlparse(video["content"])
                 domain = parsed_url.netloc.lower().replace("www.", "")
@@ -210,8 +289,6 @@ class TrendwatcherPlugin(Plugin):
             if published_date and published_date > cutoff_date:
                 title = video["title"].replace("|", "")
                 language = detect(video["title"]) if video["title"] else "unknown"
-
-                # Check if the video is from YouTube
                 is_youtube = domain in ["youtube.com", "youtu.be"]
 
                 results.append({
@@ -219,28 +296,26 @@ class TrendwatcherPlugin(Plugin):
                     "url": video["content"],
                     "video_id": self.extract_youtube_id(video["content"]) if is_youtube else "N/A",
                     "title": title,
-                    "view_count": "",  # Metadata will be fetched later
+                    "view_count": "",
                     "language": language,
-                    "published_at": "",  # Metadata will be fetched later
+                    "published_at": "",
                     "channel_id": "N/A",
                     "channel_title": "N/A",
                     "subscriber_count": "",
                     "comment_count": "",
-                    "relevance_score": 0,  # Will be calculated during export if needed
+                    "relevance_score": 0,
                     "type": "video"
                 })
 
         return results
 
-
-    def search_texts(self, keyword, useragents, debug=False):
-        """Search for recent text articles"""
-        # Create new DDGS instance with random User-Agent
+    def search_texts_duckduckgo(self, query, keyword, useragents, debug=False):
+        """Search for recent text articles using DuckDuckGo"""
         headers = {"User-Agent": random.choice(useragents)}
         ddgs = DDGS(headers=headers)
 
         text_results = ddgs.text(
-            keywords=keyword,
+            keywords=query,
             region="fr-fr",
             timelimit="w",
             max_results=5
@@ -270,11 +345,410 @@ class TrendwatcherPlugin(Plugin):
         return results
 
 
-    def search_trends(self, keyword, useragents, debug=False):
-        """Search for recent videos and web content"""
-        query = f"{keyword} site:youtube.com OR -inurl:(signup login)"
+    def search_videos_brave(self, query, keyword, useragents, valid_video_domains, debug=False):
+        """Search for recent videos with URL validation using Brave Search"""
+        from urllib.parse import urlparse
+
+        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_brave_api_key", "")
+        if not api_key:
+            st.error(t("trendwatcher_error").format(error="Brave Search API key is required."))
+            return []
+
+        brave = Brave(api_key)
+        try:
+            # Utiliser raw=True pour éviter la validation Pydantic
+            search_results = brave.search(
+                q=query,
+                count=5,
+                result_filter="videos",
+                freshness="pw",
+                raw=True
+            )
+            if debug:
+                st.write(f"Brave Search response for videos: {search_results}")
+            # Vérifier si la réponse contient des résultats vidéos
+            video_results = search_results.get("videos", {}).get("results", []) if search_results.get("videos") else []
+            if not video_results:
+                if debug:
+                    st.warning(f"No video results found for query: {query}")
+                return []
+
+            results = []
+            cutoff_date = datetime.now() - timedelta(days=7)
+
+            for video in video_results[:5]:
+                url = video.get("url", "")
+                title = video.get("title", "")
+                if not url or not title:
+                    if debug:
+                        st.warning(f"Skipping video with missing url or title for query: {query}")
+                    continue
+
+                try:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc.lower().replace("www.", "")
+                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
+                        if debug:
+                            st.warning(
+                                f"Non-video URL detected: {url} "
+                                f"for keyword '{keyword}'. Skipping."
+                            )
+                        continue
+                except Exception as e:
+                    if debug:
+                        st.warning(
+                            f"Invalid URL: {url} "
+                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
+                        )
+                    continue
+
+                # Extraire la date de publication
+                published_date_str = video.get("meta", {}).get("published_date", "") or video.get("published_date", "")
+                published_date = self.parse_date(published_date_str, debug=debug)
+                if published_date and published_date > cutoff_date:
+                    title = title.replace("|", "")
+                    language = detect(title) if title else "unknown"
+                    is_youtube = domain in ["youtube.com", "youtu.be"]
+
+                    results.append({
+                        "keyword": keyword,
+                        "url": url,
+                        "video_id": self.extract_youtube_id(url) if is_youtube else "N/A",
+                        "title": title,
+                        "view_count": "",
+                        "language": language,
+                        "published_at": "",
+                        "channel_id": "N/A",
+                        "channel_title": "N/A",
+                        "subscriber_count": "",
+                        "comment_count": "",
+                        "relevance_score": 0,
+                        "type": "video"
+                    })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"Brave Search error: {str(e)}"))
+            return []
+
+    def search_texts_brave(self, query, keyword, useragents, debug=False):
+        """Search for recent text articles using Brave Search"""
+        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_brave_api_key", "")
+        if not api_key:
+            st.error(t("trendwatcher_error").format(error="Brave Search API key is required."))
+            return []
+
+        brave = Brave(api_key)
+        try:
+            # Utiliser raw=True pour éviter la validation Pydantic
+            search_results = brave.search(
+                q=query,
+                count=5,
+                result_filter="web",
+                freshness="pw",
+                raw=True
+            )
+            if debug:
+                st.write(f"Brave Search response for web: {search_results}")
+            # Vérifier si la réponse contient des résultats web
+            web_results = search_results.get("web", {}).get("results", []) if search_results.get("web") else []
+            if not web_results:
+                if debug:
+                    st.warning(f"No web results found for query: {query}")
+                return []
+
+            results = []
+            for text in web_results[:5]:
+                url = text.get("url", "")
+                title = text.get("title", "")
+                if not url or not title:
+                    if debug:
+                        st.warning(f"Skipping article with missing url or title for query: {query}")
+                    continue
+
+                title = title.replace("|", "")
+                language = detect(title) if title else "unknown"
+                if debug:
+                    st.write(f"Text article: [{title}]({url})")
+                results.append({
+                    "keyword": keyword,
+                    "url": url,
+                    "title": title,
+                    "view_count": "",
+                    "language": language,
+                    "published_at": "",
+                    "channel_id": "N/A",
+                    "channel_title": "N/A",
+                    "subscriber_count": "",
+                    "comment_count": "",
+                    "relevance_score": 0,
+                    "type": "web"
+                })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"Brave Search error: {str(e)}"))
+            return []
+
+
+    def search_videos_google(self, query, keyword, useragents, valid_video_domains, debug=False):
+        """Search for recent videos using Google Custom Search API"""
+        from urllib.parse import urlparse
+
+        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_api_key", "")
+        cx_id = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_cx_id", "")
+        if not api_key or not cx_id:
+            st.error(t("trendwatcher_error").format(error="Google API key and CX ID are required."))
+            return []
+
+        base_url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            "q": f"{query} site:youtube.com",
+            "key": api_key,
+            "cx": cx_id,
+            "num": 5,
+            "dateRestrict": "w1"  # Limiter à 1 semaine
+        }
+
+        try:
+            headers = {"User-Agent": random.choice(useragents)}
+            response = requests.get(base_url, params=params, headers=headers)
+            if response.status_code != 200:
+                if debug:
+                    st.error(f"Google API error: {response.text}")
+                return []
+            data = response.json()
+
+            results = []
+            cutoff_date = datetime.now() - timedelta(days=7)
+
+            for item in data.get("items", [])[:5]:
+                url = item.get("link", "")
+                title = item.get("title", "").replace("|", "")
+                if not url or not title:
+                    continue
+
+                try:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc.lower().replace("www.", "")
+                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
+                        if debug:
+                            st.warning(
+                                f"Non-video URL detected: {url} "
+                                f"for keyword '{keyword}'. Skipping."
+                            )
+                        continue
+                except Exception as e:
+                    if debug:
+                        st.warning(
+                            f"Invalid URL: {url} "
+                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
+                        )
+                    continue
+
+                # Google ne fournit pas toujours la date exacte, on suppose récent
+                language = detect(title) if title else "unknown"
+                is_youtube = domain in ["youtube.com", "youtu.be"]
+
+                results.append({
+                    "keyword": keyword,
+                    "url": url,
+                    "video_id": self.extract_youtube_id(url) if is_youtube else "N/A",
+                    "title": title,
+                    "view_count": "",
+                    "language": language,
+                    "published_at": "",
+                    "channel_id": "N/A",
+                    "channel_title": "N/A",
+                    "subscriber_count": "",
+                    "comment_count": "",
+                    "relevance_score": 0,
+                    "type": "video"
+                })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"Google Search error: {str(e)}"))
+            return []
+
+    def search_texts_google(self, query, keyword, useragents, debug=False):
+        """Search for recent text articles using Google Custom Search API"""
+        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_api_key", "")
+        cx_id = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_cx_id", "")
+        if not api_key or not cx_id:
+            st.error(t("trendwatcher_error").format(error="Google API key and CX ID are required."))
+            return []
+
+        base_url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            "q": query,
+            "key": api_key,
+            "cx": cx_id,
+            "num": 5,
+            "dateRestrict": "w1"  # Limiter à 1 semaine
+        }
+
+        try:
+            headers = {"User-Agent": random.choice(useragents)}
+            response = requests.get(base_url, params=params, headers=headers)
+            if response.status_code != 200:
+                if debug:
+                    st.error(f"Google API error: {response.text}")
+                return []
+            data = response.json()
+
+            results = []
+            for item in data.get("items", [])[:5]:
+                url = item.get("link", "")
+                title = item.get("title", "").replace("|", "")
+                if not url or not title:
+                    continue
+
+                language = detect(title) if title else "unknown"
+                if debug:
+                    st.write(f"Text article: [{title}]({url})")
+                results.append({
+                    "keyword": keyword,
+                    "url": url,
+                    "title": title,
+                    "view_count": "",
+                    "language": language,
+                    "published_at": "",
+                    "channel_id": "N/A",
+                    "channel_title": "N/A",
+                    "subscriber_count": "",
+                    "comment_count": "",
+                    "relevance_score": 0,
+                    "type": "web"
+                })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"Google Search error: {str(e)}"))
+            return []
+
+    def search_videos_ytdlp(self, query, keyword, useragents, valid_video_domains, debug=False):
+        """Search for recent videos using yt-dlp"""
+        from urllib.parse import urlparse
+
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,  # Ne télécharge pas, juste les métadonnées
+            "max_downloads": 5,
+            "dateafter": (datetime.now() - timedelta(days=7)).strftime("%Y%m%d"),
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Rechercher sur YouTube
+                search_query = f"ytsearch5:{query}"  # Limite à 5 résultats
+                info = ydl.extract_info(search_query, download=False)
+
+            results = []
+            cutoff_date = datetime.now() - timedelta(days=7)
+
+            for entry in info.get("entries", [])[:5]:
+                url = entry.get("url", "") or entry.get("webpage_url", "")
+                title = entry.get("title", "").replace("|", "")
+                if not url or not title:
+                    continue
+
+                try:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc.lower().replace("www.", "")
+                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
+                        if debug:
+                            st.warning(
+                                f"Non-video URL detected: {url} "
+                                f"for keyword '{keyword}'. Skipping."
+                            )
+                        continue
+                except Exception as e:
+                    if debug:
+                        st.warning(
+                            f"Invalid URL: {url} "
+                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
+                        )
+                    continue
+
+                # Vérifier la date
+                upload_date = entry.get("upload_date", "")
+                if upload_date:
+                    try:
+                        published_date = datetime.strptime(upload_date, "%Y%m%d")
+                        if published_date <= cutoff_date:
+                            continue
+                    except ValueError:
+                        if debug:
+                            st.warning(f"Invalid date format for {url}: {upload_date}")
+                        continue
+                else:
+                    published_date = datetime.now()  # Suppose récent si pas de date
+
+                language = detect(title) if title else "unknown"
+                is_youtube = domain in ["youtube.com", "youtu.be"]
+
+                results.append({
+                    "keyword": keyword,
+                    "url": url,
+                    "video_id": entry.get("id", "N/A") if is_youtube else "N/A",
+                    "title": title,
+                    "view_count": str(entry.get("view_count", "")),
+                    "language": language,
+                    "published_at": upload_date,
+                    "channel_id": entry.get("channel_id", "N/A"),
+                    "channel_title": entry.get("uploader", "N/A"),
+                    "subscriber_count": "",
+                    "comment_count": "",
+                    "relevance_score": 0,
+                    "type": "video"
+                })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"yt-dlp error: {str(e)}"))
+            return []
+
+    def search_texts_ytdlp(self, query, keyword, useragents, debug=False):
+        """Search for text articles using yt-dlp (not supported, returns empty)"""
         if debug:
-            st.write(t("trendwatcher_debug_query").format(query=query))
+            st.warning("yt-dlp does not support text article search.")
+        return []
+
+    def search_trends(self, main_keyword, synonyms, useragents, search_mode="or", search_engine="duckduckgo", debug=False):
+        """Search for recent videos and web content"""
+        # Get search engine methods
+        engine = self.SEARCH_ENGINES.get(search_engine, self.SEARCH_ENGINES["duckduckgo"])
+        search_videos = engine["search_videos"]
+        search_texts = engine["search_texts"]
+
+        # Prepare query based on search mode
+        if search_mode == "or":
+            query_terms = [main_keyword] + synonyms
+            query = " OR ".join(f'"{term}"' for term in query_terms if term)
+            if search_engine == "duckduckgo":
+                query += " site:youtube.com OR -inurl:(signup login)"
+            elif search_engine == "google":
+                query += " site:youtube.com"  # Google gère site: mais pas -inurl
+            # Brave et yt-dlp n'ont pas besoin de restrictions spécifiques
+            if debug:
+                st.write(t("trendwatcher_debug_query").format(query=query))
+            queries = [(query, main_keyword)]
+        else:
+            queries = [(f'"{main_keyword}"', main_keyword)]
+            queries.extend((f'"{syn}"', main_keyword) for syn in synonyms)
+            if search_engine == "duckduckgo":
+                queries = [(f"{q} site:youtube.com OR -inurl:(signup login)", k) for q, k in queries]
+            elif search_engine == "google":
+                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+            if debug:
+                st.write(t("trendwatcher_debug_query").format(query=", ".join(q for q, _ in queries)))
 
         # List of valid video platform domains
         valid_video_domains = [
@@ -288,25 +762,22 @@ class TrendwatcherPlugin(Plugin):
         ]
 
         try:
-            # Search videos
-            video_results = self.search_videos(keyword, useragents, valid_video_domains, debug=debug)
-
-            # Search texts
-            text_results = self.search_texts(keyword, useragents, debug=debug)
-
-            results = video_results + text_results
+            all_results = []
+            for query, keyword in queries:
+                video_results = search_videos(query, keyword, useragents, valid_video_domains, debug=debug)
+                text_results = search_texts(query, keyword, useragents, debug=debug)
+                all_results.extend(video_results + text_results)
 
             if debug:
-                video_count = sum(1 for r in results if r.get("type") == "video")
-                text_count = sum(1 for r in results if r.get("type") == "web")
+                video_count = sum(1 for r in all_results if r.get("type") == "video")
+                text_count = sum(1 for r in all_results if r.get("type") == "web")
                 st.write(t("trendwatcher_debug_results").format(
-                    count=len(results),
+                    count=len(all_results),
                     vids=video_count,
                     texts=text_count
                 ))
 
-            return results
-
+            return all_results
         except Exception as e:
             return str(e)
 
@@ -583,7 +1054,8 @@ class TrendwatcherPlugin(Plugin):
         keywords_input = st.text_area(
             t("trendwatcher_keywords_label"),
             value=keywords_config,
-            height=150
+            height=150,
+            help="Format: main_keyword:synonym1,synonym2,... (one per line)"
         )
 
         if st.button(t("trendwatcher_save_keywords_button"), key="save_keywords"):
@@ -607,6 +1079,25 @@ class TrendwatcherPlugin(Plugin):
                 step=1
             )
 
+        # Add search engine selection
+        search_engine_options = {engine_id: engine["name"] for engine_id, engine in self.SEARCH_ENGINES.items()}
+        search_engine_name = st.selectbox(
+            t("trendwatcher_search_engine_label"),
+            list(search_engine_options.values()),
+            index=0,
+            key="search_engine"
+        )
+        search_engine = next(k for k, v in search_engine_options.items() if v == search_engine_name)
+
+        # Add search mode selection
+        search_mode = st.selectbox(
+            t("trendwatcher_search_mode_label"),
+            [t("trendwatcher_search_mode_or"), t("trendwatcher_search_mode_subsearches")],
+            index=0,
+            key="search_mode"
+        )
+        search_mode_value = "or" if search_mode == t("trendwatcher_search_mode_or") else "subsearches"
+
         # Initialize session state
         if "trendwatcher_results" not in st.session_state:
             st.session_state.trendwatcher_results = []
@@ -619,17 +1110,37 @@ class TrendwatcherPlugin(Plugin):
 
         if st.button(t("trendwatcher_search_button"), key="search_trends"):
             with st.spinner(t("trendwatcher_processing")):
-                keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
+                # Parse keywords with synonyms
+                keyword_configs = []
+                for line in keywords_input.split("\n"):
+                    line = line.strip()
+                    if line:
+                        if ":" in line:
+                            main_keyword, synonyms = line.split(":", 1)
+                            main_keyword = main_keyword.strip()
+                            synonyms = [s.strip() for s in synonyms.split(",") if s.strip()]
+                        else:
+                            main_keyword = line
+                            synonyms = []
+                        keyword_configs.append({"main": main_keyword, "synonyms": synonyms})
 
-                if debug_mode and len(keywords) > max_keywords_debug:
+                # Limit keywords in debug mode
+                if debug_mode and len(keyword_configs) > max_keywords_debug:
                     st.warning(
-                        f"Debug mode: Limiting to first {max_keywords_debug} keywords: {', '.join(keywords[:max_keywords_debug])}"
+                        f"Debug mode: Limiting to first {max_keywords_debug} keywords: {', '.join(k['main'] for k in keyword_configs[:max_keywords_debug])}"
                     )
-                    keywords = keywords[:max_keywords_debug]
+                    keyword_configs = keyword_configs[:max_keywords_debug]
 
                 all_results = []
-                for keyword in keywords:
-                    results = self.search_trends(keyword, useragents, debug=debug_mode)
+                for config in keyword_configs:
+                    results = self.search_trends(
+                        config["main"],
+                        config["synonyms"],
+                        useragents,
+                        search_mode_value,
+                        search_engine,
+                        debug=debug_mode
+                    )
                     if isinstance(results, list):
                         all_results.extend(results)
                     else:
@@ -668,11 +1179,8 @@ class TrendwatcherPlugin(Plugin):
                     df = df[df["keyword"].isin(selected_keywords)]
                 if selected_language != "All":
                     df = df[df["language"] == selected_language]
-                df["title_link"] = df.apply(lambda x: f"[{x['title'].replace('|','')}]({x['url']})", axis=1)
-                # Add a selection column
                 df["Select"] = False
-                # Reorder columns to put Select first
-                cols = ["Select", "title_link", "keyword", "language", "url"]  # Include url but don't display it
+                cols = ["Select", "title", "url", "keyword", "language"]
                 df = df[cols]
                 return df
 
@@ -682,31 +1190,43 @@ class TrendwatcherPlugin(Plugin):
                 st.subheader(t("trendwatcher_videos_table"))
                 video_df = filter_df(video_results)
                 if not video_df.empty:
-                    # Add select all checkbox
                     st.session_state.select_all_videos = st.checkbox(
                         t("trendwatcher_select_all_videos"),
                         value=st.session_state.select_all_videos,
                         key="select_all_videos_checkbox"
                     )
-                    # Update Select column based on select_all_videos
                     video_df["Select"] = st.session_state.select_all_videos
-                    # Use st.data_editor for interactive selection
                     edited_video_df = st.data_editor(
-                        video_df[["Select", "title_link", "keyword", "language"]],  # Exclude url from display
+                        video_df[["Select", "title", "url", "keyword", "language"]],
                         column_config={
                             "Select": st.column_config.CheckboxColumn(
                                 "Select for Export",
                                 help="Check to include this video in the export",
                                 default=False
+                            ),
+                            "url": st.column_config.LinkColumn(
+                                "URL",
+                                help="Click to visit the video",
+                                display_text="Visit"
+                            ),
+                            "title": st.column_config.TextColumn(
+                                "Title",
+                                help="Video title"
+                            ),
+                            "keyword": st.column_config.TextColumn(
+                                "Keyword",
+                                help="Associated keyword"
+                            ),
+                            "language": st.column_config.TextColumn(
+                                "Language",
+                                help="Detected language"
                             )
                         },
-                        disabled=["title_link", "keyword", "language"],
+                        disabled=["title", "url", "keyword", "language"],
                         hide_index=True,
                         key="video_selector"
                     )
-                    # Merge edited selections back to original DataFrame to retain url
                     video_df.update(edited_video_df[["Select"]])
-                    # Collect selected URLs
                     selected_video_urls = video_df[video_df["Select"]]["url"].tolist()
                     if debug_mode:
                         st.write("Selected video URLs:", selected_video_urls)
@@ -719,31 +1239,43 @@ class TrendwatcherPlugin(Plugin):
                 st.subheader(t("trendwatcher_texts_table"))
                 text_df = filter_df(text_results)
                 if not text_df.empty:
-                    # Add select all checkbox
                     st.session_state.select_all_texts = st.checkbox(
                         t("trendwatcher_select_all_texts"),
                         value=st.session_state.select_all_texts,
                         key="select_all_texts_checkbox"
                     )
-                    # Update Select column based on select_all_texts
                     text_df["Select"] = st.session_state.select_all_texts
-                    # Use st.data_editor for interactive selection
                     edited_text_df = st.data_editor(
-                        text_df[["Select", "title_link", "keyword", "language"]],  # Exclude url from display
+                        text_df[["Select", "title", "url", "keyword", "language"]],
                         column_config={
                             "Select": st.column_config.CheckboxColumn(
                                 "Select for Export",
                                 help="Check to include this article in the export",
                                 default=False
+                            ),
+                            "url": st.column_config.LinkColumn(
+                                "URL",
+                                help="Click to visit the article",
+                                display_text="Visit"
+                            ),
+                            "title": st.column_config.TextColumn(
+                                "Title",
+                                help="Article title"
+                            ),
+                            "keyword": st.column_config.TextColumn(
+                                "Keyword",
+                                help="Associated keyword"
+                            ),
+                            "language": st.column_config.TextColumn(
+                                "Language",
+                                help="Detected language"
                             )
                         },
-                        disabled=["title_link", "keyword", "language"],
+                        disabled=["title", "url", "keyword", "language"],
                         hide_index=True,
                         key="text_selector"
                     )
-                    # Merge edited selections back to original DataFrame to retain url
                     text_df.update(edited_text_df[["Select"]])
-                    # Collect selected URLs
                     selected_text_urls = text_df[text_df["Select"]]["url"].tolist()
                     if debug_mode:
                         st.write("Selected text URLs:", selected_text_urls)
@@ -753,7 +1285,6 @@ class TrendwatcherPlugin(Plugin):
             if not video_results and not text_results:
                 st.info(t("trendwatcher_no_results"))
 
-            # Single save button
             if st.button(t("trendwatcher_save_button"), key="save_results"):
                 if selected_video_urls or selected_text_urls:
                     with st.spinner("Saving results..."):
