@@ -11,6 +11,9 @@ import pandas as pd
 import os
 import re
 import csv
+from youtube_api import YoutubeAPI
+from datetime import datetime
+import pytz
 
 # Translations
 translations["en"].update({
@@ -49,6 +52,8 @@ translations["en"].update({
     "trendwatcher_error": "Error during search: {error}",
     "trendwatcher_save_success": "Results saved to {dir}",
     "trendwatcher_save_button": "Save Results",
+    "trendwatcher_table_view_count": "View Count",
+    "trendwatcher_table_relevance_score": "Relevance Score",
 })
 
 translations["fr"].update({
@@ -87,7 +92,15 @@ translations["fr"].update({
     "trendwatcher_error": "Erreur pendant la recherche : {error}",
     "trendwatcher_save_success": "Résultats sauvegardés dans {dir}",
     "trendwatcher_save_button": "Sauvegarder les résultats",
+    "trendwatcher_table_view_count": "Nombre de vues",
+    "trendwatcher_table_relevance_score": "Score de pertinence",
 })
+
+# Official CSV headers
+VIDEO_CSV_HEADERS = [
+    "keyword", "url", "video_id", "title", "view_count", "language", "published_at",
+    "channel_id", "channel_title", "subscriber_count", "comment_count", "relevance_score"
+]
 
 class TrendwatcherPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -160,6 +173,9 @@ class TrendwatcherPlugin(Plugin):
         headers = {"User-Agent": random.choice(useragents)}
         ddgs = DDGS(headers=headers)
 
+        # Initialize YoutubeAPI with config
+        youtube_api = YoutubeAPI(self.plugin_manager.config if self.plugin_manager else {})
+
         video_results = ddgs.videos(
             keywords=keyword,
             region="fr-fr",
@@ -191,19 +207,63 @@ class TrendwatcherPlugin(Plugin):
 
             published_date = self.parse_date(video["published"], debug=debug)
             if published_date and published_date > cutoff_date:
-                days_old = (datetime.now() - published_date).days
-                title_link = f"[{video['title'].replace('|','')}]({video['content']})"
+                title = video["title"].replace("|", "")
                 language = detect(video["title"]) if video["title"] else "unknown"
+
+                # Check if the video is from YouTube
+                is_youtube = domain in ["youtube.com", "youtu.be"]
+                relevance_score = 0
+                metadata = {
+                    "view_count": "",
+                    "published_at": "",
+                    "channel_id": "N/A",
+                    "channel_title": "N/A",
+                    "subscriber_count": "",
+                    "comment_count": ""
+                }
+
+                if is_youtube:
+                    # Get metadata from yt-dlp for YouTube videos
+                    metadata = self.extract_video_metadata_yt_dlp(video["content"], debug=debug)
+
+                    # Format published_at for YoutubeAPI
+                    published_at = metadata["published_at"]
+                    if published_at and published_at != "":
+                        try:
+                            # Convert YYYY-MM-DD to YYYY-MM-DDTHH:MM:SSZ
+                            published_at = datetime.strptime(published_at, "%Y-%m-%d").strftime("%Y-%m-%dT00:00:00Z")
+                        except:
+                            published_at = None
+                    else:
+                        published_at = None
+
+                    # Calculate relevance score for YouTube videos
+                    if published_at and metadata["subscriber_count"] and metadata["comment_count"]:
+                        try:
+                            video_data = {
+                                "published_at": published_at,
+                                "subscriber_count": int(metadata["subscriber_count"] or 0),
+                                "comment_count": int(metadata["comment_count"] or 0)
+                            }
+                            relevance_score = youtube_api.calculate_relevance_score(video_data)
+                        except Exception as e:
+                            if debug:
+                                st.write(f"Error calculating relevance score for {video['content']}: {str(e)}")
+
                 results.append({
-                    "title_link": title_link,
+                    "keyword": keyword,
                     "url": video["content"],
-                    "title": video["title"].replace("|", ""),
-                    "views": video["statistics"].get("viewCount", "N/A"),  # Kept for compatibility
-                    "date": published_date,
-                    "days_old": days_old,
-                    "type": "video",
+                    "video_id": self.extract_youtube_id(video["content"]) if is_youtube else "N/A",
+                    "title": title,
+                    "view_count": metadata["view_count"],
                     "language": language,
-                    "keyword": keyword
+                    "published_at": metadata["published_at"],
+                    "channel_id": metadata["channel_id"],
+                    "channel_title": metadata["channel_title"],
+                    "subscriber_count": metadata["subscriber_count"],
+                    "comment_count": metadata["comment_count"],
+                    "relevance_score": relevance_score,
+                    "type": "video"
                 })
 
         return results
@@ -224,20 +284,23 @@ class TrendwatcherPlugin(Plugin):
 
         results = []
         for text in text_results:
-            title_link = f"[{text['title'].replace('|','')}]({text['href']})"
+            title = text["title"].replace("|", "")
             language = detect(text["title"]) if text["title"] else "unknown"
             if debug:
-                st.write(f"Text article: {title_link}")
+                st.write(f"Text article: [{title}]({text['href']})")
             results.append({
-                "title_link": title_link,
+                "keyword": keyword,
                 "url": text["href"],
-                "title": text["title"].replace("|", ""),
-                "views": "N/A",
-                "days_old": "N/A",
-                "date": "N/A",
-                "type": "web",
+                "title": title,
+                "view_count": "",
                 "language": language,
-                "keyword": keyword
+                "published_at": "",
+                "channel_id": "N/A",
+                "channel_title": "N/A",
+                "subscriber_count": "",
+                "comment_count": "",
+                "relevance_score": 0,
+                "type": "web"
             })
 
         return results
@@ -267,15 +330,15 @@ class TrendwatcherPlugin(Plugin):
             # Search texts
             text_results = self.search_texts(keyword, useragents, debug=debug)
 
-            results = []
-            results.extend(video_results)
-            results.extend(text_results)
+            results = video_results + text_results
 
             if debug:
+                video_count = sum(1 for r in results if r.get("type") == "video")
+                text_count = sum(1 for r in results if r.get("type") == "web")
                 st.write(t("trendwatcher_debug_results").format(
                     count=len(results),
-                    vids=sum(1 for r in results if r["type"] == "video"),
-                    texts=sum(1 for r in results if r["type"] == "web")
+                    vids=video_count,
+                    texts=text_count
                 ))
 
             return results
@@ -416,15 +479,16 @@ class TrendwatcherPlugin(Plugin):
 
     def save_videos_to_csv(self, working_dir, selected_keywords):
         """Save video results for selected keywords to CSV file"""
+        from urllib.parse import urlparse
+
         # Expand ~ in working_dir
         working_dir = os.path.expanduser(working_dir)
         os.makedirs(working_dir, exist_ok=True)
 
         video_file = os.path.join(working_dir, "video_list.csv")
 
-        # CSV headers
-        headers = ["keyword", "url", "video_id", "title", "view_count", "language", "published_at",
-                   "channel_id", "channel_title", "subscriber_count", "comment_count"]
+        # Use official headers
+        headers = VIDEO_CSV_HEADERS
 
         # Filter results based on selected_keywords
         filtered_results = [r for r in st.session_state.trendwatcher_results if r["keyword"] in selected_keywords]
@@ -438,12 +502,27 @@ class TrendwatcherPlugin(Plugin):
             writer = csv.writer(f)
             writer.writerow(headers)
             for video in videos:
-                video_id = self.extract_youtube_id(video["url"]) if video["url"] else "N/A"
-                metadata = self.extract_video_metadata_yt_dlp(video["url"], debug=debug_mode)
+                # Check if the video is from YouTube
+                parsed_url = urlparse(video["url"])
+                domain = parsed_url.netloc.lower().replace("www.", "")
+                is_youtube = domain in ["youtube.com", "youtu.be"]
+
+                if is_youtube:
+                    metadata = self.extract_video_metadata_yt_dlp(video["url"], debug=debug_mode)
+                else:
+                    metadata = {
+                        "view_count": "",
+                        "published_at": "",
+                        "channel_id": "N/A",
+                        "channel_title": "N/A",
+                        "subscriber_count": "",
+                        "comment_count": ""
+                    }
+
                 writer.writerow([
                     video["keyword"],
                     video["url"],
-                    video_id,
+                    video["video_id"],
                     video["title"],
                     metadata["view_count"],
                     video["language"],
@@ -451,7 +530,8 @@ class TrendwatcherPlugin(Plugin):
                     metadata["channel_id"],
                     metadata["channel_title"],
                     metadata["subscriber_count"],
-                    metadata["comment_count"]
+                    metadata["comment_count"],
+                    video["relevance_score"]
                 ])
 
         return working_dir
@@ -480,9 +560,9 @@ class TrendwatcherPlugin(Plugin):
                     article["keyword"],
                     article["url"],
                     article["title"],
-                    article["views"],
+                    article["view_count"],
                     article["language"],
-                    article["date"]
+                    article["published_at"]
                 ])
 
         return working_dir
@@ -519,7 +599,7 @@ class TrendwatcherPlugin(Plugin):
             max_keywords_debug = st.number_input(
                 "Maximum Keywords to Search in Debug Mode",
                 min_value=1,
-                max_value=100,  # Arbitrary max to prevent abuse
+                max_value=100,
                 value=3,
                 step=1,
                 help="Limits the number of keywords searched when debug mode is enabled."
@@ -553,7 +633,7 @@ class TrendwatcherPlugin(Plugin):
                     time.sleep(random.uniform(delay_min, delay_max))
 
                 st.session_state.trendwatcher_results = all_results
-                st.session_state.debug_mode = debug_mode  # Update debug mode in session state
+                st.session_state.debug_mode = debug_mode
 
         if st.session_state.trendwatcher_results:
             # Split into videos and texts
@@ -582,14 +662,12 @@ class TrendwatcherPlugin(Plugin):
                     df = df[df["keyword"].isin(selected_keywords)]
                 if selected_language != "All":
                     df = df[df["language"] == selected_language]
-                return df.rename(columns={
-                    "title_link": t("trendwatcher_table_title"),
-                    "views": t("trendwatcher_table_views"),
-                    "days_old": t("trendwatcher_table_days"),
-                    "type": t("trendwatcher_table_type"),
-                    "language": t("trendwatcher_table_language"),
-                    "keyword": t("trendwatcher_table_keyword")
-                })
+                # Create a clickable title column
+                df["title_link"] = df.apply(lambda x: f"[{x['title'].replace('|','')}]({x['url']})", axis=1)
+                if debug_mode :
+                    st.write(df)
+                return df
+
 
             # Videos table
             if video_results:
@@ -621,6 +699,7 @@ class TrendwatcherPlugin(Plugin):
                     article_dir = self.save_articles_to_csv(working_dir, selected_keywords)
                     st.success(t("trendwatcher_save_success").format(dir=video_dir))
                 except Exception as e:
+                    raise e
                     st.error(t("trendwatcher_error").format(error=str(e)))
 
 if __name__ == "__main__":
