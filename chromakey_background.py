@@ -12,7 +12,7 @@ import tempfile
 import argparse
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+#logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 #logging.basicConfig(level=logging.CRITICAL + 1)
 logger = logging.getLogger(__name__)
 
