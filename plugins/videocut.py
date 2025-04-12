@@ -241,13 +241,54 @@ class VideocutPlugin(Plugin):
 
                     col_merge, col_delete = st.columns(2)
                     with col_merge:
-                        if st.button(t("video_merge")) and selected_videos["selection"]["rows"]:
-                            with st.spinner("Merging videos..."):
-                                video_paths = [video_df.iloc[st.session_state["video_order"][idx]]
-                                               ["Full Path"] for idx in selected_videos["selection"]["rows"]]
-                                print(video_paths)
-                                merge_videos(video_paths, self.working_dir)
-                            st.rerun()
+                                            # Préparer la liste des vidéos sélectionnées
+                                            selected_video_paths = [video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
+                                                                   for idx in selected_videos["selection"]["rows"]]
+                                            if len(selected_video_paths) >= 2:
+                                                # Afficher le text_area pour réorganiser les vidéos
+                                                default_text = "\n".join([os.path.basename(path) for path in selected_video_paths])
+                                                video_order_input = st.text_area(
+                                                    "Videos to merge (one per line, reorder as needed)",
+                                                    default_text,
+                                                    height=150,
+                                                    help="Rearrange the videos by editing the list. Each line represents one video."
+                                                )
+                                            else:
+                                                st.write("Select at least two videos to enable merging.")
+                                                video_order_input = ""
+
+                                            # Bouton Fusionner
+                                            if st.button(t("video_merge")) and selected_videos["selection"]["rows"]:
+                                                if len(selected_video_paths) < 2:
+                                                    st.error("Please select at least two videos to merge.")
+                                                else:
+                                                    # Traiter l'entrée utilisateur
+                                                    new_order_names = [line.strip() for line in video_order_input.split("\n") if line.strip()]
+                                                    # Vérifier que toutes les vidéos entrées sont valides
+                                                    original_names = [os.path.basename(path) for path in selected_video_paths]
+                                                    invalid_entries = [name for name in new_order_names if name not in original_names]
+                                                    if invalid_entries:
+                                                        st.error(f"Invalid video names: {', '.join(invalid_entries)}. Please use only the selected videos.")
+                                                    elif len(new_order_names) < 2:
+                                                        st.error("At least two videos are required to merge.")
+                                                    else:
+                                                        # Reconstruire la liste des chemins dans le nouvel ordre
+                                                        name_to_path = {os.path.basename(path): path for path in selected_video_paths}
+                                                        reordered_paths = [name_to_path[name] for name in new_order_names]
+                                                        # Mettre à jour l'ordre dans video_df pour refléter dans st.session_state["video_order"]
+                                                        new_order_indices = []
+                                                        for path in reordered_paths:
+                                                            idx = video_df[video_df["Full Path"] == path].index[0]
+                                                            new_order_indices.append(idx)
+                                                        # Mettre à jour video_order en plaçant les vidéos fusionnées en premier
+                                                        current_order = st.session_state["video_order"]
+                                                        unselected_indices = [i for i in current_order if i not in new_order_indices]
+                                                        st.session_state["video_order"] = new_order_indices + unselected_indices
+                                                        # Lancer la fusion
+                                                        with st.spinner("Merging videos..."):
+                                                            merge_videos(reordered_paths, self.working_dir)
+                                                        st.rerun()
+
                     with col_delete:
                         # Initialiser l'état dans session_state si non présent
                         if "delete_requested" not in st.session_state:
