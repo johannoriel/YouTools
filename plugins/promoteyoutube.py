@@ -326,20 +326,6 @@ class PromoteyoutubePlugin(Plugin):
         progress_bar.empty()
         progress_text.empty()
 
-    def post_responses(self, config, selected_responses, campaign_id):
-        """Poste les réponses et met à jour la base."""
-        youtube_api = YoutubeAPI(self.plugin_manager.config)
-        for response in selected_responses:
-            comment_id = response['comment_id']
-            response_text = response['response']
-            try:
-                youtube_api.post_comment_reply(comment_id, response_text)
-                update_campaign_response_status(
-                    comment_id, "posted", campaign_id)
-            except Exception as e:
-                update_campaign_response_status(
-                    comment_id, f"error: {str(e)}", campaign_id)
-
     def fetch_comments_for_selected_videos(self, selected_video_indices, max_comments_per_video, comment_order):
         youtube_api = YoutubeAPI(self.plugin_manager.config)
         comments = []
@@ -780,27 +766,31 @@ class PromoteyoutubePlugin(Plugin):
         try:
             import pandas as pd
             df = pd.read_csv(file)
-            required_columns = {'video_id', 'title', 'channel_id', 'channel_title'}
+            required_columns = {'video_id', 'title' }
             if not required_columns.issubset(df.columns):
                 raise ValueError("Le fichier ne contient pas les colonnes requises")
             videos = []
+            st.write(df)
             for _, row in df.iterrows():
+                st.write(row)
+
                 videos.append({
                     'video_id': row['video_id'],
                     'title': row['title'],
                     'url': row.get('url', f"https://www.youtube.com/watch?v={row['video_id']}"),
-                    'channel_id': row['channel_id'],
-                    'channel_title': row['channel_title'],
-                    'view_count': row.get('view_count', 0),
-                    'comment_count': row.get('comment_count', 0),
+                    'channel_id': row.get('channel_id', 'N/A'),
+                    'channel_title': row.get('channel_title', 'N/A'),
+                    'view_count': int(row.get('view_count', 0)),
+                    'comment_count': int(round(float(row.get('comment_count', '0') or '0') if row.get('comment_count') and pd.notna(row.get('comment_count')) else 0)),
                     'published_at': row.get('published_at', ''),
                     'language': row.get('language', 'unknown'),
-                    'relevance_score': row.get('relevance_score', 0),
-                    'subscriber_count': row.get('subscriber_count', 0)
+                    'relevance_score': int(row.get('relevance_score', 0) or 0),
+                    'subscriber_count': int(row.get('subscriber_count', 0) or 0)
                 })
             st.success(t("promoteyoutube_import_success").format(file.name))
             return videos
         except Exception as e:
+            raise e
             st.error(t("promoteyoutube_import_error").format(str(e)))
             return None
 
@@ -818,7 +808,7 @@ class PromoteyoutubePlugin(Plugin):
                     'text': row['comment_text'],
                     'author': row.get('author', 'Unknown'),
                     'published_at': row.get('published_at', ''),
-                    'like_count': row.get('like_count', 0),
+                    'like_count': int(row.get('like_count', 0)),
                     'video_id': row['video_id'],
                     'video_title': row['video_title'],
                     'channel_title': row['channel_title'],
