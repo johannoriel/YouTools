@@ -997,7 +997,7 @@ class MoviedPlugin(Plugin):
         # Media selector
         with col_selector:
             initial_search = None
-            if not selected_rows.empty and "Category" in selected_rows.columns:
+            if selected_rows is not None and not selected_rows.empty and "Category" in selected_rows.columns:
                 # Filtrer les lignes avec Category "illustration" ou "meme" et concaténer les Complement
                 valid_rows = selected_rows[selected_rows["Category"].isin(["illustration", "meme"])]
                 if not valid_rows.empty:
@@ -1044,7 +1044,7 @@ class MoviedPlugin(Plugin):
 
         # Conditions pour activer/désactiver les boutons
         has_text = bool(text_input.strip())
-        has_selection = not selected_rows.empty
+        has_selection = not selected_rows.empty if selected_rows is not None else False
 
         with col1:
             if st.button(t("movied_replace_image"), key="replace_image_btn", disabled=not (is_image and has_selection)):
