@@ -23,7 +23,7 @@ import streamlit as st
 from linkify_it import LinkifyIt
 import requests
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, unquote
 import streamlit.components.v1 as components
 import configparser
 from pathlib import Path
@@ -32,7 +32,6 @@ import subprocess
 import tempfile
 import os
 from streamlit_shortcuts import button
-from urllib.parse import unquote
 import random
 import time
 
@@ -638,7 +637,27 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
             elif item["type"] == "youtube":
                 if "title" in item and item["title"]:
                     st.subheader(item["title"])
-                center_content(in_group, st.video, item["url"])
+                # Parse URL to extract timestamp
+                url = item["url"]
+                parsed_url = urlparse(url)
+                query_params = parse_qs(parsed_url.query)
+                start_time = f"{int(query_params.get('t', [0])[0])}s" if 't' in query_params and query_params['t'][0].isdigit() else None
+                # Remove timestamp from URL
+                if 't' in query_params:
+                    del query_params['t']
+                clean_query = urlencode(query_params, doseq=True)
+                clean_url = urlunparse((
+                    parsed_url.scheme,
+                    parsed_url.netloc,
+                    parsed_url.path,
+                    parsed_url.params,
+                    clean_query,
+                    parsed_url.fragment
+                ))
+                if start_time:
+                    center_content(in_group, st.video, clean_url, start_time=start_time)
+                else:
+                    center_content(in_group, st.video, clean_url)
             elif item["type"] == "image":
                 filepath = item["content"]
                 if not item.get("is_online", False):
