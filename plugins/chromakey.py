@@ -16,7 +16,8 @@ translations["en"].update({
     "chromakey_processing_spinner": "Processing...",
     "chromakey_success_message": "Processing completed. Output file: ",
     "chromakey_error_message": "An error occurred during processing: ",
-    "chromakey_warning_message": "Please select a video and a background."
+    "chromakey_warning_message": "Please select a video and a background.",
+    "default_background_label": "Default Background",
 })
 translations["fr"].update({
     "chromakey_title": "Remplacement du fond (Chromakey)",
@@ -27,7 +28,8 @@ translations["fr"].update({
     "chromakey_processing_spinner": "Traitement en cours...",
     "chromakey_success_message": "Traitement terminé. Fichier de sortie : ",
     "chromakey_error_message": "Une erreur s'est produite lors du traitement : ",
-    "chromakey_warning_message": "Veuillez sélectionner une vidéo et un fond."
+    "chromakey_warning_message": "Veuillez sélectionner une vidéo et un fond.",
+    "default_background_label": "Fond par défaut",
 })
 
 
@@ -43,6 +45,11 @@ class ChromakeyPlugin(Plugin):
                 "type": "text",
                 "label": "Couleur cible par défaut (format hexadécimal)",
                 "default": "#00FF00"  # Vert par défaut
+            },
+            "default_background": {  # Nouveau champ pour le fond par défaut
+                "type": "select",
+                "label": t("default_background_label"),
+                "default": ""  # Vide par défaut, sera rempli dynamiquement
             }
         }
 
@@ -57,6 +64,23 @@ class ChromakeyPlugin(Plugin):
             "Couleur cible par défaut (format hexadécimal)",
             value=config.get("default_target_color", "#00FF00")
         )
+
+        # Récupérer la liste des fichiers vidéo dans background_directory
+        background_directory = updated_config["background_directory"]
+        background_files = []
+        if os.path.exists(background_directory):
+            background_files = [f for f in os.listdir(background_directory)
+                               if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+            background_files.insert(0, "")  # Ajouter une option vide
+
+        # Sélecteur pour le fond par défaut
+        updated_config["default_background"] = st.selectbox(
+            "Fond par défaut",
+            options=background_files,
+            index=background_files.index(config.get("default_background", ""))
+            if config.get("default_background", "") in background_files else 0
+        )
+
         return updated_config
 
     def get_tabs(self):
@@ -67,16 +91,20 @@ class ChromakeyPlugin(Plugin):
 
         work_directory = config['common']['work_directory']
         background_directory = config['chromakey']['background_directory']
+        default_background = config['chromakey'].get("default_background", "")  # Récupérer le fond par défaut
 
         original_files, trimed_files, _, _ = list_video_files(work_directory)
         video_files = original_files + trimed_files
         background_files = [f for f in os.listdir(
             background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+        selected_background = st.selectbox(
+            t("chromakey_select_background_label"),
+            background_files,
+            index=background_files.index(default_background) if default_background in background_files else 0
+        )
 
         selected_video = st.selectbox(t("chromakey_select_video_label"), [
                                       file for file, _, _ in video_files])
-        selected_background = st.selectbox(
-            t("chromakey_select_background_label"), background_files)
 
         # Extraire la première image de la vidéo sélectionnée pour la prévisualisation
         video_path = os.path.join(work_directory, selected_video)

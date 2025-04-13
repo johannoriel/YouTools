@@ -174,6 +174,19 @@ class DirectpublishPlugin(Plugin):
         remove_silences = st.checkbox(t("directpublish_remove_silences"))
         replace_green_screen = st.checkbox(
             t("directpublish_replace_green_screen"))
+
+        # Sélection du fond si le remplacement du fond vert est activé
+        background_video = None
+        if replace_green_screen:
+            default_background = config['chromakey'].get("default_background", "")  # Récupérer le fond par défaut
+            background_directory = config['chromakey']['background_directory']
+            background_files = [f for f in os.listdir(
+                background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+            background_video = st.selectbox(
+                t("directpublish_select_background"), background_files,
+                index=background_files.index(default_background) if default_background in background_files else 0
+            )
+
         do_llm = st.checkbox(t("directpublish_do_llm"), value=True)
         title = st.text_input(t("directpublish_title"))
         do_publish = st.checkbox(t("directpublish_dopublish"), value=True)
@@ -192,14 +205,6 @@ class DirectpublishPlugin(Plugin):
             else:
                 st.warning("No thumbnail images found in directory")
 
-        # Sélection du fond si le remplacement du fond vert est activé
-        background_video = None
-        if replace_green_screen:
-            background_directory = config['chromakey']['background_directory']
-            background_files = [f for f in os.listdir(
-                background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
-            background_video = st.selectbox(
-                t("directpublish_select_background"), background_files)
 
         # Sélection de la catégorie
 
