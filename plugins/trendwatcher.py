@@ -73,6 +73,12 @@ translations["en"].update({
     "trendwatcher_google_api_key_help": "Enter your Google Custom Search API key (get it from console.cloud.google.com)",
     "trendwatcher_google_cx_id_label": "Google Custom Search Engine ID",
     "trendwatcher_google_cx_id_help": "Enter your Google Custom Search Engine ID (CX ID)",
+    "trendwatcher_search_engine_searxng": "SearxNG",
+    "trendwatcher_searxng_server_url_label": "SearxNG Server URL",
+    "trendwatcher_searxng_server_url_help": "Enter the URL of your SearxNG instance (e.g., https://search.example.com)",
+    "trendwatcher_search_engine_bing": "Bing Web Search",
+    "trendwatcher_bing_api_key_label": "Bing API Key",
+    "trendwatcher_bing_api_key_help": "Enter your Bing Web Search API key (get it from portal.azure.com)",
 
 })
 
@@ -130,6 +136,12 @@ translations["fr"].update({
     "trendwatcher_google_api_key_help": "Entrez votre clé API Google Custom Search (obtenez-la sur console.cloud.google.com)",
     "trendwatcher_google_cx_id_label": "ID du moteur de recherche personnalisé Google",
     "trendwatcher_google_cx_id_help": "Entrez votre ID de moteur de recherche personnalisé Google (CX ID)",
+    "trendwatcher_search_engine_searxng": "SearxNG",
+    "trendwatcher_searxng_server_url_label": "URL du Serveur SearxNG",
+    "trendwatcher_searxng_server_url_help": "Entrez l'URL de votre instance SearxNG (par exemple, https://search.example.com)",
+    "trendwatcher_search_engine_bing": "Recherche Web Bing",
+    "trendwatcher_bing_api_key_label": "Clé API Bing",
+    "trendwatcher_bing_api_key_help": "Entrez votre clé API Bing Web Search (obtenez-la sur portal.azure.com)",
 
 })
 
@@ -170,6 +182,22 @@ class TrendwatcherPlugin(Plugin):
                 "search_videos": self.search_videos_ytdlp,
                 "search_texts": self.search_texts_ytdlp,  # Ne renvoie rien pour textes
                 "config": {}
+            },
+            "searxng": {
+                "name": t("trendwatcher_search_engine_searxng"),
+                "search_videos": self.search_videos_searxng,
+                "search_texts": self.search_texts_searxng,
+                "config": {
+                    "server_url": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_searxng_server_url", "")
+                }
+            },
+            "bing": {
+                "name": t("trendwatcher_search_engine_bing"),
+                "search_videos": self.search_videos_bing,
+                "search_texts": self.search_texts_bing,
+                "config": {
+                    "api_key": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_bing_api_key", "")
+                }
             }
         }
 
@@ -218,6 +246,18 @@ class TrendwatcherPlugin(Plugin):
                 "label": t("trendwatcher_google_cx_id_label"),
                 "default": "",
                 "help": t("trendwatcher_google_cx_id_help")
+            },
+            "trendwatcher_searxng_server_url": {
+                "type": "text",
+                "label": t("trendwatcher_searxng_server_url_label"),
+                "default": "",
+                "help": t("trendwatcher_searxng_server_url_help")
+            },
+            "trendwatcher_bing_api_key": {
+                "type": "text",
+                "label": t("trendwatcher_bing_api_key_label"),
+                "default": "",
+                "help": t("trendwatcher_bing_api_key_help")
             }
         }
 
@@ -721,6 +761,300 @@ class TrendwatcherPlugin(Plugin):
             st.warning("yt-dlp does not support text article search.")
         return []
 
+    def search_videos_searxng(self, query, keyword, useragents, valid_video_domains, debug=False):
+        """Search for recent videos using SearxNG"""
+        from urllib.parse import urlparse
+        import requests
+
+        server_url = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_searxng_server_url", "")
+        if not server_url:
+            st.error(t("trendwatcher_error").format(error="SearxNG server URL is required."))
+            return []
+
+        # Configure query for videos (restrict to YouTube)
+        search_url = f"{server_url.rstrip('/')}/search"
+        params = {
+            "q": f"{query} site:youtube.com",
+            "categories": "general,videos",
+            "time_range": "week",  # Limit to past week
+            "format": "json",
+            "safesearch": 0,
+            "language": "all"
+        }
+
+        try:
+            headers = {"User-Agent": random.choice(useragents)}
+            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            if response.status_code != 200:
+                if debug:
+                    st.error(f"SearxNG API error: {response.text}")
+                return []
+            data = response.json()
+
+            results = []
+            cutoff_date = datetime.now() - timedelta(days=7)
+
+            for item in data.get("results", [])[:5]:
+                url = item.get("url", "")
+                title = item.get("title", "").replace("|", "")
+                if not url or not title:
+                    continue
+
+                try:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc.lower().replace("www.", "")
+                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
+                        if debug:
+                            st.warning(
+                                f"Non-video URL detected: {url} "
+                                f"for keyword '{keyword}'. Skipping."
+                            )
+                        continue
+                except Exception as e:
+                    if debug:
+                        st.warning(
+                            f"Invalid URL: {url} "
+                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
+                        )
+                    continue
+
+                # SearxNG may not provide exact dates, assume recent
+                language = detect(title) if title else "unknown"
+                is_youtube = domain in ["youtube.com", "youtu.be"]
+
+                results.append({
+                    "keyword": keyword,
+                    "url": url,
+                    "video_id": self.extract_youtube_id(url) if is_youtube else "N/A",
+                    "title": title,
+                    "view_count": "",
+                    "language": language,
+                    "published_at": "",
+                    "channel_id": "N/A",
+                    "channel_title": "N/A",
+                    "subscriber_count": "",
+                    "comment_count": "",
+                    "relevance_score": 0,
+                    "type": "video"
+                })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"SearxNG Search error: {str(e)}"))
+            return []
+
+    def search_texts_searxng(self, query, keyword, useragents, debug=False):
+        """Search for recent text articles using SearxNG"""
+        import requests
+
+        server_url = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_searxng_server_url", "")
+        if not server_url:
+            st.error(t("trendwatcher_error").format(error="SearxNG server URL is required."))
+            return []
+
+        search_url = f"{server_url.rstrip('/')}/search"
+        params = {
+            "q": query,
+            "categories": "general",
+            "time_range": "week",
+            "format": "json",
+            "safesearch": 0,
+            "language": "all"
+        }
+
+        try:
+            headers = {"User-Agent": random.choice(useragents)}
+            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            if response.status_code != 200:
+                if debug:
+                    st.error(f"SearxNG API error: {response.text}")
+                return []
+            data = response.json()
+
+            results = []
+            for item in data.get("results", [])[:5]:
+                url = item.get("url", "")
+                title = item.get("title", "").replace("|", "")
+                if not url or not title:
+                    continue
+
+                language = detect(title) if title else "unknown"
+                if debug:
+                    st.write(f"Text article: [{title}]({url})")
+                results.append({
+                    "keyword": keyword,
+                    "url": url,
+                    "title": title,
+                    "view_count": "",
+                    "language": language,
+                    "published_at": "",
+                    "channel_id": "N/A",
+                    "channel_title": "N/A",
+                    "subscriber_count": "",
+                    "comment_count": "",
+                    "relevance_score": 0,
+                    "type": "web"
+                })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"SearxNG Search error: {str(e)}"))
+            return []
+
+    def search_videos_bing(self, query, keyword, useragents, valid_video_domains, debug=False):
+        """Search for recent videos using Bing Web Search API"""
+        from urllib.parse import urlparse
+        import requests
+
+        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_bing_api_key", "")
+        if not api_key:
+            st.error(t("trendwatcher_error").format(error="Bing API key is required."))
+            return []
+
+        search_url = "https://api.bing.microsoft.com/v7.0/search"
+        params = {
+            "q": f"{query} site:youtube.com",
+            "count": 5,
+            "freshness": "Week",  # Limit to past week
+            "responseFilter": "Videos,Webpages"
+        }
+        headers = {
+            "Ocp-Apim-Subscription-Key": api_key,
+            "User-Agent": random.choice(useragents)
+        }
+
+        try:
+            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            if response.status_code != 200:
+                if debug:
+                    st.error(f"Bing API error: {response.text}")
+                return []
+            data = response.json()
+
+            results = []
+            cutoff_date = datetime.now() - timedelta(days=7)
+
+            # Bing returns videos in 'videos' or 'webPages' depending on query
+            items = data.get("videos", {}).get("value", []) or data.get("webPages", {}).get("value", [])
+
+            for item in items[:5]:
+                url = item.get("url") or item.get("contentUrl", "")
+                title = item.get("name", "").replace("|", "")
+                if not url or not title:
+                    continue
+
+                try:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc.lower().replace("www.", "")
+                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
+                        if debug:
+                            st.warning(
+                                f"Non-video URL detected: {url} "
+                                f"for keyword '{keyword}'. Skipping."
+                            )
+                        continue
+                except Exception as e:
+                    if debug:
+                        st.warning(
+                            f"Invalid URL: {url} "
+                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
+                        )
+                    continue
+
+                # Bing may provide datePublished
+                date_str = item.get("datePublished", "")
+                published_date = self.parse_date(date_str, debug=debug) if date_str else None
+                if published_date and published_date <= cutoff_date:
+                    continue
+
+                language = detect(title) if title else "unknown"
+                is_youtube = domain in ["youtube.com", "youtu.be"]
+
+                results.append({
+                    "keyword": keyword,
+                    "url": url,
+                    "video_id": self.extract_youtube_id(url) if is_youtube else "N/A",
+                    "title": title,
+                    "view_count": "",
+                    "language": language,
+                    "published_at": "",
+                    "channel_id": "N/A",
+                    "channel_title": "N/A",
+                    "subscriber_count": "",
+                    "comment_count": "",
+                    "relevance_score": 0,
+                    "type": "video"
+                })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"Bing Search error: {str(e)}"))
+            return []
+
+    def search_texts_bing(self, query, keyword, useragents, debug=False):
+        """Search for recent text articles using Bing Web Search API"""
+        import requests
+
+        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_bing_api_key", "")
+        if not api_key:
+            st.error(t("trendwatcher_error").format(error="Bing API key is required."))
+            return []
+
+        search_url = "https://api.bing.microsoft.com/v7.0/search"
+        params = {
+            "q": query,
+            "count": 5,
+            "freshness": "Week",
+            "responseFilter": "Webpages"
+        }
+        headers = {
+            "Ocp-Apim-Subscription-Key": api_key,
+            "User-Agent": random.choice(useragents)
+        }
+
+        try:
+            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            if response.status_code != 200:
+                if debug:
+                    st.error(f"Bing API error: {response.text}")
+                return []
+            data = response.json()
+
+            results = []
+            for item in data.get("webPages", {}).get("value", [])[:5]:
+                url = item.get("url", "")
+                title = item.get("name", "").replace("|", "")
+                if not url or not title:
+                    continue
+
+                language = detect(title) if title else "unknown"
+                if debug:
+                    st.write(f"Text article: [{title}]({url})")
+                results.append({
+                    "keyword": keyword,
+                    "url": url,
+                    "title": title,
+                    "view_count": "",
+                    "language": language,
+                    "published_at": "",
+                    "channel_id": "N/A",
+                    "channel_title": "N/A",
+                    "subscriber_count": "",
+                    "comment_count": "",
+                    "relevance_score": 0,
+                    "type": "web"
+                })
+
+            return results
+        except Exception as e:
+            if debug:
+                st.error(t("trendwatcher_error").format(error=f"Bing Search error: {str(e)}"))
+            return []
+
+
     def search_trends(self, main_keyword, synonyms, useragents, search_mode="or", search_engine="duckduckgo", debug=False):
         """Search for recent videos and web content"""
         # Get search engine methods
@@ -735,8 +1069,12 @@ class TrendwatcherPlugin(Plugin):
             if search_engine == "duckduckgo":
                 query += " site:youtube.com OR -inurl:(signup login)"
             elif search_engine == "google":
-                query += " site:youtube.com"  # Google gère site: mais pas -inurl
-            # Brave et yt-dlp n'ont pas besoin de restrictions spécifiques
+                query += " site:youtube.com"
+            elif search_engine == "searxng":
+                query += " site:youtube.com"  # SearxNG supports site: operator
+            elif search_engine == "bing":
+                query += " site:youtube.com"
+            # ytdlp and others don't need specific restrictions
             if debug:
                 st.write(t("trendwatcher_debug_query").format(query=query))
             queries = [(query, main_keyword)]
@@ -746,6 +1084,10 @@ class TrendwatcherPlugin(Plugin):
             if search_engine == "duckduckgo":
                 queries = [(f"{q} site:youtube.com OR -inurl:(signup login)", k) for q, k in queries]
             elif search_engine == "google":
+                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+            elif search_engine == "searxng":
+                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+            elif search_engine == "bing":
                 queries = [(f"{q} site:youtube.com", k) for q, k in queries]
             if debug:
                 st.write(t("trendwatcher_debug_query").format(query=", ".join(q for q, _ in queries)))
