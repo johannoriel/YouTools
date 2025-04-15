@@ -11,7 +11,8 @@ from moviepy import *
 from pydub import AudioSegment
 import random
 import numpy as np
-
+import spacy
+from pyannote.audio import Pipeline
 
 def image_to_base64(image_path):
     """Convertit une image en URL de données Base64."""
@@ -828,3 +829,107 @@ def normalize_audio(video_path, reference_audio_path, make_backup=True):
     except Exception as e:
         st.error(
             f"Audio normalization failed for {os.path.basename(video_path)}: {str(e)}")
+
+
+def replace_audio(main_clip, start_sec, end_sec, audio_path, target_size):
+    """Remplace l'audio d'une section par un nouvel audio, ajustant la vitesse de la vidéo si nécessaire.
+
+    Args:
+        main_clip: Clip vidéo principal
+        start_sec: Début de la section (secondes)
+        end_sec: Fin de la section (secondes)
+        audio_path: Chemin du fichier audio (.mp3, .ogg, .wav)
+        target_size: Taille cible (width, height)
+
+    Returns:
+        Tuple: (nouveau clip, changement de durée)
+    """
+    original_duration = end_sec - start_sec
+    audio_clip = AudioFileClip(audio_path)
+    new_audio_duration = audio_clip.duration
+
+    # Calculer le facteur de vitesse pour ajuster la vidéo à la durée de l'audio
+    speed_factor = original_duration / new_audio_duration if new_audio_duration != 0 else 1.0
+
+    # Extraire la section à modifier
+    section_clip = main_clip.subclipped(start_sec, end_sec)
+
+    # Ajuster la vitesse de la vidéo
+    if speed_factor != 1.0:
+        section_clip = section_clip.fx(vfx.speedx, speed_factor)
+
+    # Appliquer le nouvel audio
+    section_clip = section_clip.with_audio(audio_clip)
+
+    # Construire le clip final
+    clips = [
+        main_clip.subclipped(0, start_sec),
+        section_clip,
+        main_clip.subclipped(end_sec)
+    ]
+    new_clip = concatenate_videoclips(clips)
+
+    # Calculer le changement de durée
+    duration_change = new_audio_duration - original_duration
+
+    return new_clip, duration_change
+
+
+def insert_audio(main_clip, start_sec, audio_path, target_size):
+    """Insère un audio en créant une vidéo statique à partir de l'image au timecode de départ.
+
+    Args:
+        main_clip: Clip vidéo principal (VideoFileClip)
+        start_sec: Point d'insertion (secondes)
+        audio_path: Chemin du fichier audio (.mp3, .ogg, .wav)
+        target_size: Taille cible (width, height)
+
+    Returns:
+        Tuple: (nouveau clip, durée de l'audio inséré)
+
+    Raises:
+        ValueError: Si main_clip est None, start_sec invalide, ou audio_path incorrect.
+    """
+
+    # Vérifier main_clip
+    if main_clip is None or not hasattr(main_clip, 'get_frame'):
+        raise ValueError("main_clip is None or invalid")
+
+    # Vérifier start_sec
+    if start_sec < 0 or start_sec > main_clip.duration:
+        raise ValueError(f"start_sec ({start_sec}) is out of bounds for clip duration ({main_clip.duration})")
+
+    audio_clip = None
+    static_clip = None
+    # Charger l'audio
+    audio_clip = AudioFileClip(audio_path)
+    audio_duration = audio_clip.duration
+
+    sample = audio_clip.get_frame(0)  # Essayer de lire le premier frame audio
+
+    # Capturer l'image au timecode de départ
+    frame = main_clip.get_frame(start_sec)
+    if frame is None:
+        raise ValueError(f"Failed to get frame at {start_sec} seconds")
+
+    # Créer un clip statique avec l'image
+    static_clip = ImageClip(frame, duration=audio_duration)
+    static_clip = static_clip.resized(target_size)
+    static_clip = static_clip.with_audio(audio_clip)
+
+    # Vérifier que static_clip a un audio valide
+    if static_clip.audio is None:
+        raise ValueError("Failed to attach audio to static_clip")
+
+    # Construire le clip final
+    new_clip = concatenate_videoclips([
+        main_clip.subclipped(0, start_sec),
+        static_clip,
+        main_clip.subclipped(start_sec)
+    ])
+
+    # Vérifier la validité de new_clip
+    if new_clip.audio is None:
+        raise ValueError("new_clip has no audio after concatenation")
+
+    return new_clip, audio_duration
