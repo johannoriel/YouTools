@@ -11,6 +11,8 @@ import os
 import requests
 from plugins.common import yt_categories
 from youtube_api import YoutubeAPI
+import glob
+import json
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -55,6 +57,9 @@ translations["en"].update({
     "directpublish_uploading_thumbnail": "Uploading thumbnail...",
     "directpublish_thumbnail_success": "Thumbnail successfully uploaded!",
     "directpublish_thumbnail_error": "Error uploading thumbnail: {error}",
+    "directpublish_run_editing": "Run editing operations",
+    "directpublish_edit_operations": "Edit Operations",
+    "directpublish_performing_editing": "Performing editing operations...",
 })
 
 translations["fr"].update({
@@ -99,6 +104,9 @@ translations["fr"].update({
     "directpublish_uploading_thumbnail": "Téléversement de la miniature...",
     "directpublish_thumbnail_success": "Miniature téléversée avec succès !",
     "directpublish_thumbnail_error": "Erreur lors du téléversement de la miniature : {error}",
+    "directpublish_run_editing": "Lancer les opérations d'édition",
+    "directpublish_edit_operations": "Opérations d'édition",
+    "directpublish_performing_editing": "Exécution des opérations d'édition...",
 })
 
 
@@ -172,6 +180,28 @@ class DirectpublishPlugin(Plugin):
 
         # Option pour retirer les silences
         remove_silences = st.checkbox(t("directpublish_remove_silences"))
+        run_editing = st.checkbox(t("directpublish_run_editing"))
+        operations = ""
+        if run_editing:
+            video_name = os.path.splitext(os.path.basename(selected_video_path))[0]
+            export_dir = work_directory
+            pattern = os.path.join(work_directory, f"{video_name} - *.json")
+            json_files = glob.glob(pattern)
+            if not json_files:
+                st.sidebar.warning(f"No export files found for {video_name}.")
+                return
+            export_file = max(json_files, key=os.path.getctime)
+            if os.path.exists(export_file):
+                with open(export_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    operations = data.get('operations', '')
+                    operations = "\n".join(operations)
+            operations = st.text_area(
+                t("directpublish_edit_operations"),
+                value=operations,
+                height=150,
+                key="edit_operations_area"
+            )
         replace_green_screen = st.checkbox(
             t("directpublish_replace_green_screen"))
 
@@ -252,6 +282,16 @@ class DirectpublishPlugin(Plugin):
                         st.info(
                             f"Reduction: {reduction} | Initial duration: {original_duration:.1f}s | Final duration: {final_duration:.1f}s")
                     video_to_process = result
+                    st.text(video_to_process)
+
+                if run_editing and 'edit_operations_area' in st.session_state:
+                    st.text(t("directpublish_performing_editing"))
+                    font = config.get('movied', {}).get('font', 'Arial')
+                    font_size = config.get('movied', {}).get('font_size', 100)
+                    movied_plugin = self.plugin_manager.get_plugin('movied')
+                    movied_plugin.execute_operations(
+                        video_to_process, st.session_state.edit_operations_area, font, font_size)
+                    video_to_process = os.path.splitext(video_to_process)[0] + "_edited.mp4"
                     st.text(video_to_process)
 
                 # 2. Remplacer le fond vert si demandé

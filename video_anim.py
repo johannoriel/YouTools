@@ -77,8 +77,8 @@ def replace_with_image(main_clip, start_sec, end_sec, image_path, target_size, a
     def apply_swinging(clip):
         def swinging_filter(t):
             progress = min(t / duration, 1.0)
-            if progress < 0.7:
-                osc_progress = progress / 0.7
+            if t < 1:
+                osc_progress = t
                 angle = math.degrees((math.pi / 4) * math.sin(osc_progress * math.pi * 3) * (1 - osc_progress))
             else:
                 angle = 0
