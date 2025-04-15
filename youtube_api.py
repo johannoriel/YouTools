@@ -968,7 +968,7 @@ class YoutubeAPI:
 
     def download_asset(self, video_data: Dict[str, Any]) -> BytesIO:
         """
-        Solution la plus robuste avec fichier temporaire
+        Télécharge une vidéo YouTube dans un buffer avec gestion robuste des formats
         """
         import yt_dlp
         from io import BytesIO
@@ -978,22 +978,31 @@ class YoutubeAPI:
         video_url = f"https://www.youtube.com/watch?v={video_data['original_data']['id']}"
 
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': 'temp_%(id)s.%(ext)s',
+            'format': 'bestvideo+bestaudio/best',  # Plus flexible : accepte n'importe quel format vidéo/audio
+            'merge_output_format': 'mp4',         # Force la fusion au format mp4 si possible
+            'outtmpl': os.path.join(tempfile.gettempdir(), 'temp_%(id)s.%(ext)s'),  # Utilise dossier temporaire système
+            'noplaylist': True,                   # Évite de télécharger des playlists
+            'quiet': True,                        # Réduit les logs verbeux
+            'retries': 3,                         # 3 tentatives en cas d'échec
         }
 
+        buffer = BytesIO()
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)
                 filename = ydl.prepare_filename(info)
 
-            # Lire le fichier dans un buffer
-            with open(filename, 'rb') as f:
-                buffer = BytesIO(f.read())
-            if os.path.exists(filename):
-                os.unlink(filename)
+                # Lire le fichier dans le buffer
+                with open(filename, 'rb') as f:
+                    buffer.write(f.read())
+
+                # Nettoyage
+                if os.path.exists(filename):
+                    os.unlink(filename)
+
         except Exception as e:
             raise Exception(f"Échec du téléchargement: {str(e)}")
+
         buffer.seek(0)
         return buffer
 
@@ -1034,6 +1043,7 @@ class YoutubeAPI:
             return output_buffer
 
         except Exception as e:
+            raise e
             raise Exception(f"Erreur lors du traitement vidéo: {str(e)}")
         finally:
             # Nettoyage des fichiers temporaires
@@ -1064,8 +1074,8 @@ class YoutubeAPI:
         minutes = (seconds % 3600) // 60
         seconds = seconds % 60
         if hours > 0:
-            return f"{hours}:{minutes:02d}:{seconds:02d}"
-        return f"{minutes}:{seconds:02d}"
+            return f"{hours}:{minutes:02d}:{int(seconds):02d}"
+        return f"{minutes}:{int(seconds):02d}"
 
     def _timecode_to_seconds(self, timecode: str) -> float:
         """Convertit un timecode HH:MM:SS.mmm en secondes"""
