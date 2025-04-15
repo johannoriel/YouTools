@@ -250,6 +250,11 @@ class MoviedPlugin(Plugin):
 
                     Ne réponds qu'une seule ligne par suggestion.
                 """
+            },
+            "preview_buffer_seconds": {
+                "type": "number",
+                "label": "Preview Buffer (seconds)",
+                "default": 3
             }
         }
 
@@ -519,7 +524,6 @@ class MoviedPlugin(Plugin):
                         st.rerun()
                     except Exception as e:
                         st.error(t("movied_error").format(error=str(e)))
-                        raise e
                         return None, None, None
 
         with col2:
@@ -1171,17 +1175,16 @@ class MoviedPlugin(Plugin):
         target_size = (main_clip.w, main_clip.h)
         subtitles_df, _ = load_subtitles_and_chapters(vtt_path)
         duration_offset = 0
-        operation_log = []  # Liste pour stocker les opérations avec nature séparée
+        operation_log = []
+        total_ops = len([op for op in operations.split("\n") if op.strip() and not op.strip().startswith("//")])
+        progress_bar = st.progress(0)
+        current_op = 0
 
-        text_background = st.session_state.get(
-            "text_background_select", t("movied_green_background"))
-        use_green_background = text_background == t(
-            "movied_green_background")
+        text_background = st.session_state.get("text_background_select", t("movied_green_background"))
+        use_green_background = text_background == t("movied_green_background")
         background_type = "green" if use_green_background else "video"
-        text_style = st.session_state.get(
-            "text_style_select", t("movied_text_style_outline"))
-        text_style = "outline" if text_style == t(
-            "movied_text_style_outline") else "box"
+        text_style = st.session_state.get("text_style_select", t("movied_text_style_outline"))
+        text_style = "outline" if text_style == t("movied_text_style_outline") else "box"
 
         with st.expander("Debug Information"):
             for op in operations.split("\n"):
@@ -1190,6 +1193,8 @@ class MoviedPlugin(Plugin):
                 op_cleaned = op.split("//")[0].strip()
                 if not op_cleaned:
                     continue
+                current_op += 1
+                progress_bar.progress(min(current_op / total_ops, 1.0))
                 parts = op_cleaned.split(maxsplit=5)
                 cmd = parts[0]
                 st.write(f"Processing: {op_cleaned}")
@@ -1322,6 +1327,8 @@ class MoviedPlugin(Plugin):
 
                 else:
                     raise ValueError(f"Unknown command: {cmd}")
+
+        progress_bar.empty()
         return main_clip, operation_log, subtitles_df
 
     def execute_operations(self, video_path, vtt_path, operations, font, font_size):
@@ -1339,6 +1346,7 @@ class MoviedPlugin(Plugin):
                                              "Nature", "Details", "Start", "End"])
                 st.session_state["operations_log"] = operations_df
                 st.session_state["generated_video_path"] = output_path
+                st.session_state.preview_mode = False
                 main_clip.close()
                 st.rerun()
                 self.alert()
@@ -1355,8 +1363,8 @@ class MoviedPlugin(Plugin):
                 operations_df = pd.DataFrame(operation_log, columns=[
                                              "Nature", "Details", "Start", "End"])
                 st.session_state["operations_log"] = operations_df
-                main_clip.preview()
-                main_clip.close()
+                st.session_state.preview_mode = True
+                st.session_state.previewclip = main_clip
                 st.rerun()
                 self.alert()
             except Exception as e:
@@ -1478,6 +1486,7 @@ class MoviedPlugin(Plugin):
         self.working_dir = config.get(self.name, {}).get("movied_workdir", t("movied_workdir_default"))
         self.media_dirs = config.get(self.name, {}).get("movied_media_dirs", t("movied_media_dirs_default")).split("\n")
         self.reference_audio_path = config.get(self.name, {}).get("movied_reference_audio", "/path/to/sample.mp3")
+        preview_buffer = config.get(self.name, {}).get("preview_buffer_seconds", 3)
 
         # Initialisation des états de filtre
         if "exclude_edited" not in st.session_state:
@@ -1559,21 +1568,38 @@ class MoviedPlugin(Plugin):
                 on_select="rerun",
                 key="operations_log_selector"
             )
-            start_time_seconds = None
+
             if selected_operation["selection"]["rows"]:
                 selected_row = selected_operation["selection"]["rows"][0]
-                selected_timecode = st.session_state["operations_log"].iloc[selected_row]["Start"]
-                h, m, s = map(float, selected_timecode.replace(",", ".").split(":"))
-                start_time_seconds = h * 3600 + m * 60 + s
+                start_time_seconds = time_to_milliseconds(st.session_state["operations_log"].iloc[selected_row]["Start"])/1000
+                end_time_seconds = None
+                if pd.notna(st.session_state["operations_log"].iloc[selected_row]["End"]):
+                    end_time_seconds = time_to_milliseconds(st.session_state["operations_log"].iloc[selected_row]["End"])/1000
 
-        if "generated_video_path" in st.session_state:
-            st.write("Generated Video:")
-            _, col, _ = st.columns(3)
-            col.video(
-                st.session_state["generated_video_path"],
-                start_time=start_time_seconds if start_time_seconds is not None else 0,
-                autoplay=True,
-            )
+                if st.session_state.preview_mode and video_path:
+                    main_clip = st.session_state.previewclip
+                    clip_duration = main_clip.duration
+                    start_preview = max(0, start_time_seconds - preview_buffer)
+                    if end_time_seconds is not None:
+                        end_preview = min(clip_duration, end_time_seconds + preview_buffer)
+                    else:
+                        end_preview = min(clip_duration, start_time_seconds + preview_buffer)
+                    try:
+                        preview_clip = main_clip.subclipped(start_preview, end_preview)
+                        preview_clip.preview()
+                        preview_clip.close()
+                    except Exception as e:
+                        st.error(f"Error generating preview clip: {str(e)}")
+                    finally:
+                        main_clip.close()
+                elif "generated_video_path" in st.session_state:
+                    st.write("Generated Video:")
+                    _, col, _ = st.columns(3)
+                    col.video(
+                        st.session_state["generated_video_path"],
+                        start_time=start_time_seconds,
+                        autoplay=True
+                    )
 
 
 if __name__ == "__main__":
