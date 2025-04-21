@@ -143,8 +143,7 @@ class PluginManager:
         for plugin_name in CORE_PLUGINS:
             plugin = self.get_plugin(plugin_name)
             if plugin:
-                sidebar_config = plugin.get_sidebar_config_ui(
-                    expander, config.get(plugin_name, {}))
+                sidebar_config = plugin.get_sidebar_config_ui(expander, config)
                 if sidebar_config:
                     sidebar_configs[plugin_name] = sidebar_config
         return sidebar_configs

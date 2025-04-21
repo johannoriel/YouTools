@@ -260,15 +260,16 @@ class LlmPlugin(Plugin):
     def get_sidebar_config_ui(self, expander, config: Dict[str, Any]) -> Dict[str, Any]:
         self.get_models()
         available_models = [m["name"] for m in st.session_state.models]
-        default_model = config.get(self.name, {}).get(
-            "current_llm_model", available_models[0] if available_models else None)
-
+        default_model = config[self.name].get("current_llm_model", "Unfound" if available_models else "Unfound")
+        st.write(default_model)
         selected_model = expander.selectbox(
             t("llm_select_model"),
             options=available_models,
             index=available_models.index(default_model) if default_model in available_models else 0,
             key="llm_api_model"
         )
+        config[self.name]["current_llm_model"] = selected_model
+        self.plugin_manager.save_config(config)
         return {"current_llm_model": selected_model}
 
     def models_tab(self, config):

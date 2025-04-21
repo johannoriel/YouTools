@@ -183,7 +183,8 @@ class DirectpublishPlugin(Plugin):
         run_editing = st.checkbox(t("directpublish_run_editing"))
         operations = ""
         if run_editing:
-            video_name = os.path.splitext(os.path.basename(selected_video_path))[0]
+            video_name = os.path.splitext(
+                os.path.basename(selected_video_path))[0]
             export_dir = work_directory
             pattern = os.path.join(work_directory, f"{video_name} - *.json")
             json_files = glob.glob(pattern)
@@ -208,13 +209,15 @@ class DirectpublishPlugin(Plugin):
         # Sélection du fond si le remplacement du fond vert est activé
         background_video = None
         if replace_green_screen:
-            default_background = config['chromakey'].get("default_background", "")  # Récupérer le fond par défaut
+            default_background = config['chromakey'].get(
+                "default_background", "")  # Récupérer le fond par défaut
             background_directory = config['chromakey']['background_directory']
             background_files = [f for f in os.listdir(
                 background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
             background_video = st.selectbox(
                 t("directpublish_select_background"), background_files,
-                index=background_files.index(default_background) if default_background in background_files else 0
+                index=background_files.index(
+                    default_background) if default_background in background_files else 0
             )
 
         do_llm = st.checkbox(t("directpublish_do_llm"), value=True)
@@ -225,16 +228,16 @@ class DirectpublishPlugin(Plugin):
         if use_custom_thumbnail:
             thumbnail_dir = work_directory
             thumbnail_files = [f for f in os.listdir(thumbnail_dir)
-                                if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                               if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
             if thumbnail_files:
                 selected_thumbnail = st.selectbox(
                     t("directpublish_select_thumbnail"),
                     thumbnail_files
                 )
-                thumbnail_path = os.path.join(thumbnail_dir, selected_thumbnail)
+                thumbnail_path = os.path.join(
+                    thumbnail_dir, selected_thumbnail)
             else:
                 st.warning("No thumbnail images found in directory")
-
 
         # Sélection de la catégorie
 
@@ -291,7 +294,8 @@ class DirectpublishPlugin(Plugin):
                     movied_plugin = self.plugin_manager.get_plugin('movied')
                     movied_plugin.execute_operations(
                         video_to_process, st.session_state.edit_operations_area, font, font_size)
-                    video_to_process = os.path.splitext(video_to_process)[0] + "_edited.mp4"
+                    video_to_process = os.path.splitext(video_to_process)[
+                        0] + "_edited.mp4"
                     st.text(video_to_process)
 
                 # 2. Remplacer le fond vert si demandé
@@ -368,7 +372,7 @@ class DirectpublishPlugin(Plugin):
                         video_id = upload_video(
                             video_to_process,
                             title,
-                            f"{introduction}\n\n{description}\n\n{addings}\n{signature}",
+                            f"{introduction}\n{description}\n{addings}\n{signature}",
                             selected_category,
                             tags.split(','),  # keywords (optionnel)
                             "unlisted"
@@ -377,7 +381,7 @@ class DirectpublishPlugin(Plugin):
                         video_id = upload_video(
                             video_to_process,
                             title,
-                            f"{description}\n\n{addings}\n{signature}",
+                            f"{description}\n{addings}\n{signature}",
                             selected_category,
                             [],
                             "unlisted"

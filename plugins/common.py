@@ -274,7 +274,6 @@ def upload_video(filename, title, description, category, keywords, privacy_statu
         if status:
             progress = int(status.progress() * 100)
             progress_bar.progress(progress)
-            st.write(f"Progression : {progress}%")
 
     st.success(t('upload_finished')+f" : {response['id']}")
     return response['id']

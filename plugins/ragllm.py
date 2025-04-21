@@ -200,7 +200,7 @@ class RagllmPlugin(Plugin):
     def get_sidebar_config_ui(self, expander, config: Dict[str, Any]) -> Dict[str, Any]:
         available_models = self.get_available_models(
             'ollama') + self.get_available_models('groq')
-        default_model = config.get(
+        default_model = config[self.name].get(
             'llm_model', available_models[0] if available_models else None)
         selected_model = expander.selectbox(
             t("rag_llm_model"),
