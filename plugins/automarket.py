@@ -119,7 +119,7 @@ class AutomarketPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
-        self.response_db_widget = ResponseDBDisplayWidget("response_db_display", "automarket")
+        self.response_db_widget = ResponseDBDisplayWidget("response_db_display", "automarket", plugin_manager)
         self._initialize_session_state()
 
     def _initialize_session_state(self):
@@ -965,7 +965,7 @@ class AutomarketPlugin(Plugin):
 
         with tab2:
             st.write("tab2")
-            self.response_db_widget.display_db_responses()
+            self.response_db_widget.display()
 
         with tab3:
             st.header(t("monitor_trends_header"))

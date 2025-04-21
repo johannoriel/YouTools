@@ -9,6 +9,7 @@ import re
 import pandas as pd
 from plugins.promoteyoutube import PromoteyoutubePlugin
 from widgets.yt_responses import ResponseDBDisplayWidget
+from widgets.yt_videos import VideoDatabaseWidget
 
 translations["en"].update({
     "marketyoutube_tab_videos": "Videos Database",
@@ -174,7 +175,8 @@ class MarketyoutubePlugin(Plugin):
         super().__init__(name, plugin_manager)
         initialize_database()
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
-        self.response_db_widget = ResponseDBDisplayWidget("response_db_display", "marketyoutube")
+        self.video_db_widget = VideoDatabaseWidget("video_db_display", "marketyoutube", plugin_manager)
+        self.response_db_widget = ResponseDBDisplayWidget("response_db_display", "marketyoutube", plugin_manager)
         self._initialize_session_state()
 
     def _initialize_session_state(self):
@@ -816,6 +818,8 @@ class MarketyoutubePlugin(Plugin):
 
         # Tab 1: Videos
         with tab1:
+            self.video_db_widget.display()
+            """
             st.header(t("marketyoutube_header_videos"))
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -874,6 +878,7 @@ class MarketyoutubePlugin(Plugin):
                                         page,
                                         keyword_filter=selected_keyword_filter if selected_keyword_filter else None
                                         )
+            """
 
         # Tab 2: Stats
         with tab2:
@@ -910,6 +915,15 @@ class MarketyoutubePlugin(Plugin):
             keyword = st.text_input(
                 t("marketyoutube_keyword"), key="keyword_stats")
             # Plus de pagination dans les stats
+            all_keywords = set()
+            for video in get_videos():
+                all_keywords.update(video['keywords'])
+            all_keywords = sorted(list(all_keywords))
+            selected_keyword_filter = st.multiselect(
+                t("marketyoutube_filter_keywords"),
+                options=all_keywords,
+                key=f"keyword_filter_videos"
+            )
             self.display_video_stats(
                 filter_options[filter_type],
                 keyword,
@@ -979,4 +993,4 @@ class MarketyoutubePlugin(Plugin):
                                         f"**Calculated Retention Rate:** {result['calculated_retention_rate']:.1f}%")
 
         with tab6:
-            self.response_db_widget.display_db_responses()
+            self.response_db_widget.display()

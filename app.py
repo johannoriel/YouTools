@@ -34,9 +34,15 @@ def t(key: str) -> str:
     return translations[st.session_state.lang].get(key, key)
 
 class Widget:
-    def __init__(self, name, prefix):
+    def __init__(self, name, prefix, plugin_manager):
         self.prefix = prefix
         self.name = name
+        self.plugin_manager = plugin_manager
+
+    def process_with_llm(self, prompt: str, sysprompt: str, context: str, repeat_on_failure: bool = True, number_repeat: int = 2) -> str:
+        llm = self.plugin_manager.get_plugin('llm')
+        response = llm.process_with_llm(prompt, sysprompt, context, repeat_on_failure, number_repeat)
+        return response
 
 class Plugin:
     def __init__(self, name, plugin_manager):

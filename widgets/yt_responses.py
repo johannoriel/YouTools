@@ -4,10 +4,10 @@ from youtube_db import get_posted_responses
 from datetime import datetime
 
 class ResponseDBDisplayWidget(Widget):
-    def __init__(self, name: str, prefix: str):
-        super().__init__(name, prefix)
+    def __init__(self, name, prefix, plugin_manager):
+        super().__init__(name, prefix, plugin_manager)
 
-    def display_db_responses(self):
+    def display(self):
         """
         Displays existing responses from the database in a dataframe.
         """
