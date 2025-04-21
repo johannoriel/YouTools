@@ -4,10 +4,11 @@ import streamlit as st
 from youtube_api import YoutubeAPI
 from youtube_db import *
 from typing import List, Dict, Any
-from plugins.promoteyoutube import PromoteyoutubePlugin
 import os
 import re
 import pandas as pd
+from plugins.promoteyoutube import PromoteyoutubePlugin
+from widgets.yt_responses import ResponseDBDisplayWidget
 
 translations["en"].update({
     "marketyoutube_tab_videos": "Videos Database",
@@ -173,6 +174,7 @@ class MarketyoutubePlugin(Plugin):
         super().__init__(name, plugin_manager)
         initialize_database()
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
+        self.response_db_widget = ResponseDBDisplayWidget("response_db_display", "marketyoutube")
         self._initialize_session_state()
 
     def _initialize_session_state(self):
@@ -803,8 +805,8 @@ class MarketyoutubePlugin(Plugin):
                 )
 
     def run(self, config):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([t("marketyoutube_tab_videos"), t(
-            "marketyoutube_tab_stats"), t("marketyoutube_tab_campaigns"), "Channel Manager", "Debug Stats API"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([t("marketyoutube_tab_videos"), t(
+            "marketyoutube_tab_stats"), t("marketyoutube_tab_campaigns"), "Channel Manager", "Debug Stats API", "Responses"])
 
         filter_options = {
             t("marketyoutube_filter_title"): "title",
@@ -975,3 +977,6 @@ class MarketyoutubePlugin(Plugin):
                                 if 'calculated_retention_rate' in result:
                                     st.write(
                                         f"**Calculated Retention Rate:** {result['calculated_retention_rate']:.1f}%")
+
+        with tab6:
+            self.response_db_widget.display_db_responses()

@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import pytz
 from langdetect import detect
+from widgets.yt_responses import ResponseDBDisplayWidget
 
 # Ajout des traductions spécifiques au plugin Automarket
 translations["en"].update({
@@ -118,6 +119,7 @@ class AutomarketPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
+        self.response_db_widget = ResponseDBDisplayWidget("response_db_display", "automarket")
         self._initialize_session_state()
 
     def _initialize_session_state(self):
@@ -822,7 +824,6 @@ class AutomarketPlugin(Plugin):
         if 'campaign_timestamp' not in st.session_state:
             st.session_state.campaign_timestamp = datetime.now(
                 pytz.UTC).isoformat()
-
         with tab1:
             st.header(t("automarket_header"))
 
@@ -831,6 +832,7 @@ class AutomarketPlugin(Plugin):
             if not videos:
                 st.warning(t("automarket_no_videos_with_keywords"))
                 return
+
             video_options = {
                 f"{v['title']} ({', '.join(v['keywords'])})": v for v in videos}
             selected_video_title = st.selectbox(
@@ -962,53 +964,8 @@ class AutomarketPlugin(Plugin):
                                        st.session_state.campaign_responses, st.session_state.campaign_timestamp)
 
         with tab2:
-            st.header("Réponses Existantes")
-            st.markdown(
-                f"[Lien vers mes commentaires](https://myactivity.google.com/page?hl=fr&utm_medium=web&utm_source=youtube&page=youtube_comments)")
-            responses = get_posted_responses()
-            if responses:
-                df_data = []
-                for r in responses:
-                    # Essayer de parser avec le décalage UTC, sinon avec Z
-                    try:
-                        posted_at = datetime.strptime(
-                            r['posted_at'], "%Y-%m-%dT%H:%M:%S.%f%z")
-                    except ValueError:
-                        posted_at = datetime.strptime(
-                            r['posted_at'], "%Y-%m-%dT%H:%M:%S.%fZ")
-                    df_data.append({
-                        "Mot-clé": r['keyword'],
-                        "Date": posted_at.strftime("%Y-%m-%d"),  # Sans l'heure
-                        "Chaîne": f"https://www.youtube.com/channel/{r['channel_id']}",
-                        "Vidéo": f"https://www.youtube.com/watch?v={r['video_id']}&lc={r['comment_id']}",
-                        "Réponse": r['response_text'],
-                        # Ajout du statut de modération
-                        "Statut": r['moderation_status']
-                    })
-                # Ajuster la largeur des colonnes
-                st.dataframe(
-                    df_data,
-                    column_config={
-                        "Chaîne": st.column_config.LinkColumn(
-                            label="Chaîne",
-                            width="small",
-                            display_text="Chaîne"
-                        ),
-                        "Vidéo": st.column_config.LinkColumn(
-                            label="Vidéo",
-                            width="small",
-                            display_text="Vidéo"
-                        ),
-                        "Date": st.column_config.TextColumn(width="medium"),
-                        "Mot-clé": st.column_config.TextColumn(width="medium"),
-                        "Réponse": st.column_config.TextColumn(width="large"),
-                        # Nouvelle colonne
-                        "Statut": st.column_config.TextColumn(width="medium")
-                    },
-                    use_container_width=True
-                )
-            else:
-                st.info("Aucune réponse postée trouvée dans la base.")
+            st.write("tab2")
+            self.response_db_widget.display_db_responses()
 
         with tab3:
             st.header(t("monitor_trends_header"))

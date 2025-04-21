@@ -33,6 +33,10 @@ def set_lang(language):
 def t(key: str) -> str:
     return translations[st.session_state.lang].get(key, key)
 
+class Widget:
+    def __init__(self, name, prefix):
+        self.prefix = prefix
+        self.name = name
 
 class Plugin:
     def __init__(self, name, plugin_manager):
