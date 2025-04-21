@@ -2,7 +2,6 @@ from global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import os
-from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
 # Utilisation de l'API Twitter depuis social_api.py
 from social_api import TwitterAPI
@@ -108,7 +107,6 @@ class PromotetwitterPlugin(Plugin):
             return []
 
     def generate_responses(self, config, selected_tweets, transcript, url):
-        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         responses = []
 
         for tweet_id in selected_tweets:
@@ -117,7 +115,7 @@ class PromotetwitterPlugin(Plugin):
                 url=url,
                 transcript=transcript
             )
-            llm_response = ragllm_plugin.process_with_llm(
+            llm_response = self.process_with_llm(
                 prompt,
                 config.get('llm', {}).get('llm_sys_prompt', ''),
                 tweet_text
@@ -288,10 +286,9 @@ class PromotetwitterPlugin(Plugin):
                                     url=url,
                                     transcript=transcript
                                 )
-                                llm_response = RagllmPlugin("ragllm", self.plugin_manager).process_with_llm(
+                                llm_response = self.process_with_llm(
                                     prompt,
-                                    config.get('llm', {}).get(
-                                        'llm_sys_prompt', ''),
+                                    config.get('llm', {}).get('llm_sys_prompt', ''),
                                     tweet_text
                                 )
                                 clean_response = remove_quotes(

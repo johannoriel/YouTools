@@ -247,8 +247,8 @@ class TranscriptPlugin(Plugin):
 
         return selected_prompt, prompt_content
 
-    def apply_prompt(self, transcript, prompt, llm_plugin, llm_config):
-        response = llm_plugin.process_with_llm(
+    def apply_prompt(self, transcript, prompt, llm_config):
+        response = self.process_with_llm(
             prompt,
             llm_config.get('llm_sys_prompt', ''),
             transcript
@@ -306,14 +306,13 @@ class TranscriptPlugin(Plugin):
 
             # Application du prompt
             if st.button(t("apply_prompt")):
-                ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
                 llm_config = config.get('llm', {})
 
                 final_prompt = prompt_content
                 if selected_prompt != 'Custom':
                     final_prompt = st.session_state.prompts[selected_prompt] + "\n" + prompt_content
 
-                result = self.apply_prompt(st.session_state.transcript, final_prompt, ragllm_plugin, llm_config)
+                result = self.apply_prompt(st.session_state.transcript, final_prompt, llm_config)
                 st.session_state.prompt_result = result
 
             # Affichage du résultat

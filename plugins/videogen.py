@@ -4,7 +4,6 @@ import streamlit as st
 from diffsynth import ModelManager, WanVideoPipeline, save_video, VideoData
 from modelscope import snapshot_download
 from PIL import Image
-from plugins.ragllm import RagllmPlugin
 from app import Plugin
 from global_vars import t, translations
 
@@ -176,10 +175,9 @@ class VideogenPlugin(Plugin):
             self.pipe.enable_vram_management(num_persistent_param_in_dit=None)
 
     def _generate_prompts(self, config, pre_prompt_input):
-        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         pre_prompt = config['videogen']['pre_prompt'].format(
             input=pre_prompt_input)
-        response = ragllm_plugin.process_with_llm(
+        response = self.process_with_llm(
             pre_prompt,
             config.get('llm', {}).get('llm_sys_prompt', ''),
             pre_prompt_input

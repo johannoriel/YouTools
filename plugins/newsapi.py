@@ -3,7 +3,6 @@ from app import Plugin
 import streamlit as st
 from plugins.common import remove_quotes
 # Optionnel pour enrichir les résultats avec un LLM
-from plugins.ragllm import RagllmPlugin
 import os
 import requests
 from datetime import datetime, timedelta
@@ -65,7 +64,6 @@ translations["fr"].update({
 class NewsapiPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
-        self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
         if "newsapi_french_sources" not in st.session_state:
             st.session_state["newsapi_french_sources"] = self._fetch_french_sources(
             )
@@ -178,31 +176,30 @@ class NewsapiPlugin(Plugin):
                         st.write("---")
 
                     # Résumé LLM si activé dès le départ
-                    if summarize_with_llm and self.ragllm_plugin:
+                    if summarize_with_llm :
                         llm_prompt = "Summarize the key trends from these news articles."
-                        llm_sys_prompt = config['ragllm']['llm_sys_prompt']
+                        llm_sys_prompt = config['llm']['llm_sys_prompt']
                         article_texts = "\n".join(
                             [a["description"] or "" for a in articles])
-                        llm_response = self.ragllm_plugin.process_with_llm(
+                        llm_response = self.process_with_llm(
                             llm_PROMPT,
                             llm_sys_prompt,
                             article_texts
                         )
                         st.write("**LLM Trend Summary:**")
                         st.write(llm_response)
-                    elif self.ragllm_plugin:
-                        if st.button(t("newsapi_summarize_button")):
-                            llm_prompt = "Summarize the key trends from these news articles."
-                            llm_sys_prompt = config['ragllm']['llm_sys_prompt']
-                            article_texts = "\n".join(
-                                [a["description"] or "" for a in articles])
-                            llm_response = self.ragllm_plugin.process_with_llm(
-                                llm_prompt,
-                                llm_sys_prompt,
-                                article_texts
-                            )
-                            st.write("**LLM Trend Summary:**")
-                            st.write(llm_response)
+                    elif st.button(t("newsapi_summarize_button")):
+                        llm_prompt = "Summarize the key trends from these news articles."
+                        llm_sys_prompt = config['llm']['llm_sys_prompt']
+                        article_texts = "\n".join(
+                            [a["description"] or "" for a in articles])
+                        llm_response = self.process_with_llm(
+                            llm_prompt,
+                            llm_sys_prompt,
+                            article_texts
+                        )
+                        st.write("**LLM Trend Summary:**")
+                        st.write(llm_response)
 
                 else:
                     st.warning(t("newsapi_no_results"))
@@ -285,8 +282,7 @@ class NewsapiPlugin(Plugin):
                     "Note: Selecting a specific source overrides the country filter in NewsAPI.")
 
         # Option pour résumer avec LLM
-        summarize_with_llm = st.checkbox(
-            t("newsapi_summarize_label"), value=False) if self.ragllm_plugin else False
+        summarize_with_llm = st.checkbox(t("newsapi_summarize_label"), value=False)
 
         # Bouton pour lancer la recherche
         if st.button(t("newsapi_search_button")):

@@ -4,7 +4,6 @@ import streamlit as st
 from plugins.common import upload_video, remove_quotes, list_all_video_files
 from plugins.trimsilences import TrimsilencesPlugin
 from plugins.transcript import TranscriptPlugin
-from plugins.ragllm import RagllmPlugin
 from plugins.chromakey import ChromakeyPlugin
 from chromakey_background import replace_background
 import os
@@ -131,7 +130,6 @@ class DirectpublishPlugin(Plugin):
         self.trimsilences_plugin = self.plugin_manager.get_plugin(
             'trimsilences')
         self.transcript_plugin = self.plugin_manager.get_plugin('transcript')
-        self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
         self.chromakey_plugin = self.plugin_manager.get_plugin('chromakey')
 
     def get_config_fields(self):
@@ -334,9 +332,9 @@ class DirectpublishPlugin(Plugin):
 
                     # 4. Générer un résumé du transcript
                     st.text(t("directpublish_generating_description"))
-                    description = self.ragllm_plugin.process_with_llm(
+                    description = self.process_with_llm(
                         user_prompt,
-                        config['ragllm']['llm_sys_prompt'],
+                        config['llm']['llm_sys_prompt'],
                         transcript
                     )
                     st.code(description)
@@ -345,17 +343,17 @@ class DirectpublishPlugin(Plugin):
                     st.text(t("directpublish_generating_title"))
                     title_prompt = t("directpublish_title_generator")
                     if not title:
-                        title = remove_quotes(self.ragllm_plugin.process_with_llm(
+                        title = remove_quotes(self.process_with_llm(
                             title_prompt,
-                            config['ragllm']['llm_sys_prompt'],
+                            config['llm']['llm_sys_prompt'],
                             transcript
                         )).split('\n')[0].strip()
                     st.code(title)
 
                     tag_prompt = t("directpublish_tag_generator")
-                    tags += ", "+self.ragllm_plugin.process_with_llm(
+                    tags += ", "+self.process_with_llm(
                         tag_prompt,
-                        config['ragllm']['llm_sys_prompt'],
+                        config['llm']['llm_sys_prompt'],
                         transcript
                     )
                 else:

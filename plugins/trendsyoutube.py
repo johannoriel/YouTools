@@ -271,8 +271,7 @@ class TrendsyoutubePlugin(Plugin):
 
         context = ""  # You can add relevant context if needed
 
-        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
-        llm_response = ragllm_plugin.process_with_llm(
+        llm_response = self.process_with_llm(
             prompt,
             config.get('llm', {}).get('llm_sys_prompt', ''),
             context

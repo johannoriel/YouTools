@@ -3,7 +3,6 @@ from app import Plugin
 import streamlit as st
 from youtube_api import YoutubeAPI
 from youtube_db import *
-from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any
 from plugins.promoteyoutube import PromoteyoutubePlugin
 import os
@@ -174,7 +173,6 @@ class MarketyoutubePlugin(Plugin):
         super().__init__(name, plugin_manager)
         initialize_database()
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
-        self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
         self._initialize_session_state()
 
     def _initialize_session_state(self):
@@ -228,7 +226,6 @@ class MarketyoutubePlugin(Plugin):
 
     def suggest_keywords(self, title: str, description: str, transcript: str) -> List[str]:
         """Suggère des mots-clés via LLM."""
-        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         prompt = """
         Suggest 5-10 relevant keywords for a YouTube video based on the following:
         Title: {title}
@@ -237,9 +234,8 @@ class MarketyoutubePlugin(Plugin):
         Return the keywords as a comma-separated list.
         """
         context = f"Title: {title}\nDescription: {description}\nTranscript: {transcript}"
-        llm_response = ragllm_plugin.process_with_llm(
-            prompt.format(title=title, description=description,
-                          transcript=transcript),
+        llm_response = self.process_with_llm(
+            prompt.format(title=title, description=description,transcript=transcript),
             "",
             context
         )
@@ -398,9 +394,9 @@ class MarketyoutubePlugin(Plugin):
 
             comment_context = f"Comment by {comment['author']} on {comment['video_title']} from {comment['channel_title']}:\n{comment['text']}"
             try:
-                llm_response = self.ragllm_plugin.process_with_llm(
+                llm_response = self.process_with_llm(
                     prompt,
-                    config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                    config.get('llm', {}).get('llm_sys_prompt', ''),
                     comment_context
                 )
                 clean_response = llm_response.strip()

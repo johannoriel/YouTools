@@ -43,6 +43,8 @@ translations["en"].update({
     "llm_llm_calling_error": "Error calling LLM: ",
     "llm_no_v1_label": "No /v1 in endpoint",
     "llm_timeout_label": "Timeout (seconds)",
+    "llm_sys_prompt": "System prompt for LLM",
+    "llm_default_sys_prompt": "You are an faithful AI assistant that execute instructions faithfully without adding comments or explanations.",
 })
 
 translations["fr"].update({
@@ -78,6 +80,8 @@ translations["fr"].update({
     "llm_llm_calling_error": "Erreur lors de l'appel au LLM : ",
     "llm_no_v1_label": "Pas de /v1 dans l'endpoint",
     "llm_timeout_label": "Timeout (secondes)",
+    "llm_sys_prompt": "Prompt système pour le LLM",
+    "llm_default_sys_prompt": "Tu es un assistant IA qui exécute fidèlement les tâches demandées sans rajouter de commentaires ou explications.",
 })
 
 
@@ -123,7 +127,12 @@ class LlmPlugin(Plugin):
                 "label": t("llm_select_model"),
                 "options": model_list,
                 "default": "ollama-qwen2.5:7b-instruct-q4_K_S"
-            }
+            },
+            "llm_sys_prompt": {
+                "type": "textarea",
+                "label": t("llm_sys_prompt"),
+                "default": t("llm_default_sys_prompt")
+            },
         }
 
     def get_tabs(self):
@@ -261,7 +270,6 @@ class LlmPlugin(Plugin):
         self.get_models()
         available_models = [m["name"] for m in st.session_state.models]
         default_model = config[self.name].get("current_llm_model", "Unfound" if available_models else "Unfound")
-        st.write(default_model)
         selected_model = expander.selectbox(
             t("llm_select_model"),
             options=available_models,
@@ -363,13 +371,15 @@ class LlmPlugin(Plugin):
             self.plugin_manager.save_config(config)
             st.success("Models saved successfully!")
 
-    def call_llm(self, url, api_key, model, prompt, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False, timeout=3):
+    def call_llm(self, url, api_key, model, prompt, sysprompt=None, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False, timeout=3):
         """Appelle l'API LLM avec gestion des retries et du délai."""
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         headers["Content-Type"] = "application/json"
+        if sysprompt is None:
+            sysprompt = sel.plugin_manager.config['llm']['llm_sys_prompt']
         payload = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "system", "content": sysprompt}, {"role": "user", "content": prompt}, ],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
@@ -471,6 +481,7 @@ class LlmPlugin(Plugin):
                     api_key=api_key,
                     model=model["model"],
                     prompt=f"{context}\n\n{prompt}",
+                    sysprompt=sysprompt,
                     temperature=model["temperature"],
                     max_tokens=model["max_tokens"],
                     delay=int(model["delay"]),
@@ -554,6 +565,20 @@ class LlmPlugin(Plugin):
                                 else:
                                     st.markdown(result["response"])
 
+    def free_ollama(self):
+        try:
+            ollama_model = "qwen2:1.5b" #smallest
+            st.info("Freeing ollama memory "+ollama_model)
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": ollama_model,
+                    "prompt": "bye",
+                    "keep_alive": 0
+                }
+            )
+        except Exception as e:
+            raise e
 
 if __name__ == "__main__":
     st.write("LLM Plugin standalone test")

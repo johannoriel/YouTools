@@ -350,6 +350,7 @@ class AutotranslatorPlugin(Plugin):
 
     def run(self, config):
         st.header(t("autotranslator_header"))
+        st.warning("Depend on ragllm old plugin")
 
         if 'video_to_translate' not in st.session_state:
             st.session_state['video_to_translate'] = ''

@@ -218,7 +218,6 @@ class RecentvideosPlugin(Plugin):
                             f"https://www.youtube.com/watch?v={st.session_state.current_video_id}")
                     st.success(t("recent_videos_save_success"))
             with col4:
-                llm_plugin = self.plugin_manager.get_plugin('llm')
                 llm_config = config.get('ragllm', {})
                 prompt = llm_config.get('llm_prompt', '')
                 with st.expander("Prompt"):
@@ -226,9 +225,9 @@ class RecentvideosPlugin(Plugin):
                     prompt = st.text_input("Nouveau prompt", prompt)
                 if st.button(t("recent_videos_process_llm_button")):
                     video_content = f"# {st.session_state.title} \n {st.session_state.transcript}"
-                    llm_response = llm_plugin.process_with_llm(
+                    llm_response = self.process_with_llm(
                         prompt,
-                        llm_config.get('llm_sys_prompt', ''),
+                        config['llm'].get('llm_sys_prompt', ''),
                         video_content
                     )
                     st.session_state.llm_response = llm_response

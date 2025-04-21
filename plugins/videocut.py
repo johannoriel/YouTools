@@ -9,7 +9,6 @@ from video_utils import (
 )
 import pandas as pd
 import os
-from plugins.ragllm import RagllmPlugin
 from plugins.trimsilences import TrimsilencesPlugin
 from plugins.chromakey import ChromakeyPlugin
 from chromakey_background import replace_background
@@ -118,7 +117,6 @@ class VideocutPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.working_dir = None
-        self.ragllm = RagllmPlugin("ragllm", plugin_manager)
         self.trimsilences_plugin = self.plugin_manager.get_plugin(
             'trimsilences')
         self.chromakey_plugin = self.plugin_manager.get_plugin('chromakey')
@@ -335,7 +333,7 @@ class VideocutPlugin(Plugin):
                                         prompt = config.get(self.name, {}).get("auto_chapter_prompt", self.get_config_fields()[
                                             "auto_chapter_prompt"]["default"]) + subtitles_text
                                         sysprompt = "You are an AI assistant tasked with analyzing video subtitles and generating meaningful chapters with timecodes, titles, and summaries."
-                                        response = self.ragllm.process_with_llm(
+                                        response = self.process_with_llm(
                                             prompt, sysprompt, subtitles_text)
                                         new_chapters = []
                                         for line in response.split("\n"):

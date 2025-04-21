@@ -2,7 +2,6 @@ from global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import os
-from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
 # Utilisation de l'API YouTube depuis social_api.py
 from youtube_api import YoutubeAPI
@@ -228,7 +227,6 @@ class PromoteyoutubePlugin(Plugin):
 
     def generate_responses(self, config, selected_comments, transcript, url, prefix="promo_", keyword=""):
         """Génère les réponses pour les commentaires sélectionnés."""
-        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         responses = []
         total_comments = len(selected_comments)
         progress_bar = st.progress(0)
@@ -250,7 +248,7 @@ class PromoteyoutubePlugin(Plugin):
             prompt = config['promoteyoutube']['response_prompt'].format(
                 url=url, transcript=transcript)
             try:
-                llm_response = ragllm_plugin.process_with_llm(
+                llm_response = self.process_with_llm(
                     prompt,
                     config.get('llm', {}).get('llm_sys_prompt', ''),
                     comment_with_context
@@ -289,8 +287,6 @@ class PromoteyoutubePlugin(Plugin):
         progress_text = st.empty()
         total_errors = len(error_indices)
 
-        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
-
         for idx, i in enumerate(error_indices):
             # Mise à jour de la progression
             progress = (idx + 1) / total_errors
@@ -312,7 +308,7 @@ class PromoteyoutubePlugin(Plugin):
             )
 
             try:
-                llm_response = ragllm_plugin.process_with_llm(
+                llm_response = self.process_with_llm(
                     prompt,
                     config.get('llm', {}).get('llm_sys_prompt', ''),
                     comment_with_context

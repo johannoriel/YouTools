@@ -5,7 +5,6 @@ import os, re
 import subprocess
 from plugins.common import list_video_files
 from plugins.transcript import TranscriptPlugin
-from plugins.ragllm import RagllmPlugin
 
 
 # Ajout des traductions spécifiques à ce plugin
@@ -445,7 +444,6 @@ class ShortextractorPlugin(Plugin):
 
             if st.button(t("shortextractor_suggest_timecode")):
                 with st.spinner(t("shortextractor_suggesting")):
-                    ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
 
                     suggest_theme = ""
                     if suggestion != "":
@@ -454,7 +452,7 @@ class ShortextractorPlugin(Plugin):
 
                     prompt = t("shortextractor_suggest_timecode_prompt") + suggest_theme
                     print(prompt)
-                    llm_response = ragllm_plugin.process_with_llm(prompt, config['ragllm']['llm_sys_prompt'], st.session_state.transcript)
+                    llm_response = self.process_with_llm(prompt, config['llm']['llm_sys_prompt'], st.session_state.transcript)
 
                     st.text(t("shortextractor_llm_response"))
                     st.text(llm_response)

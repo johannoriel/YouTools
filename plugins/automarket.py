@@ -3,7 +3,6 @@ from app import Plugin
 import streamlit as st
 from youtube_api import YoutubeAPI
 from youtube_db import *
-from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import pytz
@@ -119,7 +118,6 @@ class AutomarketPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
-        self.ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         self._initialize_session_state()
 
     def _initialize_session_state(self):
@@ -362,9 +360,9 @@ class AutomarketPlugin(Plugin):
 
             comment_context = f"Comment by {comment['author']} on {comment['video_title']} from {comment['channel_title']}:\n{comment['text']}"
             try:
-                llm_response = self.ragllm_plugin.process_with_llm(
+                llm_response = self.process_with_llm(
                     prompt,
-                    config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                    config.get('llm', {}).get('llm_sys_prompt', ''),
                     comment_context
                 )
                 clean_response = llm_response.strip().strip(".")

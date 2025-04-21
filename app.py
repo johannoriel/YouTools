@@ -11,7 +11,7 @@ torch.classes.__path__ = []
 
 # Constants
 CONFIG_FILE = "config.json"
-CORE_PLUGINS = {'common', 'ragllm', 'llm'}  # Add your essential plugins here
+CORE_PLUGINS = {'common', 'llm'}  # Add your essential plugins here
 
 
 def load_config() -> Dict[str, Any]:

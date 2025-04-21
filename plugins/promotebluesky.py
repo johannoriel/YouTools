@@ -2,7 +2,6 @@ from global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import os
-from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
 # Utilisation de l'API Bluesky depuis social_api.py
 from social_api import BlueskyAPI
@@ -105,7 +104,6 @@ class PromoteblueskyPlugin(Plugin):
             return []
 
     def generate_responses(self, config, selected_posts, transcript, url):
-        ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
         responses = []
 
         for post_id in selected_posts:
@@ -114,7 +112,7 @@ class PromoteblueskyPlugin(Plugin):
                 url=url,
                 transcript=transcript
             )
-            llm_response = ragllm_plugin.process_with_llm(
+            llm_response = self.process_with_llm(
                 prompt,
                 config.get('llm', {}).get('llm_sys_prompt', ''),
                 post_text
