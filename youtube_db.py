@@ -364,24 +364,27 @@ def get_stats_snapshots_timestamps() -> List[str]:
 
 
 def sync_videos(channel_id: str, youtube_api: YoutubeAPI):
-    """Sync all videos from the channel into the database."""
+    """Sync all videos from the channel into the database without overwriting keywords or transcripts."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     videos = youtube_api.get_channel_videos(channel_id)
     for video in videos:
         cursor.execute("""
-            INSERT OR REPLACE INTO videos (video_id, url, title, thumbnail_url, transcript, description, published_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO videos (video_id, url, title, thumbnail_url, description, published_at, status, keywords, transcript)
+            VALUES (?, ?, ?, ?, ?, ?, ?,
+                COALESCE((SELECT keywords FROM videos WHERE video_id = ?), '[]'),
+                COALESCE((SELECT transcript FROM videos WHERE video_id = ?), ''))
         """, (
             video['video_id'],
             video['url'],
             video['title'],
             video['thumbnail'],
-            "",  # Transcript placeholder
             video['description'],
             video['published_at'],
-            video['status']  # Ajout du statut
+            video['status'],
+            video['video_id'],  # Pour COALESCE keywords
+            video['video_id']   # Pour COALESCE transcript
         ))
 
     conn.commit()
@@ -686,6 +689,15 @@ def get_response_moderation_status(video_id: str, comment_id: str) -> str:
     result = cursor.fetchone()
     conn.close()
     return result['moderation_status'] if result else 'unknown'
+
+
+def delete_video(video_id: str):
+    """Supprime une vidéo de la base de données."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+    conn.commit()
+    conn.close()
 
 
 if __name__ == "__main__":
