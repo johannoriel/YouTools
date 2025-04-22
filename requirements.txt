@@ -41,3 +41,5 @@ stem
 streamlit-image-select
 duckduckgo_search
 streamlit-aggrid
+sentence_transformers
+fuzzywuzzy

@@ -263,7 +263,10 @@ class TrendwatcherPlugin(Plugin):
 
     def get_tabs(self):
         """Define plugin tabs"""
-        return [{"name": t("trendwatcher_tab"), "plugin": "trendwatcher"}]
+        return [
+            {"name": t("trendwatcher_tab"), "plugin": "trendwatcher"},
+            {"name": "Keyword cluster", "plugin": "trendwatcher"},
+        ]
 
     def parse_date(self, date_str, debug=False):
         """Try parsing date in multiple formats"""
@@ -1383,8 +1386,7 @@ class TrendwatcherPlugin(Plugin):
 
         return working_dir
 
-    def run(self, config):
-        """Main plugin logic"""
+    def trend_watcher(self, config):
         st.header(t("trendwatcher_header"))
 
         keywords_config = config.get(self.name, {}).get("trendwatcher_keywords", t("trendwatcher_keywords_default"))
@@ -1649,6 +1651,19 @@ class TrendwatcherPlugin(Plugin):
                     st.warning("Please select at least one video or article to export.")
         else:
             st.info(t("trendwatcher_no_results"))
+
+    def keyword_cluster(self, config):
+        from widgets.keyword_cluster import KeywordClusteringWidget
+        KeywordClusteringWidget("kwc", "kwc", plugin_manager=self.plugin_manager).display()
+
+
+    def run(self, config):
+        """Main plugin logic"""
+        tab1, tab2 = st.tabs(["Surveiller", "Keyword cluster"])
+        with tab1:
+            self.trend_watcher(config)
+        with tab2:
+            self.keyword_cluster(config)
 
 if __name__ == "__main__":
     st.write("Trendwatcher Plugin standalone test")
