@@ -9,6 +9,7 @@ import os
 from sentence_transformers import SentenceTransformer
 import pickle
 from fuzzywuzzy import fuzz
+import pandas as pd
 
 # Traductions
 translations["en"].update({
@@ -35,6 +36,9 @@ translations["en"].update({
     "thematized_keywords": "Thematized Keywords",
     "remaining_count": "Remaining keywords count",
     "remaining_weight": "Remaining keywords total weight",
+    "suggest_category": "Suggest Category for Keyword",
+    "suggested_categories": "Suggested Categories",
+    "confirm_categories": "Confirm Category Selection",
 })
 
 translations["fr"].update({
@@ -61,6 +65,9 @@ translations["fr"].update({
     "thematized_keywords": "Mots-clés thématisés",
     "remaining_count": "Nombre de mots-clés restants",
     "remaining_weight": "Poids total des mots-clés restants",
+    "suggest_category": "Suggérer une catégorie pour un mot-clé",
+    "suggested_categories": "Catégories suggérées",
+    "confirm_categories": "Confirmer la sélection des catégories",
 })
 
 @st.cache_data
@@ -235,6 +242,22 @@ class KeywordClusteringWidget(Widget):
         suggestions = sorted(suggestions, key=lambda x: x[1], reverse=True)[:20]
         return [mot for mot, _ in suggestions]
 
+    def suggest_category_for_keyword(self, keyword, themes, seuil=0.8):
+        """Suggérer la catégorie la plus proche pour un mot-clé donné."""
+        if not themes:
+            return []
+        model = self.load_model()
+        emb_keyword = model.encode(keyword)
+        suggestions = []
+        for theme in themes:
+            emb_theme = model.encode(theme)
+            sim = cosine_similarity([emb_keyword], [emb_theme])[0][0]
+            if sim > seuil:
+                suggestions.append((theme, sim))
+        # Trier par similarité décroissante
+        suggestions = sorted(suggestions, key=lambda x: x[1], reverse=True)
+        return suggestions
+
     def display(self):
         """Afficher l'interface Streamlit."""
         st.title(t("title"))
@@ -360,5 +383,38 @@ class KeywordClusteringWidget(Widget):
                 )
                 if selected_keywords and st.button(t("add_keywords")):
                     self.themes[selected_theme].extend([k for k in selected_keywords if k not in self.themes[selected_theme]])
+                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
+                    st.rerun()
+
+        # Étape 3 : Suggérer une catégorie pour un mot-clé
+        st.subheader(t("suggest_category"))
+        if not remaining_keywords:
+            st.warning(t("no_keywords_left"))
+        else:
+            selected_keyword = st.selectbox(
+                t("remaining_keywords"),
+                options=list(remaining_keywords.keys()),
+                key=f"{self.prefix}_select_keyword"
+            )
+            if st.button(t("suggest_category")):
+                with st.spinner(t("results_title")):
+                    suggested_categories = self.suggest_category_for_keyword(selected_keyword, self.themes.keys(), seuil)
+                    if suggested_categories:
+                        df = pd.DataFrame(suggested_categories, columns=["Category", "Similarity"])
+                        st.session_state[f"{self.prefix}_suggested_categories"] = df
+                    else:
+                        st.warning("Aucune catégorie suggérée.")
+            if f"{self.prefix}_suggested_categories" in st.session_state and not st.session_state[f"{self.prefix}_suggested_categories"].empty:
+                selected_categories = st.multiselect(
+                    t("suggested_categories"),
+                    options=st.session_state[f"{self.prefix}_suggested_categories"]["Category"].tolist(),
+                    default=[],
+                    key=f"{self.prefix}_select_categories"
+                )
+                if selected_categories and st.button(t("confirm_categories")):
+                    for category in selected_categories:
+                        if category in self.themes:
+                            if selected_keyword not in self.themes[category]:
+                                self.themes[category].append(selected_keyword)
                     st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
                     st.rerun()
