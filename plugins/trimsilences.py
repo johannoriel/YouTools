@@ -1,4 +1,4 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 import os
 import numpy as np
 from typing import List, Tuple

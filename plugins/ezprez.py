@@ -17,7 +17,7 @@
 # - Uses wkhtmltoimage for web screenshots and config.ini for directory paths.
 # - Designed for simplicity and speed, with minimal UI clutter in presentation mode.
 
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from linkify_it import LinkifyIt

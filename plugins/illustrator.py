@@ -1,15 +1,15 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from plugins.common import remove_quotes
 import os
 import shutil
-from media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
+from lib.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, VlipsyAPI, asset_memory_download, asset_download
 from io import BytesIO
-from youtube_api import YoutubeAPI
+from lib.youtube_api import YoutubeAPI
 import re
-from video_utils import normalize_audio
+from lib.video_utils import normalize_audio
 
 
 # Constantes pour les types de média

@@ -5,7 +5,7 @@ from diffsynth import ModelManager, WanVideoPipeline, save_video, VideoData
 from modelscope import snapshot_download
 from PIL import Image
 from app import Plugin
-from global_vars import t, translations
+from lib.global_vars import t, translations
 
 # Add translations for this plugin
 translations["en"].update({

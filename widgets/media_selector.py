@@ -3,7 +3,7 @@ import os
 from PIL import Image
 import cv2
 from streamlit_image_select import image_select
-from global_vars import translations, t
+from lib.global_vars import translations, t
 
 translations["en"].update({
     "media_selector_search_placeholder": "Search for media (e.g. 'ru')",

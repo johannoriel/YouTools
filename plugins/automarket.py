@@ -1,8 +1,8 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
-from youtube_api import YoutubeAPI
-from youtube_db import *
+from lib.youtube_api import YoutubeAPI
+from lib.youtube_db import *
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import pytz
@@ -119,7 +119,8 @@ class AutomarketPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
-        self.response_db_widget = ResponseDBDisplayWidget("response_db_display", "automarket", plugin_manager)
+        self.response_db_widget = ResponseDBDisplayWidget(
+            "response_db_display", "automarket", plugin_manager)
         self._initialize_session_state()
 
     def _initialize_session_state(self):

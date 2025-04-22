@@ -1,4 +1,4 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 from plugins.common import upload_video, get_credentials, list_all_video_files
 from plugins.ragllm import RagllmPlugin

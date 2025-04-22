@@ -1,13 +1,13 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import os
 from typing import List, Dict, Any, Optional
 # Utilisation de l'API YouTube depuis social_api.py
-from youtube_api import YoutubeAPI
+from lib.youtube_api import YoutubeAPI
 from datetime import datetime
 import pytz
-from youtube_db import *
+from lib.youtube_db import *
 from plugins.automarket import AutomarketPlugin
 
 # Ajout des traductions spécifiques à ce plugin
@@ -413,14 +413,18 @@ class PromoteyoutubePlugin(Plugin):
             if published_at and 'T' in published_at and 'Z' in published_at:
                 published_display = published_at.split('T')[0]
                 # Parse the string back to a datetime object for the days_ago calculation
-                published_at_dt = datetime.strptime(published_at, "%Y-%m-%dT%H:%M:%SZ")
+                published_at_dt = datetime.strptime(
+                    published_at, "%Y-%m-%dT%H:%M:%SZ")
             else:
-                published_display = str(published_at)[:10] if published_at else "--"
+                published_display = str(published_at)[
+                    :10] if published_at else "--"
                 # Fallback: assume a default date or handle as needed
-                published_at_dt = datetime.strptime("1970-01-01T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ") if not published_at else datetime.strptime(published_at[:10] + "T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+                published_at_dt = datetime.strptime("1970-01-01T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ") if not published_at else datetime.strptime(
+                    published_at[:10] + "T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
             # Now calculate days_ago with the datetime object
-            days_ago = (datetime.now(pytz.UTC) - published_at_dt.replace(tzinfo=pytz.UTC)).days
+            days_ago = (datetime.now(pytz.UTC) -
+                        published_at_dt.replace(tzinfo=pytz.UTC)).days
 
             st.markdown(f"[**{video['title']}**]({video['url']})")
             st.markdown(
@@ -466,10 +470,12 @@ class PromoteyoutubePlugin(Plugin):
 
         if selected_video_indices:
             if st.button(t("promoteyoutube_export_channels"), key=f"{prefix}export_channels"):
-                self.export_selected_channels(config, selected_video_indices, prefix)
+                self.export_selected_channels(
+                    config, selected_video_indices, prefix)
 
             if st.button(t("promoteyoutube_export_videos"), key=f"{prefix}export_videos"):
-                self.export_selected_videos(config, selected_video_indices, prefix)
+                self.export_selected_videos(
+                    config, selected_video_indices, prefix)
 
         max_comments_per_video = st.number_input(
             t("promoteyoutube_adjust_comments"),
@@ -526,7 +532,8 @@ class PromoteyoutubePlugin(Plugin):
                 checkbox_key = f"{prefix}select_comment_{i}_{id(comment)}"
                 is_selected = st.checkbox(
                     f"Select Comment {i+1}",
-                    value=st.session_state[f"{prefix}selected_comments"].get(i, False),
+                    value=st.session_state[f"{prefix}selected_comments"].get(
+                        i, False),
                     key=checkbox_key
                 )
                 st.session_state[f"{prefix}selected_comments"][i] = is_selected
@@ -561,7 +568,8 @@ class PromoteyoutubePlugin(Plugin):
                 i for i, sel in st.session_state[f"{prefix}selected_comments"].items() if sel]
             if selected_comment_indices:
                 if st.button(t("promoteyoutube_export_comments"), key=f"{prefix}export_comments"):
-                    self.export_selected_comments(config, selected_comment_indices, prefix)
+                    self.export_selected_comments(
+                        config, selected_comment_indices, prefix)
 
             # Affichage et publication des réponses
             if st.session_state.get(f"{prefix}generated_responses"):
@@ -578,7 +586,8 @@ class PromoteyoutubePlugin(Plugin):
                         """,
                         unsafe_allow_html=True
                     )
-                    st.write(t("promoteyoutube_response_to_comment").format(response['comment_index']+1))
+                    st.write(t("promoteyoutube_response_to_comment").format(
+                        response['comment_index']+1))
                     edited_response = st.text_area(
                         t("promoteyoutube_edit_response").format(i+1),
                         value=response['response'],
@@ -588,11 +597,13 @@ class PromoteyoutubePlugin(Plugin):
                     st.session_state[f"{prefix}generated_responses"][i]['response'] = edited_response
 
                     if len(edited_response) > 500:
-                        st.warning(t("promoteyoutube_char_limit_warning").format(len(edited_response)))
+                        st.warning(t("promoteyoutube_char_limit_warning").format(
+                            len(edited_response)))
 
                     st.session_state[f"{prefix}selected_responses"][i] = st.checkbox(
                         f"Select Response {i+1}",
-                        value=st.session_state[f"{prefix}selected_responses"].get(i, False),
+                        value=st.session_state[f"{prefix}selected_responses"].get(
+                            i, False),
                         key=f"{prefix}select_response_{i}"
                     )
 
@@ -612,9 +623,12 @@ class PromoteyoutubePlugin(Plugin):
                             resp for i, resp in enumerate(st.session_state[f"{prefix}generated_responses"])
                             if st.session_state[f"{prefix}selected_responses"][i]
                         ]
-                        campaign_id = st.session_state.get(f"{prefix}campaign_id", datetime.now(pytz.UTC).isoformat())
-                        automarket = self.plugin_manager.get_plugin('automarket')
-                        automarket.post_responses(config, selected_responses, campaign_id)
+                        campaign_id = st.session_state.get(
+                            f"{prefix}campaign_id", datetime.now(pytz.UTC).isoformat())
+                        automarket = self.plugin_manager.get_plugin(
+                            'automarket')
+                        automarket.post_responses(
+                            config, selected_responses, campaign_id)
                         st.success(t("promoteyoutube_success"))
 
     # Ajouter ces nouvelles méthodes dans la classe PromoteyoutubePlugin
@@ -625,7 +639,8 @@ class PromoteyoutubePlugin(Plugin):
             output_path = os.path.join(work_dir, "channel_list.csv")
 
             # Récupérer les vidéos sélectionnées
-            selected_videos = [st.session_state[f"{prefix}videos"][i] for i in selected_video_indices]
+            selected_videos = [
+                st.session_state[f"{prefix}videos"][i] for i in selected_video_indices]
 
             # Créer un dictionnaire pour éliminer les doublons (par channel_id)
             unique_channels = {}
@@ -656,7 +671,8 @@ class PromoteyoutubePlugin(Plugin):
             output_path = os.path.join(work_dir, "video_list.csv")
 
             # Récupérer les vidéos sélectionnées
-            selected_videos = [st.session_state[f"{prefix}videos"][i] for i in selected_video_indices]
+            selected_videos = [
+                st.session_state[f"{prefix}videos"][i] for i in selected_video_indices]
 
             # Préparer les données
             videos_data = []
@@ -691,7 +707,8 @@ class PromoteyoutubePlugin(Plugin):
             output_path = os.path.join(work_dir, "comment_list.csv")
 
             # Récupérer les commentaires sélectionnés
-            selected_comments = [st.session_state[f"{prefix}comments"][i] for i in selected_comment_indices]
+            selected_comments = [
+                st.session_state[f"{prefix}comments"][i] for i in selected_comment_indices]
 
             # Préparer les données
             comments_data = []
@@ -731,9 +748,11 @@ class PromoteyoutubePlugin(Plugin):
 
             if uploaded_file is not None:
                 df = pd.read_csv(uploaded_file)
-                required_columns = {'channel_id', 'channel_title', 'subscriber_count'}
+                required_columns = {'channel_id',
+                                    'channel_title', 'subscriber_count'}
                 if not required_columns.issubset(df.columns):
-                    raise ValueError("Le fichier ne contient pas les colonnes requises")
+                    raise ValueError(
+                        "Le fichier ne contient pas les colonnes requises")
 
                 # Convertir le DataFrame en liste de dictionnaires
                 channels = []
@@ -752,7 +771,8 @@ class PromoteyoutubePlugin(Plugin):
                         'relevance_score': 0
                     })
 
-                st.success(t("promoteyoutube_import_success").format(uploaded_file.name))
+                st.success(t("promoteyoutube_import_success").format(
+                    uploaded_file.name))
                 return channels
         except Exception as e:
             st.error(t("promoteyoutube_import_error").format(str(e)))
@@ -762,9 +782,10 @@ class PromoteyoutubePlugin(Plugin):
         try:
             import pandas as pd
             df = pd.read_csv(file)
-            required_columns = {'video_id', 'title' }
+            required_columns = {'video_id', 'title'}
             if not required_columns.issubset(df.columns):
-                raise ValueError("Le fichier ne contient pas les colonnes requises")
+                raise ValueError(
+                    "Le fichier ne contient pas les colonnes requises")
             videos = []
             st.write(df)
             for _, row in df.iterrows():
@@ -794,9 +815,11 @@ class PromoteyoutubePlugin(Plugin):
         try:
             import pandas as pd
             df = pd.read_csv(file)
-            required_columns = {'comment_id', 'comment_text', 'video_id', 'video_title', 'channel_title'}
+            required_columns = {'comment_id', 'comment_text',
+                                'video_id', 'video_title', 'channel_title'}
             if not required_columns.issubset(df.columns):
-                raise ValueError("Le fichier ne contient pas les colonnes requises")
+                raise ValueError(
+                    "Le fichier ne contient pas les colonnes requises")
             comments = []
             for _, row in df.iterrows():
                 comments.append({
@@ -837,7 +860,6 @@ class PromoteyoutubePlugin(Plugin):
                 }
         return list(video_dict.values())
 
-
     def run_campaign(self, config, target_videos, campaign_video, max_comments, prefix="promo_", keywords="", start_from_comments=False):
         """Exécute une campagne en deux étapes : sélection des vidéos puis des commentaires, ou directement à partir des commentaires."""
 
@@ -845,11 +867,12 @@ class PromoteyoutubePlugin(Plugin):
             st.session_state[f"{prefix}selected_video_indices"] = []
 
         # Always display videos with selection capability
-        selected_video_indices = self.display_and_select_videos(config, target_videos, prefix)
+        selected_video_indices = self.display_and_select_videos(
+            config, target_videos, prefix)
 
         # Only reset comments if the selection has actually changed and no comments are present
         if (selected_video_indices != st.session_state[f"{prefix}selected_video_indices"] and
-            not st.session_state.get(f"{prefix}comments")):
+                not st.session_state.get(f"{prefix}comments")):
             st.session_state[f"{prefix}selected_video_indices"] = selected_video_indices
             if f"{prefix}comments" in st.session_state:
                 del st.session_state[f"{prefix}comments"]
@@ -882,7 +905,8 @@ class PromoteyoutubePlugin(Plugin):
         transcript_path = os.path.join(work_dir, "transcript.txt")
         transcript = st.text_area(
             t("promoteyoutube_transcript"),
-            value=open(transcript_path, 'r').read() if os.path.exists(transcript_path) else "",
+            value=open(transcript_path, 'r').read(
+            ) if os.path.exists(transcript_path) else "",
             height=200,
             key="promo_transcript",
             disabled=os.path.exists(transcript_path)
@@ -891,7 +915,8 @@ class PromoteyoutubePlugin(Plugin):
         url_path = os.path.join(work_dir, "url.txt")
         url = st.text_input(
             t("promoteyoutube_url"),
-            value=open(url_path, 'r').read().strip() if os.path.exists(url_path) else "",
+            value=open(url_path, 'r').read().strip(
+            ) if os.path.exists(url_path) else "",
             key="promo_url",
             disabled=os.path.exists(url_path)
         )
@@ -932,7 +957,8 @@ class PromoteyoutubePlugin(Plugin):
                 key="promo_import_comments"
             )
         with col3:
-            search_button = st.button(t("promoteyoutube_search"), key="promo_search")
+            search_button = st.button(
+                t("promoteyoutube_search"), key="promo_search")
 
         # Handle imported files or search
         if video_file:
@@ -940,10 +966,12 @@ class PromoteyoutubePlugin(Plugin):
             file_id = f"{video_file.name}:{video_file.size}"
             if file_id != st.session_state["last_video_file"]:
                 with st.spinner("Importation de la liste de vidéos..."):
-                    imported_videos = self.import_videos_list(config, video_file)
+                    imported_videos = self.import_videos_list(
+                        config, video_file)
                     if imported_videos:
                         st.session_state["promo_target_videos"] = imported_videos
-                        st.session_state["promo_comments"] = []  # Reset comments for new video list
+                        # Reset comments for new video list
+                        st.session_state["promo_comments"] = []
                         st.session_state["last_video_file"] = file_id
                         st.success("Liste de vidéos importée avec succès.")
                     else:
@@ -953,10 +981,12 @@ class PromoteyoutubePlugin(Plugin):
             if st.session_state["last_video_file"] is not None:
                 st.session_state["last_video_file"] = None
             with st.spinner("Importation de la liste de commentaires..."):
-                imported_comments = self.import_comments_list(config, comment_file)
+                imported_comments = self.import_comments_list(
+                    config, comment_file)
                 if imported_comments:
                     st.session_state["promo_comments"] = imported_comments
-                    st.session_state["promo_target_videos"] = self._reconstruct_videos_from_comments(imported_comments)
+                    st.session_state["promo_target_videos"] = self._reconstruct_videos_from_comments(
+                        imported_comments)
                     st.success("Liste de commentaires importée avec succès.")
                 else:
                     st.error("Comment import failed")

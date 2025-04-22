@@ -1,4 +1,4 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from plugins.common import remove_quotes
@@ -11,7 +11,7 @@ import pandas as pd
 import os
 import re
 import csv
-from youtube_api import YoutubeAPI
+from lib.youtube_api import YoutubeAPI
 from datetime import datetime
 import pytz
 #from brave import Brave

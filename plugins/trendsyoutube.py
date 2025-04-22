@@ -1,12 +1,12 @@
 from app import Plugin
 import streamlit as st
 from typing import List, Dict, Any
-from youtube_api import YoutubeAPI
+from lib.youtube_api import YoutubeAPI
 import pandas as pd
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from plugins.ragllm import RagllmPlugin
 import os
-from youtube_db import *
+from lib.youtube_db import *
 
 # Add new translations for sorting functionality
 translations["en"].update({

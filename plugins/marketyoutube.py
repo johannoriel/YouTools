@@ -1,8 +1,8 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
-from youtube_api import YoutubeAPI
-from youtube_db import *
+from lib.youtube_api import YoutubeAPI
+from lib.youtube_db import *
 from typing import List, Dict, Any
 import os
 import re

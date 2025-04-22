@@ -1,6 +1,6 @@
 from app import Widget
 import streamlit as st
-from youtube_db import get_posted_responses
+from lib.youtube_db import get_posted_responses
 from datetime import datetime
 
 class ResponseDBDisplayWidget(Widget):

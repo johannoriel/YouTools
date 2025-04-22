@@ -2,16 +2,16 @@ from tkinter.constants import VERTICAL
 from tarfile import version
 from enum import verify
 import base64
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import pandas as pd
 import os
-from video_utils import *
-from video_anim import replace_with_image
+from lib.video_utils import *
+from lib.video_anim import replace_with_image
 import json
 from moviepy import VideoFileClip
-from media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
+from lib.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from datetime import datetime
 import glob
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode

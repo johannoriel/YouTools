@@ -1,7 +1,7 @@
 from sys import hexversion
 import streamlit as st
 from app import Plugin
-from global_vars import t, translations
+from lib.global_vars import t, translations
 import os
 import subprocess
 import tempfile

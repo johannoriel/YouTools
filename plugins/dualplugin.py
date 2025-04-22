@@ -1,4 +1,4 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from typing import Dict, Any

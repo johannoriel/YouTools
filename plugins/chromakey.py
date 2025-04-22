@@ -1,9 +1,9 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 from plugins.common import list_video_files
 import streamlit as st
 import os
-from chromakey_background import replace_background
+from lib.chromakey_background import replace_background
 import cv2
 
 # Ajout des traductions spécifiques à ce plugin

@@ -4,7 +4,7 @@ import importlib
 import streamlit as st
 from typing import List, Dict, Any, Set
 from dotenv import load_dotenv
-from global_vars import translations, t
+from lib.global_vars import translations, t
 import torch
 # https://discuss.streamlit.io/t/error-in-torch-with-streamlit/90908/5
 torch.classes.__path__ = []

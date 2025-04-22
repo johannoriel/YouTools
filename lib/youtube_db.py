@@ -2,7 +2,7 @@ import sqlite3
 from datetime import datetime
 import pytz
 from typing import List, Dict, Any, Optional
-from youtube_api import YoutubeAPI
+from lib.youtube_api import YoutubeAPI
 import json
 
 # Database file

@@ -5,7 +5,7 @@ import random
 from PIL import Image
 import streamlit as st
 from app import Plugin
-from global_vars import t, translations
+from lib.global_vars import t, translations
 from diffusers import FluxPipeline, AutoPipelineForImage2Image
 from rembg import remove, new_session
 import json

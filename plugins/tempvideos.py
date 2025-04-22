@@ -1,4 +1,4 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 import streamlit as st
 from app import Plugin
 from plugins.common import get_credentials

@@ -1,4 +1,4 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 
 import streamlit as st
@@ -9,7 +9,7 @@ from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import CouldNotRetrieveTranscript
 import yt_dlp
-from youtube_api import YoutubeAPI
+from lib.youtube_api import YoutubeAPI
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({

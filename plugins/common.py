@@ -5,7 +5,7 @@ from google.auth.exceptions import RefreshError
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from global_vars import t, translations
+from lib.global_vars import t, translations
 from app import Plugin
 import streamlit as st
 import torch

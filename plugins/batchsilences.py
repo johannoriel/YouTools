@@ -2,7 +2,7 @@ import os
 import streamlit as st
 import pandas as pd
 from app import Plugin
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from plugins.common import list_all_video_files
 from moviepy import VideoFileClip, concatenate_videoclips
 from typing import List

@@ -1,9 +1,9 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Widget
 import streamlit as st
-from global_vars import translations, t
-from youtube_api import YoutubeAPI
-from youtube_db import get_videos, sync_videos, get_video_transcript, save_transcript, reset_database, auto_upgrade_database, update_video_keywords, delete_video
+from lib.global_vars import translations, t
+from lib.youtube_api import YoutubeAPI
+from lib.youtube_db import get_videos, sync_videos, get_video_transcript, save_transcript, reset_database, auto_upgrade_database, update_video_keywords, delete_video
 from datetime import datetime
 from typing import List, Dict, Any
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode

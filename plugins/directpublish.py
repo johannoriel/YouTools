@@ -1,15 +1,15 @@
-from global_vars import translations, t
+from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from plugins.common import upload_video, remove_quotes, list_all_video_files
 from plugins.trimsilences import TrimsilencesPlugin
 from plugins.transcript import TranscriptPlugin
 from plugins.chromakey import ChromakeyPlugin
-from chromakey_background import replace_background
+from lib.chromakey_background import replace_background
 import os
 import requests
 from plugins.common import yt_categories
-from youtube_api import YoutubeAPI
+from lib.youtube_api import YoutubeAPI
 import glob
 import json
 

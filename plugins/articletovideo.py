@@ -1,7 +1,7 @@
 from proglog import ProgressBarLogger
 import streamlit as st
 from app import Plugin
-from global_vars import t, translations
+from lib.global_vars import t, translations
 import requests
 from bs4 import BeautifulSoup
 from transformers import MarianMTModel, MarianTokenizer
