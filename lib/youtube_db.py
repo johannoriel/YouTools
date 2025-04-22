@@ -421,6 +421,8 @@ def get_videos(filter_type: str = "title", keyword: str = "", page: int = 1, per
         conditions.append(
             "(title LIKE ? OR description LIKE ? OR transcript LIKE ?)")
         params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+    else:
+        raise ValueError(f"Invalid filter type: {filter_type}")
 
     if keyword_filter:
         # Filtrer par mots-clés (recherche dans le champ JSON)

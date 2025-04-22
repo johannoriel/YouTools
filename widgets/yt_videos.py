@@ -132,13 +132,16 @@ class VideoDatabaseWidget(Widget):
             else:
                 st.info("No videos to synchronize.")
 
-    def display_video_database(self, config, filter_type: str, keyword: str, keyword_filter: List[str] = None):
-        videos = get_videos(filter_type, keyword, 0,
+    def display_video_database(self, config, filter_type: str, search_keyword: str, keyword_filter: List[str] = None):
+        videos = get_videos(filter_type, search_keyword, 0,
                             keyword_filter=keyword_filter)
 
         col1, col2, col3 = st.columns(3)
         total_videos = len(videos)
         col1.write(t("marketyoutube_video_count").format(total_videos))
+        if total_videos == 0:
+            st.warning("No videos to display.")
+            return
 
         # Slider pour la taille des vignettes et la hauteur des lignes
         thumbnail_size = col2.slider(
@@ -443,24 +446,38 @@ class VideoDatabaseWidget(Widget):
             options=list(filter_options.keys()),
             key=f"{self.prefix}_filter_type_videos"
         )
-        keyword = col2.text_input(
+        search_keyword = col2.text_input(
             t("marketyoutube_keyword"),
             key=f"{self.prefix}_keyword_videos"
         )
 
-        all_keywords = set()
+        # Compter les occurrences de chaque mot-clé
+        keyword_counts = {}
         for video in get_videos():
-            all_keywords.update(video['keywords'])
-        all_keywords = sorted(list(all_keywords))
+            for keyword in video['keywords']:
+                keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
+
+        # Trier d'abord par occurrence décroissante, puis par ordre alphabétique
+        sorted_keywords = sorted(
+            keyword_counts.items(),
+            key=lambda item: (-item[1], item[0])  # -item[1] pour ordre décroissant
+        )
+
+        # Créer les options avec le format "mot-clé (occurrences)"
+        keyword_options = [f"{keyword} ({count})" for keyword, count in sorted_keywords]
+        raw_keywords = [keyword for keyword, count in sorted_keywords]
+
         selected_keyword_filter = col3.multiselect(
             t("marketyoutube_filter_keywords"),
-            options=all_keywords,
+            options=keyword_options,
             key=f"{self.prefix}_keyword_filter_videos"
         )
 
+        # Pour récupérer les mots-clés sans les occurrences dans le filtre
+        selected_keywords = [kw.split(" (")[0] for kw in selected_keyword_filter] if selected_keyword_filter else None
         self.display_video_database(
             config,
             filter_options[filter_type],
-            keyword,
-            keyword_filter=selected_keyword_filter if selected_keyword_filter else None
+            search_keyword,
+            keyword_filter=selected_keywords
         )
