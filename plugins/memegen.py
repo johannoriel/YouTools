@@ -5,7 +5,6 @@ import requests
 import json
 import os
 import time
-from plugins.ragllm import RagllmPlugin
 
 translations["en"].update({
     "meme_generator_tab_manual": "Manual Meme Generator",
@@ -64,7 +63,6 @@ class MemegenPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.memes = self.fetch_memes()
-        self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
 
     def fetch_memes(self):
         """Fetch and cache popular memes from Imgflip API."""
@@ -141,16 +139,14 @@ class MemegenPlugin(Plugin):
 
     def generate_meme_from_theme(self, config, theme):
         """Generate a meme based on a given theme (manual or transcript-derived)."""
-        if not self.ragllm_plugin:
-            return None, "RAG LLM plugin not available."
 
         meme_list = json.dumps([{m["id"]: m["name"]} for m in self.memes])
         auto_prompt = config.get(self.name, {}).get("memegen_auto_prompt", "")
         prompt = auto_prompt.format(subject=theme, meme_list=meme_list)
-        llm_sys_prompt = config['ragllm']['llm_sys_prompt']
+        llm_sys_prompt = config['llm']['llm_sys_prompt']
 
         try:
-            llm_response = self.ragllm_plugin.process_with_llm(
+            llm_response = self.process_with_llm(
                 prompt, llm_sys_prompt, theme)
             cleaned_response = llm_response.strip()
             if cleaned_response.startswith("```json"):

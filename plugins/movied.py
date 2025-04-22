@@ -271,8 +271,7 @@ class MoviedPlugin(Plugin):
 
     def setup_controls(self):
         with st.sidebar.expander("Options"):
-            selected_model = st.selectbox(t("movied_model_label"), [
-                                          "base", "medium", "turbo", "large-v3", "large-v3-turbo"], index=4)
+            selected_model = st.selectbox(t("movied_model_label"), ["base", "medium", "turbo", "large-v3", "large-v3-turbo"], index=4)
             thumbnail_size = st.selectbox(
                 "Thumbnail Size",
                 ["small", "medium", "large"],
@@ -625,7 +624,7 @@ class MoviedPlugin(Plugin):
                 )
                 response = self.process_with_llm(
                     prompt,
-                    config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                    config.get('llm', {}).get('llm_sys_prompt', ''),
                     row["Text"]
                 )
 
@@ -676,14 +675,14 @@ class MoviedPlugin(Plugin):
             # Générer les suggestions pour les illustrations
             illustration_response = self.process_with_llm(
                 illustration_prompt,
-                config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                config.get('llm', {}).get('llm_sys_prompt', ''),
                 subtitles_text
             )
 
             # Générer les suggestions pour les mèmes
             meme_response = self.process_with_llm(
                 meme_prompt,
-                config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                config.get('llm', {}).get('llm_sys_prompt', ''),
                 subtitles_text
             )
 

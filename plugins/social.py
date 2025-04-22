@@ -2,7 +2,6 @@ from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import os
-from plugins.ragllm import RagllmPlugin
 from typing import List, Dict, Any, Optional
 from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI
 from lib.youtube_api import YoutubeAPI
@@ -348,10 +347,9 @@ Chaque tweet doit faire maximum 280 caractères."""
         if st.button(t("social_generate")) and transcript:
             st.session_state.has_generated = True
             with st.spinner(t("social_generating")):
-                #ragllm_plugin = RagllmPlugin("ragllm", self.plugin_manager)
                 llm_response = self.process_with_llm(
                     prompt,
-                    config.get('ragllm', {}).get('llm_sys_prompt', ''),
+                    config.get('llm', {}).get('llm_sys_prompt', ''),
                     transcript
                 )
 
