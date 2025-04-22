@@ -29,7 +29,6 @@ def save_config(config: Dict[str, Any]):
 def set_lang(language):
     st.session_state.lang = language
 
-
 def t(key: str) -> str:
     return translations[st.session_state.lang].get(key, key)
 

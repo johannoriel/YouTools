@@ -12,14 +12,13 @@ from googleapiclient.discovery import build
 import ffmpeg
 import math
 
-
 from pytube import YouTube
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
 import os
 
 from plugins.common import get_category_id
-
-from frdubb import VideoDubber
+from lib.frdubb import VideoDubber
+from lib.video_utils import download_video_dlp, convert_time_to_seconds
 
 def debug_youtube_object(yt):
     print("Available attributes and methods in the YouTube object:")
@@ -30,82 +29,6 @@ def debug_youtube_object(yt):
             print(f"{attr}")
         except Exception as e:
             print(f"{attr}: Could not retrieve value - {str(e)}")
-
-def convert_time_to_seconds(time_str):
-    # Convert a time string "mm:ss" to seconds
-    if isinstance(time_str, str):
-        minutes, seconds = map(int, time_str.split(":"))
-        return minutes * 60 + seconds
-    elif isinstance(time_str, int):
-        return time_str
-    else:
-        return 0
-
-def extract_video_section(input_path, output_dir, start_time=None, end_time=None, video_length=None):
-    # If no start_time and end_time are provided, return the full video path
-    if start_time is None and end_time is None:
-        return input_path
-
-    # Convert time from "mm:ss" to seconds
-    start_sec = convert_time_to_seconds(start_time) if start_time else 0
-    end_sec = convert_time_to_seconds(end_time) if end_time else video_length
-
-    # Extract the video section using moviepy
-    new_file_name = os.path.join(output_dir, "section_" + os.path.basename(input_path))
-    print(f"Extracting section {start_sec} -> {end_sec}...")
-    ffmpeg_extract_subclip(input_path, start_sec, end_sec, targetname=new_file_name)
-    print(f"Section extracted {new_file_name}")
-
-    # Delete the full downloaded video to save space
-    #os.remove(input_path) #debug only
-
-    return new_file_name
-
-def download_video_pytube(url, output_dir, start_time=None, end_time=None):
-    # Download the full video using pytube
-    yt = YouTube(url)
-    # Extract video information
-    video_info = {
-        "title": yt.title,
-        "description": yt.description,
-        "tags": yt.keywords,
-        "category": 'Unknown'
-    }
-
-    # Check if metadata is available
-    if hasattr(yt, 'metadata') and yt.metadata:
-        # Since yt.metadata is an object, try to find 'category' if it exists
-        # Note: YouTubeMetadata may not have 'category', adapt as needed based on actual content
-        for data in yt.metadata.raw_metadata:
-            if 'category' in data:
-                video_info['category'] = data['category']
-                break
-
-    video = yt.streams.filter(file_extension='mp4').first()
-    filename = video.download(output_path=output_dir)
-
-    new_file_name = extract_video_section(filename, output_dir, start_time, end_time, video_length=yt.length)
-
-    return new_file_name, video_info
-
-def download_video_dlp(url, output_dir, start_time=None, end_time=None):
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': os.path.join(output_dir, 'downloaded_video.%(ext)s')
-    }
-
-    #if start_time is not None or end_time is not None:
-    #    ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
-    #    ydl_opts['force_keyframes_at_cuts'] = True
-
-    print(ydl_opts)
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-
-    new_file_name = extract_video_section(filename, output_dir, start_time, end_time)
-    return new_file_name, info
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({

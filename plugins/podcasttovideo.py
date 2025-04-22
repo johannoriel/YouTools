@@ -170,10 +170,6 @@ class PodcasttovideoPlugin(Plugin):
                 transcript = self.transcript_plugin.transcribe_video(
                     temp_audio.name,
                     "txt",
-                    config['transcript']['whisper_path'],
-                    config['transcript']['whisper_model'],
-                    config['transcript']['ffmpeg_path'],
-                    config['common']['language']
                 )
                 transcriptions.append(transcript)
                 os.unlink(temp_audio.name)
@@ -216,10 +212,6 @@ class PodcasttovideoPlugin(Plugin):
         transcript = self.transcript_plugin.transcribe_video(
             audio_file,
             "srt",
-            config['transcript']['whisper_path'],
-            config['transcript']['whisper_model'],
-            config['transcript']['ffmpeg_path'],
-            config['common']['language']
         )
         return transcript
 

@@ -190,10 +190,6 @@ class YoutubeAPI:
             print(f"YouTube API Error (get_channel_info): {str(e)}")
             return None
 
-    # social_api.py (modification de la fonction get_channel_videos)
-
-    # social_api.py (modification de la fonction get_channel_videos)
-
     def get_channel_videos(self, channel_id: str) -> list:
         """
         Récupère toutes les vidéos d'une chaîne YouTube.

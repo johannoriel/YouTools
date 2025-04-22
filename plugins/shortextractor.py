@@ -383,7 +383,7 @@ class ShortextractorPlugin(Plugin):
         if st.button(t("shortextractor_transcribe")):
             with st.spinner(t("shortextractor_transcribing")):
                 transcript_plugin = TranscriptPlugin("transcript", self.plugin_manager)
-                transcript = transcript_plugin.transcribe_video(selected_video_path, "srt", config['transcript']['whisper_path'], config['transcript']['whisper_model'], config['transcript']['ffmpeg_path'], config['common']['language'])
+                transcript = transcript_plugin.transcribe_video(selected_video_path, "srt")
                 st.session_state.transcript = transcript
 
         if 'transcript' in st.session_state:

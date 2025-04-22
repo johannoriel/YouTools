@@ -122,8 +122,17 @@ class TranscriptPlugin(Plugin):
     def get_tabs(self):
         return [{"name": t("transcript_tab"), "plugin": "transcript"}]
 
-    def transcribe_video(self, video_path, output_format, whisper_path, whisper_model, ffmpeg_path, lang):
+    def transcribe_video(self, video_path, output_format, whisper_path=None, whisper_model=None, ffmpeg_path=None, lang=None):
         print("Executed by user :", getpass.getuser())
+        if whisper_path is None:
+            whisper_path = os.path.expanduser(self.get_config("whisper_path"))
+        if ffmpeg_path is None:
+            ffmpeg_path = os.path.expanduser(self.get_config("ffmpeg_path"))
+        if whisper_model is None:
+            whisper_model = self.get_config("whisper_model")
+        if lang is None:
+            lang = self.plugin_manager.config["common"]["language"]
+
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
             temp_audio_path = temp_audio.name
 
@@ -263,10 +272,6 @@ class TranscriptPlugin(Plugin):
 
         # Le reste du code pour la transcription
         work_directory = os.path.expanduser(config['common']['work_directory'])
-        whisper_path = os.path.expanduser(config['transcript']['whisper_path'])
-        whisper_model = config['transcript']['whisper_model']
-        ffmpeg_path = config['transcript']['ffmpeg_path']
-
         videos = list_all_video_files(work_directory)
 
         if not videos:
@@ -280,7 +285,7 @@ class TranscriptPlugin(Plugin):
 
         if st.button(t("transcript_transcribe_button")):
             with st.spinner(t("transcript_transcribing")):
-                transcript = self.transcribe_video(selected_video_path, output_format, whisper_path, whisper_model, ffmpeg_path, config['common']['language'])
+                transcript = self.transcribe_video(selected_video_path, output_format)
                 st.session_state.transcript = transcript
                 st.session_state.show_transcript = True
                 with open(os.path.join(work_directory, "transcript.txt"), "w", encoding="utf-8") as f:

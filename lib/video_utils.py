@@ -13,6 +13,63 @@ import random
 import numpy as np
 import spacy
 from pyannote.audio import Pipeline
+import yt_dlp
+
+def convert_time_to_seconds(time_str):
+    # Convert a time string "mm:ss" to seconds
+    if isinstance(time_str, str):
+        minutes, seconds = map(int, time_str.split(":"))
+        return minutes * 60 + seconds
+    elif isinstance(time_str, int):
+        return time_str
+    else:
+        return 0
+
+def extract_video_section(input_path, output_dir, start_time=None, end_time=None, video_length=None):
+    # If no start_time and end_time are provided, return the full video path
+    if start_time is None and end_time is None:
+        return input_path
+
+    # Convert time from "mm:ss" to seconds
+    start_sec = convert_time_to_seconds(start_time) if start_time else 0
+    end_sec = convert_time_to_seconds(end_time) if end_time else video_length
+
+    # Extract the video section using moviepy
+    new_file_name = os.path.join(output_dir, "section_" + os.path.basename(input_path))
+    print(f"Extracting section {start_sec} -> {end_sec}...")
+    ffmpeg_extract_subclip(input_path, start_sec, end_sec, targetname=new_file_name)
+    print(f"Section extracted {new_file_name}")
+
+    # Delete the full downloaded video to save space
+    #os.remove(input_path) #debug only
+
+    return new_file_name
+
+def download_video_dlp(url, output_dir, start_time=None, end_time=None):
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': os.path.join(output_dir, 'downloaded_video.%(ext)s')
+    }
+    #print(ydl_opts)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+
+    new_file_name = extract_video_section(filename, output_dir, start_time, end_time)
+    return new_file_name, info
+
+def download_audio_with_auth(url, output_dir, cookie_file):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': f'{output_dir}/%(id)s.%(ext)s',
+        'cookiefile': cookie_file,
+        'extract_audio': True,
+        'audio_format': 'mp3',
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        return ydl.prepare_filename(info)
 
 def image_to_base64(image_path):
     """Convertit une image en URL de données Base64."""

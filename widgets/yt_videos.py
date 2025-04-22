@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
 import pandas as pd
+import os
 
 translations["en"].update({
     "marketyoutube_header_videos": "YouTube Video Database",
@@ -17,7 +18,8 @@ translations["en"].update({
     "marketyoutube_sync_transcripts": "Sync Transcripts",
     "marketyoutube_copy_transcripts": "Copy Transcripts",
     "marketyoutube_download_transcripts": "Download Transcripts",
-    "marketyoutube_generate_transcripts": "Generate Transcripts",
+    "marketyoutube_get_transcripts": "Get Transcripts",
+    "marketyoutube_generate_transcript": "Generate Transcript",
     "marketyoutube_suggest_keywords": "Suggest Keywords",
     "marketyoutube_edit_keywords": "Edit Keywords",
     "marketyoutube_save_keywords": "Save Keywords",
@@ -40,7 +42,8 @@ translations["fr"].update({
     "marketyoutube_sync_transcripts": "Synchroniser les transcriptions",
     "marketyoutube_copy_transcripts": "Copier les transcriptions",
     "marketyoutube_download_transcripts": "Télécharger les transcriptions",
-    "marketyoutube_generate_transcripts": "Générer les transcriptions",
+    "marketyoutube_get_transcripts": "Récupérer les transcriptions",
+    "marketyoutube_generate_transcript": "Générer la transcription",
     "marketyoutube_suggest_keywords": "Suggérer des mots-clés",
     "marketyoutube_edit_keywords": "Modifier les mots-clés",
     "marketyoutube_save_keywords": "Enregistrer les mots-clés",
@@ -60,6 +63,7 @@ class VideoDatabaseWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
+        self.transcript_plugin = self.plugin_manager.get_plugin('transcript')
 
     def format_count(self, count: int) -> str:
         """Formats a number into K/M if > 1000."""
@@ -131,6 +135,41 @@ class VideoDatabaseWidget(Widget):
                             st.write(error)
             else:
                 st.info("No videos to synchronize.")
+
+    def generate_transcript(self, video_id: str, title: str) -> str:
+        """Generate transcript by downloading video and processing it with transcript plugin."""
+        try:
+            # Initialize transcript plugin if not already done
+            if self.transcript_plugin is None:
+                raise Exception("Transcript plugin not available")
+
+            # Get video URL
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+            # Download video
+            work_directory = self.plugin_manager.config['common']['work_directory']
+            from lib.video_utils import download_audio_with_auth
+            video_path = download_audio_with_auth(video_url, work_directory, 'www.youtube.com_cookies.txt') # use "Get cookies.txt" extension
+
+            # Transcribe video
+            transcript = self.transcript_plugin.transcribe_video(video_path, "txt")
+
+            # Save transcript to database
+            if transcript:
+                save_transcript(video_id, transcript)
+                return True
+            return False
+
+        except Exception as e:
+            st.error(f"Error generating transcript for {title}: {str(e)}")
+            return False
+        finally:
+            # Nettoyage: supprimer le fichier vidéo temporaire s'il existe
+            if video_path and os.path.exists(video_path):
+                try:
+                    os.remove(video_path)
+                except Exception as e:
+                    st.error(f"Error deleting temporary video file: {str(e)}")
 
     def display_video_database(self, config, filter_type: str, search_keyword: str, keyword_filter: List[str] = None):
         videos = get_videos(filter_type, search_keyword, 0,
@@ -284,7 +323,7 @@ class VideoDatabaseWidget(Widget):
             st.write(f"Selected videos: {len(selected_rows)}")
 
             # Boutons pour les actions
-            col1, col2, col3, col4, col5 = st.columns(5)
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
 
             with col1:
                 if st.button(t("marketyoutube_copy_transcripts"), key=f"{self.prefix}_copy_transcripts"):
@@ -321,7 +360,7 @@ class VideoDatabaseWidget(Widget):
                             "No transcripts available for selected videos.")
 
             with col3:
-                if st.button(t("marketyoutube_generate_transcripts"), key=f"{self.prefix}_generate_transcripts"):
+                if st.button(t("marketyoutube_get_transcripts"), key=f"{self.prefix}_get_transcripts"):
                     total = len(selected_rows)
                     processed = 0
                     successes = 0
@@ -355,6 +394,32 @@ class VideoDatabaseWidget(Widget):
                     st.rerun()
 
             with col4:
+                if st.button(t("marketyoutube_generate_transcript"), key=f"{self.prefix}_generate_transcript"):
+                    total = len(selected_rows)
+                    processed = 0
+                    successes = 0
+                    errors = []
+                    with st.spinner("Generating transcripts from video..."):
+                        progress_bar = st.progress(0)
+                        for _, row in selected_rows.iterrows():
+                            if not get_video_transcript(row['video_id']):
+                                try:
+                                    if self.generate_transcript(row['video_id'], row['title']):
+                                        successes += 1
+                                    else:
+                                        errors.append(f"{row['title']} ({row['video_id']}): Generation failed")
+                                except Exception as e:
+                                    errors.append(f"{row['title']} ({row['video_id']}): {str(e)}")
+                            processed += 1
+                            progress_bar.progress(processed / total)
+                        progress_bar.empty()
+                    st.success(f"Transcripts generated: {successes}/{total}")
+                    if errors:
+                        with st.expander("Errors"):
+                            for error in errors:
+                                st.write(error)
+
+            with col5:
                 if st.button(t("marketyoutube_suggest_keywords"), key=f"{self.prefix}_suggest_keywords"):
                     total = len(selected_rows)
                     processed = 0
@@ -374,7 +439,7 @@ class VideoDatabaseWidget(Widget):
                     st.success(f"Keywords suggested for {total} videos.")
                     st.rerun()
 
-            with col5:
+            with col6:
                 if st.button(t("marketyoutube_delete_videos"), key=f"{self.prefix}_delete_videos"):
                     total = len(selected_rows)
                     with st.spinner("Deleting videos..."):

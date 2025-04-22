@@ -3,7 +3,6 @@ from app import Plugin
 import streamlit as st
 from plugins.common import upload_video, remove_quotes, list_all_video_files
 from plugins.trimsilences import TrimsilencesPlugin
-from plugins.transcript import TranscriptPlugin
 from plugins.chromakey import ChromakeyPlugin
 from lib.chromakey_background import replace_background
 import os
@@ -317,14 +316,7 @@ class DirectpublishPlugin(Plugin):
                 tags = config['directpublish'].get('keywords', '').strip()
                 if do_llm:
                     st.text(t("directpublish_generating_transcription"))
-                    transcript = self.transcript_plugin.transcribe_video(
-                        video_to_process,
-                        "txt",
-                        config['transcript']['whisper_path'],
-                        config['transcript']['whisper_model'],
-                        config['transcript']['ffmpeg_path'],
-                        config['common']['language']
-                    )
+                    transcript = self.transcript_plugin.transcribe_video(video_to_process,"txt")
                     st.code(transcript)
                     st.session_state.transcript = transcript  # May bu used by other plugins
                     with open(os.path.join(work_directory, "transcript.txt"), "w", encoding="utf-8") as f:
