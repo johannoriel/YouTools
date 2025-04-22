@@ -43,3 +43,4 @@ duckduckgo_search
 streamlit-aggrid
 sentence_transformers
 fuzzywuzzy
+python-Levenshtein

@@ -4,7 +4,6 @@ import streamlit as st
 import json
 import numpy as np
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
 import os
 from sentence_transformers import SentenceTransformer
@@ -16,44 +15,52 @@ translations["en"].update({
     "title": "Keyword Clustering Tool",
     "upload_json": "Upload JSON file with keywords (optional)",
     "keywords_file": "Keywords file (keywords.json)",
-    "select_clusters": "Select number of clusters",
-    "auto_clusters": "Automatic (optimize clusters)",
-    "min_clusters": "Minimum number of clusters (auto mode)",
-    "similarity_threshold": "Similarity threshold for cross-thematic keywords",
-    "fuzzy_ratio": "Fuzzy ratio for merging similar keywords",
-    "use_predefined_themes": "Use predefined themes",
-    "predefined_themes": "Predefined themes (one per line)",
-    "cluster_button": "Cluster Keywords",
-    "no_file": "No keywords.json found in work directory and no file uploaded.",
-    "results_title": "Thematic Clusters",
-    "loading_model": "Loading embedding model...",
-    "clustering": "Clustering keywords...",
-    "export_results": "Export Results",
-    "export_success": "Results exported to thematiques.json",
+    "predefined_themes": "Themes (format: theme: keyword1, keyword2, ...)",
     "save_themes": "Save Themes",
     "themes_saved": "Themes saved to themes.json",
+    "suggest_themes": "Suggest New Themes",
+    "select_themes": "Select themes to add",
+    "confirm_themes": "Confirm Theme Selection",
+    "suggest_keywords": "Suggest Keywords for Theme",
+    "select_theme": "Select a theme",
+    "current_keywords": "Current keywords",
+    "suggested_keywords": "Suggested keywords",
+    "add_keywords": "Add Selected Keywords",
+    "similarity_threshold": "Similarity threshold for suggestions",
+    "fuzzy_ratio": "Fuzzy ratio for merging similar keywords",
+    "no_file": "No keywords.json found in work directory and no file uploaded.",
+    "no_keywords_left": "No keywords left to process.",
+    "results_title": "Current Themes",
+    "remaining_keywords": "Remaining Keywords",
+    "thematized_keywords": "Thematized Keywords",
+    "remaining_count": "Remaining keywords count",
+    "remaining_weight": "Remaining keywords total weight",
 })
 
 translations["fr"].update({
     "title": "Outil de regroupement de mots-clés",
     "upload_json": "Télécharger un fichier JSON avec les mots-clés (optionnel)",
     "keywords_file": "Fichier de mots-clés (keywords.json)",
-    "select_clusters": "Sélectionner le nombre de clusters",
-    "auto_clusters": "Automatique (optimisation des clusters)",
-    "min_clusters": "Nombre minimum de clusters (mode auto)",
-    "similarity_threshold": "Seuil de similarité pour les mots-clés transversaux",
-    "fuzzy_ratio": "Ratio de fusion pour les mots-clés similaires",
-    "use_predefined_themes": "Utiliser les thématiques prédéfinies",
-    "predefined_themes": "Thématiques prédéfinies (une par ligne)",
-    "cluster_button": "Regrouper les mots-clés",
-    "no_file": "Aucun keywords.json trouvé dans le répertoire de travail et aucun fichier téléchargé.",
-    "results_title": "Regroupements thématiques",
-    "loading_model": "Chargement du modèle d'embeddings...",
-    "clustering": "Regroupement des mots-clés...",
-    "export_results": "Exporter les résultats",
-    "export_success": "Résultats exportés vers thematiques.json",
+    "predefined_themes": "Thématiques (format : thématique : motclé1, motclé2, ...)",
     "save_themes": "Sauvegarder les thématiques",
     "themes_saved": "Thématiques sauvegardées dans themes.json",
+    "suggest_themes": "Suggérer de nouvelles thématiques",
+    "select_themes": "Sélectionner les thématiques à ajouter",
+    "confirm_themes": "Confirmer la sélection des thématiques",
+    "suggest_keywords": "Suggérer des mots-clés pour une thématique",
+    "select_theme": "Sélectionner une thématique",
+    "current_keywords": "Mots-clés actuels",
+    "suggested_keywords": "Mots-clés suggérés",
+    "add_keywords": "Ajouter les mots-clés sélectionnés",
+    "similarity_threshold": "Seuil de similarité pour les suggestions",
+    "fuzzy_ratio": "Ratio de fusion pour les mots-clés similaires",
+    "no_file": "Aucun keywords.json trouvé dans le répertoire de travail et aucun fichier téléchargé.",
+    "no_keywords_left": "Aucun mot-clé restant à traiter.",
+    "results_title": "Thématiques actuelles",
+    "remaining_keywords": "Mots-clés restants",
+    "thematized_keywords": "Mots-clés thématisés",
+    "remaining_count": "Nombre de mots-clés restants",
+    "remaining_weight": "Poids total des mots-clés restants",
 })
 
 @st.cache_data
@@ -81,7 +88,6 @@ def load_keywords(work_directory, fuzzy_ratio=90, json_file=None):
 
     keywords = {k.lower(): v for k, v in keywords.items() if isinstance(v, (int, float))}
     # Fusionner les mots-clés similaires
-
     merged_keywords = {}
     used = set()
     for k1 in keywords:
@@ -100,13 +106,28 @@ class KeywordClusteringWidget(Widget):
         super().__init__(name, prefix, plugin_manager)
         self.model = None
         self.work_directory = self.plugin_manager.config["common"]["work_directory"]
-        # Liste par défaut des thématiques
-        self.default_themes = [
-            "intelligence artificielle", "politique", "démocratie", "post-nationalisme",
-            "santé", "méditation", "agentivité", "écologie", "technologie", "philosophie",
-            "éthique", "science", "société", "économie", "conscience"
-        ]
+        # Thématiques par défaut
+        self.default_themes = {
+            "intelligence artificielle": [],
+            "politique": [],
+            "démocratie": [],
+            "post-nationalisme": [],
+            "santé": [],
+            "méditation": [],
+            "agentivité": [],
+            "écologie": [],
+            "technologie": [],
+            "philosophie": [],
+            "éthique": [],
+            "science": [],
+            "société": [],
+            "économie": [],
+            "conscience": []
+        }
         self.themes = self.load_themes()
+        # Initialiser l'état de session
+        if f"{self.prefix}_themes_text" not in st.session_state:
+            st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
 
     def load_themes(self):
         """Charger les thématiques depuis themes.json ou utiliser la liste par défaut."""
@@ -115,7 +136,7 @@ class KeywordClusteringWidget(Widget):
             try:
                 with open(themes_file, "r", encoding="utf-8") as f:
                     themes = json.load(f)
-                return [t.strip().lower() for t in themes if t.strip()]
+                return {k.lower(): v for k, v in themes.items()}
             except Exception as e:
                 st.warning(f"Erreur lors du chargement de themes.json : {e}. Utilisation de la liste par défaut.")
         return self.default_themes
@@ -130,47 +151,57 @@ class KeywordClusteringWidget(Widget):
         except Exception as e:
             st.error(f"Erreur lors de la sauvegarde de themes.json : {e}")
 
+    def themes_to_text(self, themes):
+        """Convertir les thématiques en texte pour le textarea."""
+        return "\n".join([f"{th}: {', '.join(mots)}" if mots else f"{th}:" for th, mots in themes.items()])
+
+    def text_to_themes(self, text):
+        """Convertir le texte du textarea en dictionnaire de thématiques."""
+        themes = {}
+        for line in text.split("\n"):
+            if ":" in line:
+                theme, keywords = line.split(":", 1)
+                theme = theme.strip().lower()
+                keywords = [k.strip().lower() for k in keywords.split(",") if k.strip()]
+                themes[theme] = keywords
+        return themes
+
+    def get_remaining_keywords(self, keywords, themes):
+        """Retourner les mots-clés non assignés, leur nombre et leur poids total."""
+        assigned_keywords = set()
+        for mots in themes.values():
+            assigned_keywords.update(mots)
+        remaining = {k: v for k, v in keywords.items() if k not in assigned_keywords}
+        count = len(remaining)
+        weight = sum(remaining.values())
+        return remaining, count, weight
+
+    def get_thematized_keywords(self, keywords, themes):
+        """Retourner les mots-clés thématisés avec leurs poids."""
+        thematized = {}
+        for mots in themes.values():
+            for mot in mots:
+                if mot in keywords:
+                    thematized[mot] = keywords[mot]
+        return thematized
+
     def load_model(self):
         """Charger le modèle SentenceTransformer."""
         if self.model is None:
-            with st.spinner(t("loading_model")):
+            with st.spinner(t("results_title")):
                 self.model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
         return self.model
 
-    def optimize_clusters(self, X, min_clusters=5, max_clusters=30):
-        """Trouver le nombre optimal de clusters avec le score de silhouette."""
-        best_n = min_clusters
-        best_score = -1
-        for n in range(min_clusters, max_clusters + 1):
-            kmeans = KMeans(n_clusters=n, random_state=42)
-            labels = kmeans.fit_predict(X)
-            if len(set(labels)) > 1:
-                score = silhouette_score(X, labels)
-                if score > best_score:
-                    best_score = score
-                    best_n = n
-        return best_n
-
-    def cluster_keywords(self, keywords, n_clusters, auto_clusters=False, min_clusters=5, seuil=0.8, use_predefined=True):
-        """Regrouper les mots-clés en clusters et assigner des thématiques."""
+    def suggest_themes(self, keywords, n_clusters=5):
+        """Suggérer de nouvelles thématiques via clustering."""
+        if not keywords:
+            return []
         model = self.load_model()
-        embedding_file = os.path.join(self.work_directory, "keyword_embeddings.pkl")
-
-        # Charger ou calculer les embeddings
-        if os.path.exists(embedding_file):
-            with open(embedding_file, "rb") as f:
-                embeddings = pickle.load(f)
-        else:
-            embeddings = {mot: model.encode(mot) for mot in keywords}
-            with open(embedding_file, "wb") as f:
-                pickle.dump(embeddings, f)
-
+        embeddings = {mot: model.encode(mot) for mot in keywords}
         X = np.array(list(embeddings.values()))
-        if auto_clusters:
-            n_clusters = self.optimize_clusters(X, min_clusters, max_clusters=30)
 
         # Clustering avec K-Means
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        kmeans = KMeans(n_clusters=min(n_clusters, len(keywords)), random_state=42)
         labels = kmeans.fit_predict(X)
 
         # Regrouper les mots par cluster
@@ -180,118 +211,93 @@ class KeywordClusteringWidget(Widget):
                 clusters[label] = []
             clusters[label].append(mot)
 
-        # Assigner les thématiques
-        resultats = {}
-        if use_predefined:
-            # Approche hybride : utiliser thématiques prédéfinies si similarité > 0.7
-            embeddings_thematiques = {th: model.encode(th) for th in self.themes}
-            for label, mots in clusters.items():
-                emb_cluster = np.mean([embeddings[mot] for mot in mots], axis=0)
-                similarites = {
-                    th: cosine_similarity([emb_cluster], [embeddings_thematiques[th]])[0][0]
-                    for th in self.themes
-                }
-                max_sim = max(similarites.values())
-                if max_sim > 0.7:  # Seuil pour utiliser une thématique prédéfinie
-                    th_choisie = max(similarites, key=similarites.get)
-                else:
-                    th_choisie = max(mots, key=lambda mot: keywords[mot])  # Mot-clé le plus fréquent
-                resultats[th_choisie] = mots
-        else:
-            # Nommage par mot-clé le plus fréquent
-            for label, mots in clusters.items():
-                th_choisie = max(mots, key=lambda mot: keywords[mot])
-                resultats[th_choisie] = mots
+        # Nommer les thématiques par mot-clé le plus fréquent
+        themes = []
+        for mots in clusters.values():
+            if mots:
+                theme = max(mots, key=lambda mot: keywords[mot])
+                themes.append(theme)
+        return themes
 
-        # Gérer la transversalité
-        resultats_transversaux = {th: [] for th in resultats}
+    def suggest_keywords(self, theme, keywords, seuil=0.8):
+        """Suggérer des mots-clés proches sémantiquement d'une thématique."""
+        if not keywords:
+            return []
+        model = self.load_model()
+        emb_theme = model.encode(theme)
+        embeddings = {mot: model.encode(mot) for mot in keywords}
+        suggestions = []
         for mot in keywords:
-            emb_mot = embeddings[mot]
-            for th in resultats:
-                emb_th = embeddings[th]
-                sim = cosine_similarity([emb_mot], [emb_th])[0][0]
-                if sim > seuil:
-                    resultats_transversaux[th].append(mot)
-
-        # Calculer les poids
-        poids_thematiques = {
-            th: sum(keywords.get(mot, 0) for mot in mots)
-            for th, mots in resultats_transversaux.items()
-        }
-
-        return resultats_transversaux, poids_thematiques
+            sim = cosine_similarity([emb_theme], [embeddings[mot]])[0][0]
+            if sim > seuil:
+                suggestions.append((mot, sim))
+        # Trier par similarité décroissante et limiter à 20 suggestions
+        suggestions = sorted(suggestions, key=lambda x: x[1], reverse=True)[:20]
+        return [mot for mot, _ in suggestions]
 
     def display(self):
         """Afficher l'interface Streamlit."""
         st.title(t("title"))
 
-        # Gestion des thématiques prédéfinies
+        # Gestion des thématiques
         st.subheader(t("predefined_themes"))
-        themes_text = "\n".join(self.themes)
-        new_themes = st.text_area(
+        themes_text = st.text_area(
             t("predefined_themes"),
-            value=themes_text,
-            height=200
+            value=st.session_state[f"{self.prefix}_themes_text"],
+            height=200,
+            key=f"{self.prefix}_themes_text_input"
         )
+        self.themes = self.text_to_themes(themes_text)
         if st.button(t("save_themes")):
-            themes = [t.strip().lower() for t in new_themes.split("\n") if t.strip()]
-            self.themes = themes
-            self.save_themes(themes)
-
-        # Checkbox pour thématiques prédéfinies
-        use_predefined = st.checkbox(t("use_predefined_themes"), value=True)
+            self.save_themes(self.themes)
+            st.session_state[f"{self.prefix}_themes_text"] = themes_text
 
         # Chargement des mots-clés
         st.subheader(t("keywords_file"))
         json_file = st.file_uploader(t("upload_json"), type=["json"])
-        fuzzy_ratio = st.session_state.get(f"{self.prefix}_fuzzy_ratio", 90)
-        keywords = load_keywords(self.work_directory, fuzzy_ratio=fuzzy_ratio, json_file=json_file)
+        keywords = load_keywords(self.work_directory, st.session_state.get(f"{self.prefix}_fuzzy_ratio", 90), json_file)
         if not keywords:
             st.warning(t("no_file"))
             return
 
-        # Paramètres de clustering
-        cluster_option = st.radio(
-            t("select_clusters"),
-            options=[t("auto_clusters"), "Manuel"],
-            index=0
-        )
-        n_clusters = 10
-        min_clusters = 5
-        seuil = 0.8
-        fuzzy_ratio = 90
+        # Afficher les mots-clés restants et thématisés
+        st.subheader(t("remaining_keywords"))
+        remaining_keywords, remaining_count, remaining_weight = self.get_remaining_keywords(keywords, self.themes)
+        thematized_keywords = self.get_thematized_keywords(keywords, self.themes)
 
-        # Sliders sur une même ligne
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.write(f"**{t('remaining_count')}**: {remaining_count}")
+        col2.write(f"**{t('remaining_weight')}**: {remaining_weight}")
+        remaining_text = "\n".join([f"{k}: {v}" for k, v in remaining_keywords.items()])
+        thematized_text = "\n".join([f"{k}: {v}" for k, v in thematized_keywords.items()])
+        col3.text_area(
+            t("remaining_keywords"),
+            value=remaining_text if remaining_text else "Aucun",
+            height=100,
+            disabled=True,
+            key=f"{self.prefix}_remaining_keywords"
+        )
+        col4.text_area(
+            t("thematized_keywords"),
+            value=thematized_text if thematized_text else "Aucun",
+            height=100,
+            disabled=True,
+            key=f"{self.prefix}_thematized_keywords"
+        )
+
+        # Paramètres
+        col1, col2 = st.columns(2)
         with col1:
-            if cluster_option == "Manuel":
-                n_clusters = st.slider(
-                    "Nombre de clusters",
-                    min_value=2,
-                    max_value=50,
-                    value=10,
-                    step=1,
-                    key=f"{self.prefix}_n_clusters"
-                )
-            else:
-                min_clusters = st.slider(
-                    t("min_clusters"),
-                    min_value=5,
-                    max_value=20,
-                    value=5,
-                    step=1,
-                    key=f"{self.prefix}_min_clusters"
-                )
-        with col2:
             seuil = st.slider(
                 t("similarity_threshold"),
-                min_value=0.6,
-                max_value=0.9,
+                min_value=0.0,
+                max_value=1.0,
                 value=0.8,
-                step=0.05,
+                step=0.01,
                 key=f"{self.prefix}_seuil"
             )
-        with col3:
+        with col2:
             fuzzy_ratio = st.slider(
                 t("fuzzy_ratio"),
                 min_value=70,
@@ -301,35 +307,58 @@ class KeywordClusteringWidget(Widget):
                 key=f"{self.prefix}_fuzzy_ratio"
             )
 
-        # Bouton pour lancer le clustering
-        if st.button(t("cluster_button")):
-            with st.spinner(t("clustering")):
-                auto_clusters = (cluster_option == t("auto_clusters"))
-                resultats, poids = self.cluster_keywords(
-                    keywords, n_clusters, auto_clusters, min_clusters, seuil, use_predefined
+        # Étape 1 : Suggérer de nouvelles thématiques
+        st.subheader(t("suggest_themes"))
+        if not remaining_keywords:
+            st.warning(t("no_keywords_left"))
+        else:
+            n_clusters = st.slider(
+                "Nombre de thématiques à suggérer",
+                min_value=1,
+                max_value=20,
+                value=5,
+                step=1,
+                key=f"{self.prefix}_n_clusters_themes"
+            )
+            if st.button(t("suggest_themes")):
+                with st.spinner(t("results_title")):
+                    suggested_themes = self.suggest_themes(remaining_keywords, n_clusters)
+                    st.session_state[f"{self.prefix}_suggested_themes"] = suggested_themes
+            if f"{self.prefix}_suggested_themes" in st.session_state and st.session_state[f"{self.prefix}_suggested_themes"]:
+                selected_themes = st.multiselect(
+                    t("select_themes"),
+                    options=st.session_state[f"{self.prefix}_suggested_themes"],
+                    default=[],
+                    key=f"{self.prefix}_select_themes"
                 )
+                if selected_themes and st.button(t("confirm_themes")):
+                    for theme in selected_themes:
+                        if theme not in self.themes:
+                            self.themes[theme] = []
+                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
+                    st.rerun()
 
-                # Afficher les résultats
-                st.subheader(t("results_title"))
-                thematiques_triees = sorted(
-                    [(th, poids[th]) for th in resultats if poids[th] > 0],
-                    key=lambda x: x[1],
-                    reverse=True
+        # Étape 2 : Suggérer des mots-clés pour une thématique
+        st.subheader(t("suggest_keywords"))
+        if self.themes:
+            selected_theme = st.selectbox(
+                t("select_theme"),
+                options=list(self.themes.keys()),
+                key=f"{self.prefix}_select_theme"
+            )
+            st.write(f"**{t('current_keywords')}**: {', '.join(self.themes[selected_theme]) if self.themes[selected_theme] else 'Aucun'}")
+            if st.button(t("suggest_keywords")):
+                with st.spinner(t("results_title")):
+                    suggested_keywords = self.suggest_keywords(selected_theme, remaining_keywords, seuil)
+                    st.session_state[f"{self.prefix}_suggested_keywords"] = suggested_keywords
+            if f"{self.prefix}_suggested_keywords" in st.session_state and st.session_state[f"{self.prefix}_suggested_keywords"]:
+                selected_keywords = st.multiselect(
+                    t("suggested_keywords"),
+                    options=st.session_state[f"{self.prefix}_suggested_keywords"],
+                    default=[],
+                    key=f"{self.prefix}_select_keywords"
                 )
-                data = []
-                for th, poids_th in thematiques_triees:
-                    mots = resultats[th]
-                    mots_str = ", ".join(mots)
-                    data.append({"Thématique": th, "Poids": poids_th, "Mots-clés": mots_str})
-                st.table(data)
-
-                # Bouton d'exportation
-                if st.button(t("export_results")):
-                    with open(os.path.join(self.work_directory, "thematiques.json"), "w", encoding="utf-8") as f:
-                        json.dump(
-                            {"thematiques": {th: {"mots": resultats[th], "poids": poids[th]} for th in resultats}},
-                            f,
-                            ensure_ascii=False,
-                            indent=2
-                        )
-                    st.success(t("export_success"))
+                if selected_keywords and st.button(t("add_keywords")):
+                    self.themes[selected_theme].extend([k for k in selected_keywords if k not in self.themes[selected_theme]])
+                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
+                    st.rerun()
