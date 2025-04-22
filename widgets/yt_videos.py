@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
 import pandas as pd
-import os
+import os, json
 
 translations["en"].update({
     "marketyoutube_header_videos": "YouTube Video Database",
@@ -31,7 +31,10 @@ translations["en"].update({
     "marketyoutube_filter_title_desc": "Title and Description",
     "marketyoutube_filter_all": "All",
     "marketyoutube_keyword": "Search keyword",
-    "marketyoutube_filter_keywords": "Filter by keywords"
+    "marketyoutube_filter_keywords": "Filter by keywords",
+    "marketyoutube_export_keywords": "Export Keywords (JSON)",
+    "marketyoutube_export_success": "Keywords exported to {path}",
+    "marketyoutube_export_error": "Export error: {error}",
 })
 
 translations["fr"].update({
@@ -55,7 +58,10 @@ translations["fr"].update({
     "marketyoutube_filter_title_desc": "Titre et description",
     "marketyoutube_filter_all": "Tout",
     "marketyoutube_keyword": "Mot-clé de recherche",
-    "marketyoutube_filter_keywords": "Filtrer par mots-clés"
+    "marketyoutube_filter_keywords": "Filtrer par mots-clés",
+    "marketyoutube_export_keywords": "Exporter mots-clés (JSON)",
+    "marketyoutube_export_success": "Mots-clés exportés vers {path}",
+    "marketyoutube_export_error": "Erreur export : {error}",
 })
 
 
@@ -91,50 +97,32 @@ class VideoDatabaseWidget(Widget):
         )
         return [kw.strip() for kw in llm_response.split(",")]
 
-    def sync_transcripts(self, channel_id: str, youtube_api, config):
-        """Synchronizes transcripts for all videos in the channel that lack them."""
-        videos = get_videos()  # Retrieve all videos from the database
-        total_videos = len(videos)
-        processed = 0
-        successes = 0
-        errors = []
+    def export_keywords_to_json(self, config):
+        """Export simple liste mots-clés avec poids"""
+        work_dir = config['common']['work_directory']
+        output_path = os.path.join(work_dir, "keywords.json")
 
-        with st.spinner(t("marketyoutube_syncing")):
-            progress_bar = st.progress(0)
+        try:
+            # Compter les occurrences
+            keyword_counts = {}
+            for video in get_videos():
+                if 'keywords' in video:
+                    for kw in video['keywords']:
+                        keyword_counts[kw] = keyword_counts.get(kw, 0) + 1
 
-            for video in videos:
-                current_transcript = get_video_transcript(video['video_id'])
-                if not current_transcript:
-                    try:
-                        transcript, lang = youtube_api.get_transcript(
-                            video['video_id'],
-                            config['common']['language']
-                        )
-                        if transcript:
-                            save_transcript(video['video_id'], transcript)
-                            successes += 1
-                        else:
-                            errors.append(
-                                f"{video['title']} ({video['video_id']}): No transcript available")
-                    except Exception as e:
-                        error_msg = f"{video['title']} ({video['video_id']}): {str(e)}"
-                        errors.append(error_msg)
+            # Trier par poids décroissant
+            sorted_kw = dict(sorted(
+                keyword_counts.items(),
+                key=lambda x: -x[1]
+            ))
 
-                processed += 1
-                progress_bar.progress(processed / total_videos)
+            # Écrire le JSON simple
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(sorted_kw, f, indent=2, ensure_ascii=False)
 
-            progress_bar.empty()
-
-            if total_videos > 0:
-                st.success(t("marketyoutube_sync_complete"))
-                st.write(
-                    f"Transcripts synchronized successfully: {successes}/{total_videos}")
-                if errors:
-                    with st.expander("Error details"):
-                        for error in errors:
-                            st.write(error)
-            else:
-                st.info("No videos to synchronize.")
+            st.success(t("marketyoutube_export_success").format(path=output_path))
+        except Exception as e:
+            st.error(t("marketyoutube_export_error").format(error=str(e)))
 
     def generate_transcript(self, video_id: str, title: str) -> str:
         """Generate transcript by downloading video and processing it with transcript plugin."""
@@ -483,9 +471,8 @@ class VideoDatabaseWidget(Widget):
                                 ['channel_id'], self.youtube_api)
                     st.success(t("marketyoutube_sync_complete"))
         with col2:
-            if st.button(t("marketyoutube_sync_transcripts"), key=f"{self.prefix}_sync_transcripts"):
-                self.sync_transcripts(
-                    config['common']['channel_id'], self.youtube_api, config)
+            if st.button(t("marketyoutube_export_keywords"), key=f"{self.prefix}_export_keywords"):
+                    self.export_keywords_to_json(self.plugin_manager.config)
         with col3:
             if st.button("Reset Database Structure", key=f"{self.prefix}_reset_database"):
                 with st.spinner("Resetting database..."):
