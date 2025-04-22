@@ -18,3 +18,7 @@ canva_token.json
 code_verifier.txt
 www.youtube.com_cookies.txt
 installed_packages.txt
+.ropeproject
+widgets/.ropeproject
+lib/.ropeproject
+plugins/.ropeproject
