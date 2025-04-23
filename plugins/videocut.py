@@ -2,7 +2,7 @@ from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from plugins.common import remove_quotes
-from video_utils import (
+from lib.video_utils import (
     scan_videos, load_subtitles_and_chapters, save_vtt, generate_subtitles,
     convert_to_mp4, rename_video, merge_videos, split_video, delete_videos,
     generate_thumbnail, format_time, parse_timecode_to_ms, split_by_chapters, normalize_audio
@@ -11,7 +11,7 @@ import pandas as pd
 import os
 from plugins.trimsilences import TrimsilencesPlugin
 from plugins.chromakey import ChromakeyPlugin
-from chromakey_background import replace_background
+from lib.chromakey_background import replace_background
 
 # Traductions
 translations["en"].update({
@@ -239,53 +239,67 @@ class VideocutPlugin(Plugin):
 
                     col_merge, col_delete = st.columns(2)
                     with col_merge:
-                                            # Préparer la liste des vidéos sélectionnées
-                                            selected_video_paths = [video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
-                                                                   for idx in selected_videos["selection"]["rows"]]
-                                            if len(selected_video_paths) >= 2:
-                                                # Afficher le text_area pour réorganiser les vidéos
-                                                default_text = "\n".join([os.path.basename(path) for path in selected_video_paths])
-                                                video_order_input = st.text_area(
-                                                    "Videos to merge (one per line, reorder as needed)",
-                                                    default_text,
-                                                    height=150,
-                                                    help="Rearrange the videos by editing the list. Each line represents one video."
-                                                )
-                                            else:
-                                                st.write("Select at least two videos to enable merging.")
-                                                video_order_input = ""
+                        # Préparer la liste des vidéos sélectionnées
+                        selected_video_paths = [video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
+                                                for idx in selected_videos["selection"]["rows"]]
+                        if len(selected_video_paths) >= 2:
+                            # Afficher le text_area pour réorganiser les vidéos
+                            default_text = "\n".join(
+                                [os.path.basename(path) for path in selected_video_paths])
+                            video_order_input = st.text_area(
+                                "Videos to merge (one per line, reorder as needed)",
+                                default_text,
+                                height=150,
+                                help="Rearrange the videos by editing the list. Each line represents one video."
+                            )
+                        else:
+                            st.write(
+                                "Select at least two videos to enable merging.")
+                            video_order_input = ""
 
-                                            # Bouton Fusionner
-                                            if st.button(t("video_merge")) and selected_videos["selection"]["rows"]:
-                                                if len(selected_video_paths) < 2:
-                                                    st.error("Please select at least two videos to merge.")
-                                                else:
-                                                    # Traiter l'entrée utilisateur
-                                                    new_order_names = [line.strip() for line in video_order_input.split("\n") if line.strip()]
-                                                    # Vérifier que toutes les vidéos entrées sont valides
-                                                    original_names = [os.path.basename(path) for path in selected_video_paths]
-                                                    invalid_entries = [name for name in new_order_names if name not in original_names]
-                                                    if invalid_entries:
-                                                        st.error(f"Invalid video names: {', '.join(invalid_entries)}. Please use only the selected videos.")
-                                                    elif len(new_order_names) < 2:
-                                                        st.error("At least two videos are required to merge.")
-                                                    else:
-                                                        # Reconstruire la liste des chemins dans le nouvel ordre
-                                                        name_to_path = {os.path.basename(path): path for path in selected_video_paths}
-                                                        reordered_paths = [name_to_path[name] for name in new_order_names]
-                                                        # Mettre à jour l'ordre dans video_df pour refléter dans st.session_state["video_order"]
-                                                        new_order_indices = []
-                                                        for path in reordered_paths:
-                                                            idx = video_df[video_df["Full Path"] == path].index[0]
-                                                            new_order_indices.append(idx)
-                                                        # Mettre à jour video_order en plaçant les vidéos fusionnées en premier
-                                                        current_order = st.session_state["video_order"]
-                                                        unselected_indices = [i for i in current_order if i not in new_order_indices]
-                                                        st.session_state["video_order"] = new_order_indices + unselected_indices
-                                                        # Lancer la fusion
-                                                        with st.spinner("Merging videos..."):
-                                                            merge_videos(reordered_paths, self.working_dir)
-                                                        st.rerun()
+                        # Bouton Fusionner
+                        if st.button(t("video_merge")) and selected_videos["selection"]["rows"]:
+                            if len(selected_video_paths) < 2:
+                                st.error(
+                                    "Please select at least two videos to merge.")
+                            else:
+                                # Traiter l'entrée utilisateur
+                                new_order_names = [
+                                    line.strip() for line in video_order_input.split("\n") if line.strip()]
+                                # Vérifier que toutes les vidéos entrées sont valides
+                                original_names = [os.path.basename(
+                                    path) for path in selected_video_paths]
+                                invalid_entries = [
+                                    name for name in new_order_names if name not in original_names]
+                                if invalid_entries:
+                                    st.error(
+                                        f"Invalid video names: {', '.join(invalid_entries)}. Please use only the selected videos.")
+                                elif len(new_order_names) < 2:
+                                    st.error(
+                                        "At least two videos are required to merge.")
+                                else:
+                                    # Reconstruire la liste des chemins dans le nouvel ordre
+                                    name_to_path = {os.path.basename(
+                                        path): path for path in selected_video_paths}
+                                    reordered_paths = [name_to_path[name]
+                                                       for name in new_order_names]
+                                    # Mettre à jour l'ordre dans video_df pour refléter dans st.session_state["video_order"]
+                                    new_order_indices = []
+                                    for path in reordered_paths:
+                                        idx = video_df[video_df["Full Path"]
+                                                       == path].index[0]
+                                        new_order_indices.append(idx)
+                                    # Mettre à jour video_order en plaçant les vidéos fusionnées en premier
+                                    current_order = st.session_state["video_order"]
+                                    unselected_indices = [
+                                        i for i in current_order if i not in new_order_indices]
+                                    st.session_state["video_order"] = new_order_indices + \
+                                        unselected_indices
+                                    # Lancer la fusion
+                                    with st.spinner("Merging videos..."):
+                                        merge_videos(
+                                            reordered_paths, self.working_dir)
+                                    st.rerun()
 
                     with col_delete:
                         # Initialiser l'état dans session_state si non présent
@@ -409,14 +423,17 @@ class VideocutPlugin(Plugin):
                     col1_actions, col2_actions, col3_actions = st.columns(3)
                     with col1_actions:
                         # Section Chromakey
-                        background_directory = config.get('chromakey', {}).get('background_directory', '')
+                        background_directory = config.get(
+                            'chromakey', {}).get('background_directory', '')
                         if not background_directory:
-                            st.error("Background directory not configured in chromakey plugin")
+                            st.error(
+                                "Background directory not configured in chromakey plugin")
                         else:
                             background_files = [f for f in os.listdir(background_directory)
-                                             if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+                                                if f.lower().endswith(('.mp4', '.avi', '.mov'))]
                             if not background_files:
-                                st.error("No background videos found in directory")
+                                st.error(
+                                    "No background videos found in directory")
                             else:
                                 # Afficher la sélection du fond
                                 selected_background = st.selectbox(
@@ -429,17 +446,25 @@ class VideocutPlugin(Plugin):
                                 if st.button("Replace Green Screen") and selected_videos["selection"]["rows"]:
                                     with st.spinner("Replacing green screens..."):
                                         for idx in selected_videos["selection"]["rows"]:
-                                            video_path = video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
+                                            video_path = video_df.iloc[st.session_state["video_order"]
+                                                                       [idx]]["Full Path"]
                                             try:
-                                                background_path = os.path.join(background_directory, selected_background)
+                                                background_path = os.path.join(
+                                                    background_directory, selected_background)
                                                 result_filename = f"chroma_{os.path.basename(video_path)}"
-                                                result_path = os.path.join(os.path.dirname(video_path), result_filename)
-                                                target_color_rgb = config.get('chromakey', {}).get("default_target_color", "#00FF00")
-                                                target_color_rgb = [int(target_color_rgb.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)]
-                                                replace_background(video_path, background_path, result_path, target_color_rgb)
-                                                st.success(f"Green screen replaced for {os.path.basename(video_path)}")
+                                                result_path = os.path.join(
+                                                    os.path.dirname(video_path), result_filename)
+                                                target_color_rgb = config.get('chromakey', {}).get(
+                                                    "default_target_color", "#00FF00")
+                                                target_color_rgb = [int(target_color_rgb.lstrip('#')[
+                                                                        i:i+2], 16) for i in (0, 2, 4)]
+                                                replace_background(
+                                                    video_path, background_path, result_path, target_color_rgb)
+                                                st.success(
+                                                    f"Green screen replaced for {os.path.basename(video_path)}")
                                             except Exception as e:
-                                                st.error(f"Error processing {os.path.basename(video_path)}: {str(e)}")
+                                                st.error(
+                                                    f"Error processing {os.path.basename(video_path)}: {str(e)}")
                                         st.rerun()
 
                     with col2_actions:
@@ -447,15 +472,18 @@ class VideocutPlugin(Plugin):
                         if st.button(t("video_normalize_audio")) and selected_videos["selection"]["rows"]:
                             with st.spinner(t("video_normalize_processing")):
                                 for idx in selected_videos["selection"]["rows"]:
-                                    video_path = video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
+                                    video_path = video_df.iloc[st.session_state["video_order"]
+                                                               [idx]]["Full Path"]
                                     try:
                                         reference_audio_path = config.get("movied", {}).get(
                                             "movied_reference_audio", "")
-                                        normalize_audio(video_path, reference_audio_path)
+                                        normalize_audio(
+                                            video_path, reference_audio_path)
                                         st.success(t("video_normalize_success").format(
                                             video=os.path.basename(video_path)))
                                     except Exception as e:
-                                        st.error(t("video_error").format(error=str(e)))
+                                        st.error(
+                                            t("video_error").format(error=str(e)))
                             st.rerun()
 
                 with col3_actions:
@@ -463,7 +491,8 @@ class VideocutPlugin(Plugin):
                     if st.button("Trim Silences") and selected_videos["selection"]["rows"]:
                         with st.spinner("Trimming silences..."):
                             for idx in selected_videos["selection"]["rows"]:
-                                video_path = video_df.iloc[st.session_state["video_order"][idx]]["Full Path"]
+                                video_path = video_df.iloc[st.session_state["video_order"]
+                                                           [idx]]["Full Path"]
                                 try:
                                     result, reduction, original_duration, final_duration = self.trimsilences_plugin.remove_silence(
                                         video_path,
@@ -473,11 +502,14 @@ class VideocutPlugin(Plugin):
                                         os.path.dirname(video_path)
                                     )
                                     if isinstance(result, str) and (result.startswith("Erreur") or result.startswith("Une erreur")):
-                                        st.error(f"Error processing {os.path.basename(video_path)}: {result}")
+                                        st.error(
+                                            f"Error processing {os.path.basename(video_path)}: {result}")
                                     else:
-                                        st.success(f"Trimmed {os.path.basename(video_path)} - Reduction: {reduction}% | {original_duration:.1f}s → {final_duration:.1f}s")
+                                        st.success(
+                                            f"Trimmed {os.path.basename(video_path)} - Reduction: {reduction}% | {original_duration:.1f}s → {final_duration:.1f}s")
                                 except Exception as e:
-                                    st.error(f"Error processing {os.path.basename(video_path)}: {str(e)}")
+                                    st.error(
+                                        f"Error processing {os.path.basename(video_path)}: {str(e)}")
                             st.rerun()
 
     def handle_chapters(self, col1, selected_videos, video_df, show_end_columns):
@@ -772,7 +804,7 @@ class VideocutPlugin(Plugin):
         """Gère la sélection des répertoires avec des options spéciales"""
         # Liste tous les répertoires immédiats
         immediate_subdirs = [d for d in os.listdir(working_dir)
-                           if os.path.isdir(os.path.join(working_dir, d))]
+                             if os.path.isdir(os.path.join(working_dir, d))]
 
         # Options spéciales
         options = [
@@ -822,37 +854,39 @@ class VideocutPlugin(Plugin):
         return dirs_to_scan
 
     def run(self, config):
-            self.working_dir = config.get(self.name, {}).get(
-                "video_workdir", t("video_config_workdir_default"))
+        self.working_dir = config.get(self.name, {}).get(
+            "video_workdir", t("video_config_workdir_default"))
 
-            self.setup_header()
-            selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos, show_end_columns = self.setup_controls()
+        self.setup_header()
+        selected_model, generate_thumbnails, refresh_thumbnails, selected_extensions, mute_videos, show_end_columns = self.setup_controls()
 
-            # Nouveau sélecteur de répertoires
-            st.sidebar.markdown(f"**{t('video_directory_selector')}**")
-            dirs_to_scan = self.get_selected_directories(self.working_dir)
+        # Nouveau sélecteur de répertoires
+        st.sidebar.markdown(f"**{t('video_directory_selector')}**")
+        dirs_to_scan = self.get_selected_directories(self.working_dir)
 
-            if not dirs_to_scan:
-                return
+        if not dirs_to_scan:
+            return
 
-            # Scanner chaque répertoire selon les paramètres
-            video_dfs = []
-            for dir_path, recursive in dirs_to_scan:
-                video_df = scan_videos(dir_path, selected_extensions, recursive=recursive)
-                video_dfs.append(video_df)
+        # Scanner chaque répertoire selon les paramètres
+        video_dfs = []
+        for dir_path, recursive in dirs_to_scan:
+            video_df = scan_videos(
+                dir_path, selected_extensions, recursive=recursive)
+            video_dfs.append(video_df)
 
-            video_df = pd.concat(video_dfs).reset_index(drop=True) if video_dfs else pd.DataFrame()
+        video_df = pd.concat(video_dfs).reset_index(
+            drop=True) if video_dfs else pd.DataFrame()
 
-            if video_df.empty:
-                st.write("No videos found with the selected extensions.")
-                return
+        if video_df.empty:
+            st.write("No videos found with the selected extensions.")
+            return
 
-            col1, col2, selected_videos = self.display_videos(video_df)
-            self.handle_video_actions(
-                col1, selected_videos, video_df, selected_model, config)
-            self.handle_chapters(col1, selected_videos, video_df, show_end_columns)
-            self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails,
-                                 refresh_thumbnails, mute_videos, show_end_columns)
+        col1, col2, selected_videos = self.display_videos(video_df)
+        self.handle_video_actions(
+            col1, selected_videos, video_df, selected_model, config)
+        self.handle_chapters(col1, selected_videos, video_df, show_end_columns)
+        self.handle_subtitles(col2, selected_videos, video_df, generate_thumbnails,
+                              refresh_thumbnails, mute_videos, show_end_columns)
 
 
 if __name__ == "__main__":

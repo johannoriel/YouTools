@@ -9,7 +9,7 @@ import ast
 import time
 import random
 import re
-from bench_db import BenchDB
+from lib.bench_db import BenchDB
 import pandas as pd
 from PIL import Image, ImageDraw
 import io

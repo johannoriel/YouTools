@@ -4,7 +4,7 @@ import streamlit as st
 import os
 from typing import List, Dict, Any, Optional
 # Utilisation de l'API Twitter depuis social_api.py
-from social_api import TwitterAPI
+from lib.social_api import TwitterAPI
 import pyperclip  # Pour copier le texte en un clic
 
 # Ajout des traductions spécifiques à ce plugin
@@ -288,7 +288,8 @@ class PromotetwitterPlugin(Plugin):
                                 )
                                 llm_response = self.process_with_llm(
                                     prompt,
-                                    config.get('llm', {}).get('llm_sys_prompt', ''),
+                                    config.get('llm', {}).get(
+                                        'llm_sys_prompt', ''),
                                     tweet_text
                                 )
                                 clean_response = remove_quotes(

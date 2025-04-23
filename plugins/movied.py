@@ -11,7 +11,7 @@ from lib.video_utils import *
 from lib.video_anim import replace_with_image
 import json
 from moviepy import VideoFileClip
-from lib.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
+from widgets.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from datetime import datetime
 import glob
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
@@ -171,12 +171,16 @@ translations["fr"].update({
     "movied_insert_audio": "Insérer un Audio",
 })
 
+
 def time_to_seconds(time_str):
     h, m, s = map(float, time_str.replace(",", ".").split(":"))
     return h * 3600 + m * 60 + s
+
+
 def time_to_milliseconds(time_str):
     h, m, s = map(float, time_str.replace(",", ".").split(":"))
     return int((h * 3600 + m * 60 + s) * 1000)
+
 
 class MoviedPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -265,13 +269,15 @@ class MoviedPlugin(Plugin):
         st.header(t("movied_header"))
 
     def refresh_grid_key(self):
-        operations_hash = hash(st.session_state.get("operations", "")) if "operations" in st.session_state else 0
+        operations_hash = hash(st.session_state.get(
+            "operations", "")) if "operations" in st.session_state else 0
         grid_key = f"subtitles_grid_{operations_hash}"
         st.session_state.grid_key = grid_key
 
     def setup_controls(self):
         with st.sidebar.expander("Options"):
-            selected_model = st.selectbox(t("movied_model_label"), ["base", "medium", "turbo", "large-v3", "large-v3-turbo"], index=4)
+            selected_model = st.selectbox(t("movied_model_label"), [
+                                          "base", "medium", "turbo", "large-v3", "large-v3-turbo"], index=4)
             thumbnail_size = st.selectbox(
                 "Thumbnail Size",
                 ["small", "medium", "large"],
@@ -319,7 +325,7 @@ class MoviedPlugin(Plugin):
                             font_name = os.path.basename(font_path)
                             font_dict[font_name] = font_path
                     except Exception as e:
-                        #print(f"Impossible de lire la police {font_path} : {str(e)}")
+                        # print(f"Impossible de lire la police {font_path} : {str(e)}")
                         continue
 
                 # Liste des noms de polices pour l'affichage dans la selectbox
@@ -382,12 +388,14 @@ class MoviedPlugin(Plugin):
                 "editable": False,
             },
             "columnDefs": [
-                {"field": "Start", "headerName": "Start", "width": 110, "editable": False, "checkboxSelection": True},
-                {"field": "End", "headerName": "End", "width": 100, "editable": False},
+                {"field": "Start", "headerName": "Start", "width": 110,
+                    "editable": False, "checkboxSelection": True},
+                {"field": "End", "headerName": "End",
+                    "width": 100, "editable": False},
                 {"field": "Text", "headerName": "Text", "flex": 3, "editable": False,
                     "tooltipValueGetter": JsCode("""function(p) {return p.value}"""),
                     "headerTooltip": "Tooltip for caption",
-                },
+                 },
                 {
                     "field": "Category",
                     "width": 100,
@@ -396,13 +404,14 @@ class MoviedPlugin(Plugin):
                     "cellEditor": "agSelectCellEditor",
                     "cellEditorParams": {"values": ["", "illustration", "meme", "texte"]},
                 },
-                {"field": "Complement", "width": 150, "headerName": "Complement", "editable": True},
+                {"field": "Complement", "width": 150,
+                    "headerName": "Complement", "editable": True},
                 {"field": "Operation", "flex": 2, "headerName": "Operation", "editable": True,
                     "tooltipValueGetter": JsCode(
                         """function(p) {return p.value}"""
                     ),
                     "headerTooltip": "Tooltip for Operations",
-                },
+                 },
             ],
             "rowSelection": "multiple",
             "tooltipShowDelay": 100,
@@ -487,7 +496,8 @@ class MoviedPlugin(Plugin):
                 "Video": file,
                 "Full Path": full_path,
                 "Has Transcript": os.path.exists(vtt_path),
-                "Type": file_ext.upper()[1:]  # Ajout de la colonne Type (MP4/MKV)
+                # Ajout de la colonne Type (MP4/MKV)
+                "Type": file_ext.upper()[1:]
             })
         return pd.DataFrame(videos)
 
@@ -528,7 +538,8 @@ class MoviedPlugin(Plugin):
                         st.session_state["subtitles_df"] = subtitles_df
                         st.session_state["current_vtt_path"] = vtt_path
                         save_vtt(vtt_path, subtitles_df, pd.DataFrame())
-                        st.success(t("movied_success").format(video=os.path.basename(video_path)))
+                        st.success(t("movied_success").format(
+                            video=os.path.basename(video_path)))
                         st.rerun()
                     except Exception as e:
                         st.error(t("movied_error").format(error=str(e)))
@@ -590,13 +601,16 @@ class MoviedPlugin(Plugin):
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("Suggest All", key="suggest_all_btn"):
-                    self.handle_llm_suggestions(video_path, vtt_path, subtitles_df)
+                    self.handle_llm_suggestions(
+                        video_path, vtt_path, subtitles_df)
             with col2:
                 if st.button("Suggest for Selection", key="suggest_selection_btn", disabled=selected_rows.empty):
-                    self.handle_llm_suggestions_for_selection(video_path, vtt_path, selected_rows)
+                    self.handle_llm_suggestions_for_selection(
+                        video_path, vtt_path, selected_rows)
             with col3:
                 if st.button("Rafraîchir les opérations", key="refresh_ops_btn"):
-                    st.session_state["subtitles_df"] = self.update_operations_in_grid(st.session_state["subtitles_df"])
+                    st.session_state["subtitles_df"] = self.update_operations_in_grid(
+                        st.session_state["subtitles_df"])
                     # st.rerun()
 
             return selected_rows, subtitles_df, vtt_path
@@ -609,7 +623,8 @@ class MoviedPlugin(Plugin):
             return
 
         config = self.plugin_manager.config
-        edit_prompt = config.get(self.name, {}).get('edit_suggestion_prompt', self.get_config_fields()["edit_suggestion_prompt"]["default"])
+        edit_prompt = config.get(self.name, {}).get(
+            'edit_suggestion_prompt', self.get_config_fields()["edit_suggestion_prompt"]["default"])
 
         with st.spinner("Getting LLM suggestions for selection..."):
             subtitles_df = st.session_state["subtitles_df"]
@@ -638,21 +653,28 @@ class MoviedPlugin(Plugin):
                                         category = parts[1]
                                         complement = parts[2]
                                         # Localiser la ligne par Start et End
-                                        mask = (subtitles_df["Start"] == row["Start"]) & (subtitles_df["End"] == row["End"])
-                                        subtitles_df.loc[mask, "Category"] = category
-                                        subtitles_df.loc[mask, "Complement"] = complement
+                                        mask = (subtitles_df["Start"] == row["Start"]) & (
+                                            subtitles_df["End"] == row["End"])
+                                        subtitles_df.loc[mask,
+                                                         "Category"] = category
+                                        subtitles_df.loc[mask,
+                                                         "Complement"] = complement
                                 else:
                                     complement = parts[1]
                                     current_complement = row["Complement"]
                                     new_complement = f"{current_complement}, {complement}" if current_complement else complement
                                     # Localiser la ligne par Start et End
-                                    mask = (subtitles_df["Start"] == row["Start"]) & (subtitles_df["End"] == row["End"])
-                                    subtitles_df.loc[mask, "Complement"] = new_complement
+                                    mask = (subtitles_df["Start"] == row["Start"]) & (
+                                        subtitles_df["End"] == row["End"])
+                                    subtitles_df.loc[mask,
+                                                     "Complement"] = new_complement
                         except Exception as e:
-                            st.warning(f"Error parsing suggestion: {line} - {str(e)}")
+                            st.warning(
+                                f"Error parsing suggestion: {line} - {str(e)}")
 
             st.session_state["subtitles_df"] = subtitles_df
-            st.success(f"Applied suggestions to {len(selected_rows)} selected rows")
+            st.success(
+                f"Applied suggestions to {len(selected_rows)} selected rows")
             st.rerun()
 
     def handle_llm_suggestions(self, video_path, vtt_path, subtitles_df):
@@ -661,9 +683,9 @@ class MoviedPlugin(Plugin):
 
         # Récupérer les prompts depuis la configuration
         illustration_prompt = config.get(self.name, {}).get('illustration_prompt',
-            "Analyze the following subtitles and suggest where to add illustrations. Format: [ILLUSTRATION] start_time complement")
+                                                            "Analyze the following subtitles and suggest where to add illustrations. Format: [ILLUSTRATION] start_time complement")
         meme_prompt = config.get(self.name, {}).get('meme_prompt',
-            "Analyze the following subtitles and suggest where to add memes. Format: [MEME] start_time complement")
+                                                    "Analyze the following subtitles and suggest where to add memes. Format: [MEME] start_time complement")
 
         with st.spinner("Getting LLM suggestions..."):
             # Préparer le texte des sous-titres pour le LLM
@@ -706,11 +728,13 @@ class MoviedPlugin(Plugin):
                             start_sec = time_to_seconds(row["Start"])
                             end_sec = time_to_seconds(row["End"])
                             if start_sec <= start_time_sec <= end_sec:
-                                subtitles_df.at[idx, "Category"] = "illustration"
+                                subtitles_df.at[idx,
+                                                "Category"] = "illustration"
                                 subtitles_df.at[idx, "Complement"] = complement
                                 break
                     except Exception as e:
-                        st.warning(f"Error parsing illustration suggestion: {line} - {str(e)}")
+                        st.warning(
+                            f"Error parsing illustration suggestion: {line} - {str(e)}")
 
             # Traiter les suggestions de mèmes
             for line in meme_response.split('\n'):
@@ -732,7 +756,8 @@ class MoviedPlugin(Plugin):
                                 subtitles_df.at[idx, "Complement"] = complement
                                 break
                     except Exception as e:
-                        st.warning(f"Error parsing meme suggestion: {line} - {str(e)}")
+                        st.warning(
+                            f"Error parsing meme suggestion: {line} - {str(e)}")
 
             # Mettre à jour st.session_state pour refléter les changements dans l'AgGrid
             st.session_state["subtitles_df"] = subtitles_df
@@ -748,12 +773,15 @@ class MoviedPlugin(Plugin):
 
                 col1, col2 = st.columns(2)
                 with col1:
-                    edited_start = st.text_input(t("movied_start_time"), start_time, key="start_time")
+                    edited_start = st.text_input(
+                        t("movied_start_time"), start_time, key="start_time")
                 with col2:
-                    edited_end = st.text_input(t("movied_end_time"), end_time, key="end_time")
+                    edited_end = st.text_input(
+                        t("movied_end_time"), end_time, key="end_time")
                 return edited_start, edited_end
             else:
-                st.error("Selected final subtitle index out of bounds or DataFrame is empty.")
+                st.error(
+                    "Selected final subtitle index out of bounds or DataFrame is empty.")
                 return None, None
         return None, None
 
@@ -815,7 +843,8 @@ class MoviedPlugin(Plugin):
         """Affiche une prévisualisation du média dans une colonne centrale (1/3 de la largeur)."""
         st.subheader("Preview")
         if media_path.lower().endswith(IMAGE_EXTENSIONS):
-            st.image(media_path, use_container_width=True)  # Ajuste à la largeur de la colonne
+            # Ajuste à la largeur de la colonne
+            st.image(media_path, use_container_width=True)
         elif media_path.lower().endswith(VIDEO_EXTENSIONS):
             st.video(media_path, format="video/mp4", autoplay=True, muted=True)
         elif media_path.lower().endswith(AUDIO_EXTENSIONS):
@@ -951,7 +980,8 @@ class MoviedPlugin(Plugin):
         # Générer les opérations pour chaque groupe
         for group in groups:
             start_time = group[0]["Start"]
-            end_time = group[-1]["End"] if operation_type not in ["insert_video", "insertVideoWithText", "insert_audio"] else None
+            end_time = group[-1]["End"] if operation_type not in ["insert_video",
+                                                                  "insertVideoWithText", "insert_audio"] else None
 
             # Construire la commande
             if operation_type == "replace_image":
@@ -1015,7 +1045,8 @@ class MoviedPlugin(Plugin):
         if t("movied_all_directories") in selected_dirs:
             dirs_to_scan = self.media_dirs
         else:
-            dirs_to_scan = [d for d in selected_dirs if d != t("movied_all_directories")]
+            dirs_to_scan = [d for d in selected_dirs if d !=
+                            t("movied_all_directories")]
 
         if not dirs_to_scan:
             st.warning("Please select at least one directory.")
@@ -1030,9 +1061,11 @@ class MoviedPlugin(Plugin):
             initial_search = None
             if selected_rows is not None and not selected_rows.empty and "Category" in selected_rows.columns:
                 # Filtrer les lignes avec Category "illustration" ou "meme" et concaténer les Complement
-                valid_rows = selected_rows[selected_rows["Category"].isin(["illustration", "meme"])]
+                valid_rows = selected_rows[selected_rows["Category"].isin(
+                    ["illustration", "meme"])]
                 if not valid_rows.empty:
-                    initial_search = ", ".join(valid_rows["Complement"].dropna().astype(str))
+                    initial_search = ", ".join(
+                        valid_rows["Complement"].dropna().astype(str))
 
             selected_media = media_selector(
                 media_dirs=dirs_to_scan,
@@ -1098,7 +1131,8 @@ class MoviedPlugin(Plugin):
 
         with col5:
             if st.button(t("movied_replace_video_keep_audio"), key="replace_video_keep_audio_btn", disabled=not (is_video and has_selection)):
-                self.handle_operation("replace_video_keep_audio", selected_rows)
+                self.handle_operation(
+                    "replace_video_keep_audio", selected_rows)
 
         with col6:
             if st.button(t("movied_animate_text"), key="animate_text_btn", disabled=not (has_text and has_selection)):
@@ -1183,15 +1217,19 @@ class MoviedPlugin(Plugin):
         target_size = (main_clip.w, main_clip.h)
         duration_offset = 0
         operation_log = []
-        total_ops = len([op for op in operations.split("\n") if op.strip() and not op.strip().startswith("//")])
+        total_ops = len([op for op in operations.split(
+            "\n") if op.strip() and not op.strip().startswith("//")])
         progress_bar = st.progress(0)
         current_op = 0
 
-        text_background = st.session_state.get("text_background_select", t("movied_green_background"))
+        text_background = st.session_state.get(
+            "text_background_select", t("movied_green_background"))
         use_green_background = text_background == t("movied_green_background")
         background_type = "green" if use_green_background else "video"
-        text_style = st.session_state.get("text_style_select", t("movied_text_style_outline"))
-        text_style = "outline" if text_style == t("movied_text_style_outline") else "box"
+        text_style = st.session_state.get(
+            "text_style_select", t("movied_text_style_outline"))
+        text_style = "outline" if text_style == t(
+            "movied_text_style_outline") else "box"
 
         with st.expander("Debug Information"):
             for op in operations.split("\n"):
@@ -1208,7 +1246,8 @@ class MoviedPlugin(Plugin):
 
                 if cmd in ["insert_video", "insertVideoWithText", "insert_audio"]:
                     start_time = parts[1]
-                    start_sec = self.parse_timecode(start_time) + duration_offset
+                    start_sec = self.parse_timecode(
+                        start_time) + duration_offset
                     end_sec = None
                     remaining_args = " ".join(parts[2:])
                 else:
@@ -1216,12 +1255,15 @@ class MoviedPlugin(Plugin):
                     if start_time.endswith("F"):
                         start_sec = self.parse_timecode(start_time.rstrip("F"))
                     else:
-                        start_sec = self.parse_timecode(start_time) + duration_offset
+                        start_sec = self.parse_timecode(
+                            start_time) + duration_offset
                     if end_time.endswith("F"):
                         end_sec = self.parse_timecode(end_time.rstrip("F"))
                     else:
-                        end_sec = self.parse_timecode(end_time) + duration_offset
-                    remaining_args = " ".join(parts[3:]) if len(parts) > 3 else ""
+                        end_sec = self.parse_timecode(
+                            end_time) + duration_offset
+                    remaining_args = " ".join(
+                        parts[3:]) if len(parts) > 3 else ""
 
                 real_start = self.format_timecode(start_sec)
                 real_end = self.format_timecode(end_sec) if end_sec else None
@@ -1253,7 +1295,8 @@ class MoviedPlugin(Plugin):
                     except ValueError:
                         raise ValueError(
                             f"Invalid format for insertVideoWithText: {op_cleaned}. Use 'timecode path | text'")
-                    start_sec = self.parse_timecode(start_time) + duration_offset
+                    start_sec = self.parse_timecode(
+                        start_time) + duration_offset
                     real_start = self.format_timecode(start_sec)
                     main_clip, duration_change = insert_video_with_text(
                         main_clip, start_sec, video_path_insert, text, target_size, font, font_size, use_green_background, text_style)
@@ -1326,14 +1369,16 @@ class MoviedPlugin(Plugin):
     def execute_operations(self, video_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
             try:
-                main_clip, operation_log = self._execute_operations(video_path, operations, font, font_size)
+                main_clip, operation_log = self._execute_operations(
+                    video_path, operations, font, font_size)
                 output_path = os.path.splitext(video_path)[0] + "_edited.mp4"
                 main_clip.write_videofile(
                     output_path, codec="libx264", audio_codec="aac")
                 st.success(f"Video generated successfully at {output_path}")
 
                 # Créer un DataFrame avec les opérations et timecodes réels
-                operations_df = pd.DataFrame(operation_log, columns=["Nature", "Details", "Start", "End", "Duration"])
+                operations_df = pd.DataFrame(operation_log, columns=[
+                                             "Nature", "Details", "Start", "End", "Duration"])
                 st.session_state["operations_log"] = operations_df
                 st.session_state["generated_video_path"] = output_path
                 st.session_state.preview_mode = False
@@ -1344,9 +1389,11 @@ class MoviedPlugin(Plugin):
     def preview(self, video_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
             try:
-                main_clip, operation_log = self._execute_operations(video_path, operations, font, font_size)
+                main_clip, operation_log = self._execute_operations(
+                    video_path, operations, font, font_size)
                 st.success(f"Video generated successfully")
-                operations_df = pd.DataFrame(operation_log, columns=["Nature", "Details", "Start", "End", "Duration"])
+                operations_df = pd.DataFrame(operation_log, columns=[
+                                             "Nature", "Details", "Start", "End", "Duration"])
                 st.session_state["operations_log"] = operations_df
                 st.session_state.preview_mode = True
                 if 'previewclip' in st.session_state:
@@ -1371,7 +1418,8 @@ class MoviedPlugin(Plugin):
             return
 
         # Prepare data for export
-        subtitles_data = st.session_state["subtitles_df"].to_dict(orient="records")
+        subtitles_data = st.session_state["subtitles_df"].to_dict(
+            orient="records")
         operations = st.session_state.get("operations", "")
 
         export_data = {
@@ -1402,20 +1450,25 @@ class MoviedPlugin(Plugin):
 
             # Vérifier que subtitles_df existe dans session_state
             if "subtitles_df" not in st.session_state or st.session_state["subtitles_df"].empty:
-                st.warning("No current subtitles to merge with. Please load a video first.")
+                st.warning(
+                    "No current subtitles to merge with. Please load a video first.")
                 return
 
             # Récupérer le subtitles_df actuel
             subtitles_df = st.session_state["subtitles_df"].copy()
 
             # Colonnes attendues
-            expected_cols = ["Start", "End", "Category", "Complement", "Operation"]
+            expected_cols = ["Start", "End",
+                             "Category", "Complement", "Operation"]
             # Sélectionner uniquement les colonnes présentes dans subtitles_data
-            available_cols = [col for col in expected_cols if col in subtitles_data.columns]
+            available_cols = [
+                col for col in expected_cols if col in subtitles_data.columns]
             merge_data = subtitles_data[available_cols]
 
             # Fusionner avec subtitles_df
-            subtitles_df = subtitles_df.drop(columns=available_cols[2:], errors="ignore")  # Supprimer Category, Complement, Operation si présentes
+            # Supprimer Category, Complement, Operation si présentes
+            subtitles_df = subtitles_df.drop(
+                columns=available_cols[2:], errors="ignore")
             subtitles_df = subtitles_df.merge(
                 merge_data,
                 on=["Start", "End"],
@@ -1425,9 +1478,11 @@ class MoviedPlugin(Plugin):
             # S'assurer que les colonnes Category, Complement et Operation existent
             for col in ["Category", "Complement", "Operation"]:
                 if col not in subtitles_df.columns:
-                    subtitles_df[col] = ""  # Ajouter la colonne avec des chaînes vides
+                    # Ajouter la colonne avec des chaînes vides
+                    subtitles_df[col] = ""
                 else:
-                    subtitles_df[col] = subtitles_df[col].fillna("")  # Remplacer les NaN par des chaînes vides
+                    subtitles_df[col] = subtitles_df[col].fillna(
+                        "")  # Remplacer les NaN par des chaînes vides
 
             # Mettre à jour st.session_state
             st.session_state["subtitles_df"] = subtitles_df
@@ -1445,7 +1500,8 @@ class MoviedPlugin(Plugin):
 
     def import_data(self):
         # Use Streamlit file uploader in sidebar
-        uploaded_file = st.sidebar.file_uploader("Choose a JSON file", type="json", key="import_file")
+        uploaded_file = st.sidebar.file_uploader(
+            "Choose a JSON file", type="json", key="import_file")
         if uploaded_file and st.sidebar.button(t("movied_import")):
             try:
                 # Read and parse JSON
@@ -1470,9 +1526,12 @@ class MoviedPlugin(Plugin):
         self._import_data(imported_data, video_name)
 
     def run(self, config):
-        self.working_dir = config.get(self.name, {}).get("movied_workdir", t("movied_workdir_default"))
-        self.media_dirs = config.get(self.name, {}).get("movied_media_dirs", t("movied_media_dirs_default")).split("\n")
-        self.reference_audio_path = config.get(self.name, {}).get("movied_reference_audio", "/path/to/sample.mp3")
+        self.working_dir = config.get(self.name, {}).get(
+            "movied_workdir", t("movied_workdir_default"))
+        self.media_dirs = config.get(self.name, {}).get(
+            "movied_media_dirs", t("movied_media_dirs_default")).split("\n")
+        self.reference_audio_path = config.get(self.name, {}).get(
+            "movied_reference_audio", "/path/to/sample.mp3")
 
         # Initialisation des états de filtre
         if "exclude_edited" not in st.session_state:
@@ -1495,11 +1554,14 @@ class MoviedPlugin(Plugin):
             return
 
         selected_video = self.display_videos(video_df)
-        selected_rows, subtitles_df, vtt_path = self.handle_transcript(selected_video, video_df, selected_model)
+        selected_rows, subtitles_df, vtt_path = self.handle_transcript(
+            selected_video, video_df, selected_model)
 
         # Gestion des opérations
-        video_path = video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"] if selected_video["selection"]["rows"] else None
-        self.handle_operations(selected_rows, video_path, vtt_path, thumbnail_size, font, font_size)
+        video_path = video_df.iloc[selected_video["selection"]["rows"][0]
+                                   ]["Full Path"] if selected_video["selection"]["rows"] else None
+        self.handle_operations(selected_rows, video_path,
+                               vtt_path, thumbnail_size, font, font_size)
 
         # Zone de texte pour afficher et éditer les opérations
         operations = st.text_area(
@@ -1508,12 +1570,15 @@ class MoviedPlugin(Plugin):
             height=150,
             key="operations_area"
         )
-        st.session_state["operations"] = operations  # Met à jour les opérations avec les modifications manuelles
+        # Met à jour les opérations avec les modifications manuelles
+        st.session_state["operations"] = operations
 
         # Boutons de génération et vérification
-        col1, col2, col3, col4 = st.columns(4)  # Ajout d'une colonne pour "Ordonner"
+        # Ajout d'une colonne pour "Ordonner"
+        col1, col2, col3, col4 = st.columns(4)
         if col1.button(t("movied_generate"), key="generate_btn", type="primary") and st.session_state.get("operations"):
-            self.execute_operations(video_path, st.session_state.operations, font, font_size)
+            self.execute_operations(
+                video_path, st.session_state.operations, font, font_size)
             st.rerun()
         if col2.button(t("movied_verify")):
             self.verify_operations()
@@ -1524,6 +1589,7 @@ class MoviedPlugin(Plugin):
                 # Filtrer les lignes vides
                 ops_list = [op.strip() for op in ops_list if op.strip()]
                 # Trier par timecode (deuxième élément de chaque ligne)
+
                 def get_start_time(op):
                     parts = op.split()
                     return time_to_milliseconds(parts[1]) if len(parts) > 1 else float('inf')
@@ -1532,13 +1598,15 @@ class MoviedPlugin(Plugin):
                 st.session_state["operations"] = "\n".join(ops_list)
                 st.rerun()  # Rafraîchir pour afficher les opérations triées
         if col4.button("Preview"):
-            self.preview(video_path, st.session_state.operations, font, font_size)
+            self.preview(video_path, st.session_state.operations,
+                         font, font_size)
 
         # Gestion des données export/import
         with st.sidebar:
             st.header("Data Management")
             if selected_video["selection"]["rows"]:
-                video_name = os.path.splitext(os.path.basename(video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"]))[0]
+                video_name = os.path.splitext(os.path.basename(
+                    video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"]))[0]
                 if st.button(t("movied_export")):
                     self.export_data(video_name)
                 if st.button(t("movied_import_last")):
@@ -1558,21 +1626,26 @@ class MoviedPlugin(Plugin):
 
             if selected_operation["selection"]["rows"]:
                 selected_row = selected_operation["selection"]["rows"][0]
-                start_time_seconds = time_to_milliseconds(st.session_state["operations_log"].iloc[selected_row]["Start"])/1000
+                start_time_seconds = time_to_milliseconds(
+                    st.session_state["operations_log"].iloc[selected_row]["Start"])/1000
                 end_time_seconds = None
                 if pd.notna(st.session_state["operations_log"].iloc[selected_row]["End"]):
-                    end_time_seconds = time_to_milliseconds(st.session_state["operations_log"].iloc[selected_row]["End"])/1000
+                    end_time_seconds = time_to_milliseconds(
+                        st.session_state["operations_log"].iloc[selected_row]["End"])/1000
 
                 if st.session_state.preview_mode and video_path:
                     main_clip = st.session_state.previewclip
                     clip_duration = main_clip.duration
                     start_preview = max(0, start_time_seconds - preview_buffer)
                     if end_time_seconds is not None:
-                        end_preview = min(clip_duration, end_time_seconds + preview_buffer)
+                        end_preview = min(
+                            clip_duration, end_time_seconds + preview_buffer)
                     else:
-                        end_preview = min(clip_duration, start_time_seconds + preview_buffer)
+                        end_preview = min(
+                            clip_duration, start_time_seconds + preview_buffer)
                     try:
-                        preview_clip = main_clip.subclipped(start_preview, end_preview)
+                        preview_clip = main_clip.subclipped(
+                            start_preview, end_preview)
                         preview_clip.preview()
                         preview_clip.close()
                     except Exception as e:

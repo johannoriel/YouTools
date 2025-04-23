@@ -4,7 +4,7 @@ import streamlit as st
 import os
 from typing import List, Dict, Any, Optional
 # Utilisation de l'API Bluesky depuis social_api.py
-from social_api import BlueskyAPI
+from lib.social_api import BlueskyAPI
 import pyperclip  # Pour copier le texte en un clic
 
 # Ajout des traductions spécifiques à ce plugin

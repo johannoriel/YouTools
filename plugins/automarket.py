@@ -819,8 +819,8 @@ class AutomarketPlugin(Plugin):
         return comments
 
     def run(self, config):
-        tab1, tab2, tab3 = st.tabs(
-            ["Lancer une campagne", "Réponses existantes", t("monitor_trends_tab")])
+        tab1, tab2 = st.tabs(
+            ["Lancer une campagne", t("monitor_trends_tab")])
         self._initialize_session_state()
         if 'campaign_timestamp' not in st.session_state:
             st.session_state.campaign_timestamp = datetime.now(
@@ -965,10 +965,6 @@ class AutomarketPlugin(Plugin):
                                        st.session_state.campaign_responses, st.session_state.campaign_timestamp)
 
         with tab2:
-            st.write("tab2")
-            self.response_db_widget.display()
-
-        with tab3:
             st.header(t("monitor_trends_header"))
 
             all_keywords = set()

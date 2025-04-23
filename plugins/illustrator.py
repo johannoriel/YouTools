@@ -4,8 +4,8 @@ import streamlit as st
 from plugins.common import remove_quotes
 import os
 import shutil
-from lib.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
-from assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, VlipsyAPI, asset_memory_download, asset_download
+from widgets.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
+from lib.assets_api import PexelsAPI, GoogleImageAPI, DuckDuckGoImageAPI, VlipsyAPI, asset_memory_download, asset_download
 from io import BytesIO
 from lib.youtube_api import YoutubeAPI
 import re
@@ -211,14 +211,16 @@ class IllustratorPlugin(Plugin):
                 if media_type == 'photo':
                     st.image(media_data)
                 elif media_type == 'video':
-                    st.video(media_data, format="video/mp4", autoplay=True, muted=True)
+                    st.video(media_data, format="video/mp4",
+                             autoplay=True, muted=True)
 
             # Cas des chemins de fichiers locaux
             elif isinstance(media_data, str):
                 if media_data.lower().endswith(IMAGE_EXTENSIONS):
                     st.image(media_data)
                 elif media_data.lower().endswith(VIDEO_EXTENSIONS):
-                    st.video(media_data, format="video/mp4", autoplay=True, muted=True)
+                    st.video(media_data, format="video/mp4",
+                             autoplay=True, muted=True)
                 elif media_data.lower().endswith(AUDIO_EXTENSIONS):
                     st.audio(media_data)
 
@@ -227,7 +229,8 @@ class IllustratorPlugin(Plugin):
                 if media_data['original_data']['type'] == 'photo':
                     st.image(media_data['url'])
                 else:
-                    st.video(media_data['url'], format="video/mp4", autoplay=True, muted=True)
+                    st.video(
+                        media_data['url'], format="video/mp4", autoplay=True, muted=True)
 
     def folder_selector_with_creation(self, base_dir, key=None):
         """Sélection de dossier avec option de création de nouveau dossier"""
@@ -354,7 +357,6 @@ class IllustratorPlugin(Plugin):
 
             return selected_media
 
-
     def _save_media_options(self, media_buffer, media_name, media_type, stored_dir, current_dir, prefix=""):
         """Affiche les options de sauvegarde communes pour tous les moteurs de recherche"""
         st.markdown("---")
@@ -366,18 +368,20 @@ class IllustratorPlugin(Plugin):
         cleaned_media_name = cleaned_media_name.strip('-')
 
         # Récupérer le dernier mot-clé utilisé pour cette recherche spécifique
-        search_keyword = st.session_state.get(f"last_search_keyword_{prefix}", "")
+        search_keyword = st.session_state.get(
+            f"last_search_keyword_{prefix}", "")
 
         # Ajouter le mot-clé de recherche si disponible et non présent
         if (search_keyword and
-            search_keyword.lower() not in cleaned_media_name.lower()):
+                search_keyword.lower() not in cleaned_media_name.lower()):
             # Nettoyer le mot-clé pour le nom de fichier
             clean_keyword = re.sub(r'[^\w\-_]', '-', search_keyword)
             clean_keyword = re.sub(r'-+', '-', clean_keyword).strip('-')
             cleaned_media_name = f"{cleaned_media_name}_{clean_keyword}"
 
         ext = '.mp4' if media_type == 'video' else '.jpg'
-        reference_audio_path = self.config.get("movied", {}).get("movied_reference_audio", "")
+        reference_audio_path = self.config.get(
+            "movied", {}).get("movied_reference_audio", "")
 
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -393,20 +397,23 @@ class IllustratorPlugin(Plugin):
 
                     if media_type == 'video':
                         with st.spinner("Normalizing audio..."):
-                            normalize_audio(filepath, reference_audio_path, make_backup=False)
+                            normalize_audio(
+                                filepath, reference_audio_path, make_backup=False)
 
                     st.success(f"Added to current assets: {filepath}")
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
         with col2:
-            selected_subdir = self.folder_selector_with_creation(stored_dir, f"save_{prefix}_{cleaned_media_name}")
+            selected_subdir = self.folder_selector_with_creation(
+                stored_dir, f"save_{prefix}_{cleaned_media_name}")
 
         with col3:
             if selected_subdir and st.button(t("download_to_stored"), key=f"download_stored_{prefix}_{cleaned_media_name}"):
                 try:
                     filename = f"{cleaned_media_name}{ext}"
-                    filepath = os.path.join(stored_dir, selected_subdir, filename)
+                    filepath = os.path.join(
+                        stored_dir, selected_subdir, filename)
 
                     with open(filepath, 'wb') as f:
                         media_buffer.seek(0)
@@ -414,7 +421,8 @@ class IllustratorPlugin(Plugin):
 
                     if media_type == 'video':
                         with st.spinner("Normalizing audio..."):
-                            normalize_audio(filepath, reference_audio_path, make_backup=False)
+                            normalize_audio(
+                                filepath, reference_audio_path, make_backup=False)
 
                     st.success(f"Saved to stored assets: {filepath}")
                 except Exception as e:
@@ -425,14 +433,16 @@ class IllustratorPlugin(Plugin):
                 try:
                     # Save to stored
                     filename = f"{cleaned_media_name}{ext}"
-                    stored_path = os.path.join(stored_dir, selected_subdir, filename)
+                    stored_path = os.path.join(
+                        stored_dir, selected_subdir, filename)
                     with open(stored_path, 'wb') as f:
                         media_buffer.seek(0)
                         f.write(media_buffer.read())
 
                     if media_type == 'video':
                         with st.spinner("Normalizing audio..."):
-                            normalize_audio(stored_path, reference_audio_path, make_backup=False)
+                            normalize_audio(
+                                stored_path, reference_audio_path, make_backup=False)
 
                     # Save to current
                     os.makedirs(current_dir, exist_ok=True)
@@ -443,7 +453,8 @@ class IllustratorPlugin(Plugin):
 
                     if media_type == 'video':
                         with st.spinner("Normalizing audio..."):
-                            normalize_audio(current_path, reference_audio_path, make_backup=False)
+                            normalize_audio(
+                                current_path, reference_audio_path, make_backup=False)
 
                     st.success(
                         f"Saved to stored assets: {stored_path}\n"
@@ -506,7 +517,7 @@ class IllustratorPlugin(Plugin):
                     st.session_state[f"media_type_{prefix}"] = media_type
                 except Exception as e:
                     st.error(f"Preview download error: {str(e)}")
-                    #raise e
+                    # raise e
 
         # Prévisualisation
         if st.session_state[f"media_buffer_{prefix}"]:
@@ -549,7 +560,8 @@ class IllustratorPlugin(Plugin):
             keywords = st.text_input(
                 t("illustrator_search_keywords"),
                 key="pexels_keywords",
-                on_change=lambda: setattr(st.session_state, 'pexels_search_triggered', True)
+                on_change=lambda: setattr(
+                    st.session_state, 'pexels_search_triggered', True)
             )
         with col2:
             media_type = st.selectbox(
@@ -568,19 +580,22 @@ class IllustratorPlugin(Plugin):
                         if media_type in ["photos", "both"]:
                             photos = self.apis["pexels"].search(
                                 remove_quotes(keywords),
-                                config.get(self.name, {}).get("pexels_api_key"),
+                                config.get(self.name, {}).get(
+                                    "pexels_api_key"),
                                 "photos"
                             )
                             results.extend(photos)
                         if media_type in ["videos", "both"]:
                             videos = self.apis["pexels"].search(
                                 remove_quotes(keywords),
-                                config.get(self.name, {}).get("pexels_api_key"),
+                                config.get(self.name, {}).get(
+                                    "pexels_api_key"),
                                 "videos"
                             )
                             results.extend(videos)
 
-                        self._handle_search_results("pexels", results, config, prefix="pexels", search_keyword=keywords)
+                        self._handle_search_results(
+                            "pexels", results, config, prefix="pexels", search_keyword=keywords)
                     except Exception as e:
                         st.error(f"Search error: {str(e)}")
                         raise e
@@ -593,7 +608,8 @@ class IllustratorPlugin(Plugin):
         st.header("Google Search")
 
         if not config.get('common', {}).get('youtube_api_key'):
-            st.error("Google API key (YouTube API key) is not configured in common settings")
+            st.error(
+                "Google API key (YouTube API key) is not configured in common settings")
             return
         if not config.get(self.name, {}).get('google_cx'):
             st.error("Google Custom Search Engine ID (cx) is not configured")
@@ -607,7 +623,8 @@ class IllustratorPlugin(Plugin):
         keywords = st.text_input(
             t("illustrator_search_keywords"),
             key="google_keywords",
-            on_change=lambda: setattr(st.session_state, 'google_search_triggered', True)
+            on_change=lambda: setattr(
+                st.session_state, 'google_search_triggered', True)
         )
 
         # Recherche soit avec Enter soit avec le bouton
@@ -621,7 +638,8 @@ class IllustratorPlugin(Plugin):
                             config.get('common', {}).get('youtube_api_key'),
                             config.get(self.name, {}).get('google_cx')
                         )
-                        self._handle_search_results("google", results, config, prefix="google", search_keyword=keywords)
+                        self._handle_search_results(
+                            "google", results, config, prefix="google", search_keyword=keywords)
                     except Exception as e:
                         st.error(f"Search error: {str(e)}")
                         raise e
@@ -641,7 +659,8 @@ class IllustratorPlugin(Plugin):
         keywords = st.text_input(
             t("illustrator_search_keywords"),
             key="duckduckgo_keywords",
-            on_change=lambda: setattr(st.session_state, 'duckduckgo_search_triggered', True)
+            on_change=lambda: setattr(
+                st.session_state, 'duckduckgo_search_triggered', True)
         )
 
         # Recherche soit avec Enter soit avec le bouton
@@ -653,7 +672,8 @@ class IllustratorPlugin(Plugin):
                         results = self.apis["duckduckgo"].search(
                             remove_quotes(keywords)
                         )
-                        self._handle_search_results("duckduckgo", results, config, prefix="duckduckgo", search_keyword=keywords)
+                        self._handle_search_results(
+                            "duckduckgo", results, config, prefix="duckduckgo", search_keyword=keywords)
                     except Exception as e:
                         st.error(f"Search error: {str(e)}")
                         raise e
@@ -685,7 +705,8 @@ class IllustratorPlugin(Plugin):
         # Options de recherche
         col1, col2 = st.columns(2)
         with col1:
-            keywords = st.text_input(t("illustrator_search_keywords"), key="youtube_keywords")
+            keywords = st.text_input(
+                t("illustrator_search_keywords"), key="youtube_keywords")
         with col2:
             creative_commons = st.checkbox("Creative Commons only", value=True)
 
@@ -719,7 +740,8 @@ class IllustratorPlugin(Plugin):
 
                 # Afficher la durée totale de la vidéo
                 total_duration = st.session_state.selected_youtube_video['original_data']['duration']
-                st.write(f"Durée totale: {youtube_api._format_duration(total_duration)}")
+                st.write(
+                    f"Durée totale: {youtube_api._format_duration(total_duration)}")
 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -738,15 +760,18 @@ class IllustratorPlugin(Plugin):
                 if st.button(t("illustrator_youtube_process")):
                     try:
                         # Convertir les timecodes en secondes
-                        start_seconds = youtube_api._timecode_to_seconds(start_time)
-                        end_seconds = youtube_api._timecode_to_seconds(end_time)
+                        start_seconds = youtube_api._timecode_to_seconds(
+                            start_time)
+                        end_seconds = youtube_api._timecode_to_seconds(
+                            end_time)
 
                         # Validation et ajustement des timecodes
                         if end_seconds == 0 or end_seconds > total_duration:
                             end_seconds = total_duration
 
                         if start_seconds >= end_seconds:
-                            st.error("Le temps de fin doit être après le temps de début")
+                            st.error(
+                                "Le temps de fin doit être après le temps de début")
                         else:
                             with st.spinner("Processing video..."):
                                 try:
@@ -761,35 +786,42 @@ class IllustratorPlugin(Plugin):
                                         start_seconds,
                                         end_seconds
                                     )
-                                    st.success(f"Video segment processed! ({youtube_api._format_duration(end_seconds - start_seconds)})")
+                                    st.success(
+                                        f"Video segment processed! ({youtube_api._format_duration(end_seconds - start_seconds)})")
                                 except Exception as e:
-                                    st.error(f"Error processing video: {str(e)}")
+                                    st.error(
+                                        f"Error processing video: {str(e)}")
                                     raise e
                     except ValueError as e:
                         st.error(f"Format de timecode invalide : {str(e)}")
 
-
                 # Prévisualisation du segment
                 if st.session_state.processed_segment:
                     st.markdown("---")
-                    st.video(st.session_state.processed_segment, format="video/mp4")
+                    st.video(st.session_state.processed_segment,
+                             format="video/mp4")
                     st.subheader("Save Options")
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         if st.button(t("download_to_current"), key="youtube_download_current"):
-                            self._save_youtube_segment(current_dir, None, st.session_state.selected_youtube_video)
+                            self._save_youtube_segment(
+                                current_dir, None, st.session_state.selected_youtube_video)
 
                     with col2:
-                        selected_subdir = self.folder_selector_with_creation(stored_dir, "youtube_save")
+                        selected_subdir = self.folder_selector_with_creation(
+                            stored_dir, "youtube_save")
 
                     with col3:
                         if selected_subdir and st.button(t("download_to_stored"), key="youtube_download_stored"):
-                            self._save_youtube_segment(stored_dir, selected_subdir, st.session_state.selected_youtube_video)
+                            self._save_youtube_segment(
+                                stored_dir, selected_subdir, st.session_state.selected_youtube_video)
 
                     with col4:
                         if selected_subdir and st.button(t("download_to_both"), key="youtube_download_both"):
-                            self._save_youtube_segment(current_dir, None, st.session_state.selected_youtube_video)
-                            self._save_youtube_segment(stored_dir, selected_subdir, st.session_state.selected_youtube_video)
+                            self._save_youtube_segment(
+                                current_dir, None, st.session_state.selected_youtube_video)
+                            self._save_youtube_segment(
+                                stored_dir, selected_subdir, st.session_state.selected_youtube_video)
 
     def _save_youtube_segment(self, base_dir: str, subdir: str, video_data: dict) -> str:
         """Sauvegarde un segment vidéo YouTube avec comme nom le titre de la vidéo"""
@@ -799,12 +831,14 @@ class IllustratorPlugin(Plugin):
 
             # Créer un nom de fichier propre à partir du titre de la vidéo
             title = video_data['original_data']['title']
-            clean_title = re.sub(r'[^\w\-_\. ]', '_', title)[:100]  # Limite à 100 caractères
+            # Limite à 100 caractères
+            clean_title = re.sub(r'[^\w\-_\. ]', '_', title)[:100]
 
             # Récupérer le dernier mot-clé utilisé pour YouTube
-            search_keyword = st.session_state.get('last_search_keyword_youtube', '')
+            search_keyword = st.session_state.get(
+                'last_search_keyword_youtube', '')
             if (search_keyword and
-                search_keyword.lower() not in clean_title.lower()):
+                    search_keyword.lower() not in clean_title.lower()):
                 clean_keyword = re.sub(r'[^\w\-_]', '_', search_keyword)
                 clean_keyword = re.sub(r'_+', '_', clean_keyword).strip('_')
                 clean_title = f"{clean_title}_{clean_keyword}"
@@ -816,9 +850,11 @@ class IllustratorPlugin(Plugin):
                 f.write(st.session_state.processed_segment.getvalue())
 
             # Normalisation audio pour les vidéos YouTube
-            reference_audio_path = self.config.get("movied", {}).get("movied_reference_audio", "")
+            reference_audio_path = self.config.get(
+                "movied", {}).get("movied_reference_audio", "")
             with st.spinner("Normalizing audio..."):
-                normalize_audio(filepath, reference_audio_path, make_backup=False)
+                normalize_audio(filepath, reference_audio_path,
+                                make_backup=False)
 
             st.success(f"Saved to {filepath}")
             return filepath
@@ -831,7 +867,8 @@ class IllustratorPlugin(Plugin):
         st.header("Vlipsy Search")
 
         # Vérification de la clé API
-        vlipsy_api_key = config.get(self.name, {}).get("vlipsy_api_key", "vl_hFxn07bG43d0n9t")
+        vlipsy_api_key = config.get(self.name, {}).get(
+            "vlipsy_api_key", "vl_hFxn07bG43d0n9t")
         if not vlipsy_api_key:
             st.error("API key for Vlipsy is not configured")
             return
@@ -844,7 +881,8 @@ class IllustratorPlugin(Plugin):
         keywords = st.text_input(
             t("illustrator_search_keywords"),
             key="vlipsy_keywords",
-            on_change=lambda: setattr(st.session_state, 'vlipsy_search_triggered', True)
+            on_change=lambda: setattr(
+                st.session_state, 'vlipsy_search_triggered', True)
         )
 
         # Recherche soit avec Enter soit avec le bouton
@@ -856,7 +894,8 @@ class IllustratorPlugin(Plugin):
                         results = self.apis["vlipsy"].search(
                             remove_quotes(keywords)
                         )
-                        self._handle_search_results("vlipsy", results, config, prefix="vlipsy", search_keyword=keywords)
+                        self._handle_search_results(
+                            "vlipsy", results, config, prefix="vlipsy", search_keyword=keywords)
                     except Exception as e:
                         st.error(f"Search error: {str(e)}")
                         raise e
@@ -903,35 +942,41 @@ class IllustratorPlugin(Plugin):
                             st.write("Pexel search...")
                             photos = self.apis["pexels"].search(
                                 remove_quotes(global_search_query),
-                                config.get(self.name, {}).get("pexels_api_key"),
+                                config.get(self.name, {}).get(
+                                    "pexels_api_key"),
                                 "photos"
                             )
                             results.extend(photos)
                             videos = self.apis["pexels"].search(
                                 remove_quotes(global_search_query),
-                                config.get(self.name, {}).get("pexels_api_key"),
+                                config.get(self.name, {}).get(
+                                    "pexels_api_key"),
                                 "videos"
                             )
                             results.extend(videos)
-                            self._handle_search_results("pexels", results, config, prefix="pexels", search_keyword=global_search_query)
+                            self._handle_search_results(
+                                "pexels", results, config, prefix="pexels", search_keyword=global_search_query)
 
                         # Google
                         if (config.get('common', {}).get('youtube_api_key') and
-                            config.get(self.name, {}).get('google_cx')):
+                                config.get(self.name, {}).get('google_cx')):
                             st.write("Google search...")
                             results = self.apis["google"].search(
                                 remove_quotes(global_search_query),
-                                config.get('common', {}).get('youtube_api_key'),
+                                config.get('common', {}).get(
+                                    'youtube_api_key'),
                                 config.get(self.name, {}).get('google_cx')
                             )
-                            self._handle_search_results("google", results, config, prefix="google", search_keyword=global_search_query)
+                            self._handle_search_results(
+                                "google", results, config, prefix="google", search_keyword=global_search_query)
 
                         # DuckDuckGo
                         st.write("DuckDuckGo search...")
                         results = self.apis["duckduckgo"].search(
                             remove_quotes(global_search_query)
                         )
-                        self._handle_search_results("duckduckgo", results, config, prefix="duckduckgo", search_keyword=global_search_query)
+                        self._handle_search_results(
+                            "duckduckgo", results, config, prefix="duckduckgo", search_keyword=global_search_query)
 
                         # Vlipsy
                         if config.get(self.name, {}).get("vlipsy_api_key"):
@@ -939,7 +984,8 @@ class IllustratorPlugin(Plugin):
                             results = self.apis["vlipsy"].search(
                                 remove_quotes(global_search_query)
                             )
-                            self._handle_search_results("vlipsy", results, config, prefix="vlipsy", search_keyword=global_search_query)
+                            self._handle_search_results(
+                                "vlipsy", results, config, prefix="vlipsy", search_keyword=global_search_query)
 
                         # YouTube
                         st.write("Youtube search...")
@@ -950,7 +996,8 @@ class IllustratorPlugin(Plugin):
                         )
 
                     except Exception as e:
-                        st.error(f"Erreur lors de la recherche globale: {str(e)}")
+                        st.error(
+                            f"Erreur lors de la recherche globale: {str(e)}")
 
         # Navigation par onglets
         tabs = st.tabs([
