@@ -2,12 +2,7 @@ from lib.global_vars import translations, t
 from app import Widget
 import streamlit as st
 import json
-import numpy as np
-from sklearn.cluster import KMeans
-from sklearn.metrics.pairwise import cosine_similarity
 import os
-from sentence_transformers import SentenceTransformer
-import pickle
 from fuzzywuzzy import fuzz
 import pandas as pd
 
@@ -19,15 +14,11 @@ translations["en"].update({
     "predefined_themes": "Themes (format: theme: keyword1, keyword2, ...)",
     "save_themes": "Save Themes",
     "themes_saved": "Themes saved to themes.json",
-    "suggest_themes": "Suggest New Themes",
-    "select_themes": "Select themes to add",
-    "confirm_themes": "Confirm Theme Selection",
     "suggest_keywords": "Suggest Keywords for Theme",
     "select_theme": "Select a theme",
     "current_keywords": "Current keywords",
     "suggested_keywords": "Suggested keywords",
     "add_keywords": "Add Selected Keywords",
-    "similarity_threshold": "Similarity threshold for suggestions",
     "fuzzy_ratio": "Fuzzy ratio for merging similar keywords",
     "no_file": "No keywords.json found in work directory and no file uploaded.",
     "no_keywords_left": "No keywords left to process.",
@@ -41,7 +32,11 @@ translations["en"].update({
     "suggested_categories": "Suggested Categories",
     "confirm_categories": "Confirm Category Selection",
     "notfound": "No theme found",
-    "filter_similarity": "Filter by minimum similarity"
+    "assign_keywords": "Assign Keywords to a Theme",
+    "filter_by_theme": "Filter by another theme",
+    "no_filter": "No filter",
+    "show_all_keywords": "Show all keywords",
+    "add_selected_keywords": "Add Selected Keywords"
 })
 
 translations["fr"].update({
@@ -51,15 +46,11 @@ translations["fr"].update({
     "predefined_themes": "Thématiques (format : thématique : motclé1, motclé2, ...)",
     "save_themes": "Sauvegarder les thématiques",
     "themes_saved": "Thématiques sauvegardées dans themes.json",
-    "suggest_themes": "Suggérer de nouvelles thématiques",
-    "select_themes": "Sélectionner les thématiques à ajouter",
-    "confirm_themes": "Confirmer la sélection des thématiques",
     "suggest_keywords": "Suggérer des mots-clés pour une thématique",
     "select_theme": "Sélectionner une thématique",
     "current_keywords": "Mots-clés actuels",
     "suggested_keywords": "Mots-clés suggérés",
     "add_keywords": "Ajouter les mots-clés sélectionnés",
-    "similarity_threshold": "Seuil de similarité pour les suggestions",
     "fuzzy_ratio": "Ratio de fusion pour les mots-clés similaires",
     "no_file": "Aucun keywords.json trouvé dans le répertoire de travail et aucun fichier téléchargé.",
     "no_keywords_left": "Aucun mot-clé restant à traiter.",
@@ -73,7 +64,11 @@ translations["fr"].update({
     "suggested_categories": "Catégories suggérées",
     "confirm_categories": "Confirmer la sélection des catégories",
     "notfound": "Aucune thématique trouvée",
-    "filter_similarity": "Filtrer par similarité minimale"
+    "assign_keywords": "Assigner des mots-clés à une thématique",
+    "filter_by_theme": "Filtrer par une autre thématique",
+    "no_filter": "Aucun filtre",
+    "show_all_keywords": "Afficher tous les mots-clés",
+    "add_selected_keywords": "Ajouter les mots-clés sélectionnés"
 })
 
 
@@ -120,7 +115,6 @@ def load_keywords(work_directory, fuzzy_ratio=90, json_file=None):
 class KeywordClusteringWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
-        self.model = None
         self.work_directory = self.plugin_manager.config["common"]["work_directory"]
         # Thématiques par défaut
         self.default_themes = {
@@ -205,106 +199,72 @@ class KeywordClusteringWidget(Widget):
                     thematized[mot] = keywords[mot]
         return thematized
 
-    def load_model(self):
-        """Charger le modèle SentenceTransformer."""
-        if self.model is None:
-            with st.spinner(t("results_title")):
-                self.model = SentenceTransformer(
-                    "paraphrase-multilingual-MiniLM-L12-v2")
-        return self.model
-
-    def suggest_themes(self, keywords, n_clusters=5):
-        """Suggérer de nouvelles thématiques via clustering."""
-        if not keywords:
-            return []
-        model = self.load_model()
-        embeddings = {mot: model.encode(mot) for mot in keywords}
-        X = np.array(list(embeddings.values()))
-
-        # Clustering avec K-Means
-        kmeans = KMeans(n_clusters=min(
-            n_clusters, len(keywords)), random_state=42)
-        labels = kmeans.fit_predict(X)
-
-        # Regrouper les mots par cluster
-        clusters = {}
-        for mot, label in zip(keywords, labels):
-            if label not in clusters:
-                clusters[label] = []
-            clusters[label].append(mot)
-
-        # Nommer les thématiques par mot-clé le plus fréquent
-        themes = []
-        for mots in clusters.values():
-            if mots:
-                theme = max(mots, key=lambda mot: keywords[mot])
-                themes.append(theme)
-        return themes
-
-    def suggest_keywords(self, theme, keywords, seuil=0.8):
-        """Suggérer des mots-clés proches sémantiquement d'une thématique."""
-        if not keywords:
-            return []
-        model = self.load_model()
-        emb_theme = model.encode(theme)
-        embeddings = {mot: model.encode(mot) for mot in keywords}
+    def suggest_with_llm(self, items, targets, mode="keyword_to_theme"):
+        """Factorisation de la suggestion avec LLM pour associer des mots-clés à des thématiques ou vice versa."""
         suggestions = []
-        for mot in keywords:
-            sim = cosine_similarity([emb_theme], [embeddings[mot]])[0][0]
-            if sim > seuil:
-                suggestions.append((mot, sim))
-        # Trier par similarité décroissante et limiter à 20 suggestions
-        suggestions = sorted(
-            suggestions, key=lambda x: x[1], reverse=True)[:20]
-        return [mot for mot, _ in suggestions]
-
-    def suggest_category_for_keyword(self, keyword, themes, seuil=0.8):
-        """Suggérer la catégorie la plus proche pour un mot-clé donné."""
-        if not themes:
-            return []
-        model = self.load_model()
-        emb_keyword = model.encode(keyword)
-        suggestions = []
-        for theme in themes:
-            emb_theme = model.encode(theme)
-            sim = cosine_similarity([emb_keyword], [emb_theme])[0][0]
-            if sim > seuil:
-                suggestions.append((theme, sim))
-        # Trier par similarité décroissante
-        suggestions = sorted(suggestions, key=lambda x: x[1], reverse=True)
-        return suggestions
-
-    def suggest_mass_categories(self, keywords, themes, seuil=0.7):
-        """Suggérer des catégories pour tous les mots-clés non assignés en utilisant un LLM."""
-        if not keywords or not themes:
-            return []
-        suggestions = []
-        total = len(keywords)
+        total = len(items)
         progress_bar = st.progress(0)
-        themes_list = ", ".join(themes)
+        targets_list = ", ".join(targets)
 
-        for i, keyword in enumerate(keywords):
-            # Créer le prompt pour le LLM
-            prompt = (
-                f"Étant donné le mot-clé \"{keyword}\" et la liste suivante de thématiques : {themes_list}, "
-                "sélectionnez la thématique la plus appropriée à laquelle le mot-clé appartient. "
-                "Si aucune thématique n'est pertinente, retournez \"notfound\". "
-                "Fournissez uniquement le nom de la thématique ou \"notfound\" comme réponse."
-            )
+        for i, item in enumerate(items):
+            if mode == "keyword_to_theme":
+                prompt = (
+                    f"Étant donné le mot-clé \"{item}\" et la liste suivante de thématiques : {targets_list}, "
+                    "sélectionnez la thématique la plus appropriée à laquelle le mot-clé appartient. "
+                    "Si aucune thématique n'est pertinente, retournez \"notfound\". "
+                    "Fournissez uniquement le nom de la thématique ou \"notfound\" comme réponse."
+                )
+            else:  # mode == "theme_to_keywords"
+                prompt = (
+                    f"Étant donné la thématique \"{item}\" et la liste suivante de mots-clés : {targets_list}, "
+                    "suggérez jusqu'à 20 mots-clés qui appartiennent à cette thématique. "
+                    "Retournez une liste de mots-clés séparés par des virgules, ou \"notfound\" si aucun mot-clé n'est pertinent. "
+                    "Fournissez uniquement la liste ou \"notfound\" comme réponse."
+                )
+
             try:
-                # Appeler le LLM
                 response = self.plugin_manager.get_plugin(
                     self.name).process_with_llm(prompt)
-                # Nettoyer la réponse pour enlever les espaces ou caractères indésirables
                 response = response.strip().lower()
-                if response in themes or response == "notfound":
-                    suggestions.append(
-                        (keyword, response, 1.0 if response != "notfound" else 0.0))
+                if mode == "keyword_to_theme":
+                    if response in targets or response == "notfound":
+                        suggestions.append(
+                            (item, response, 1.0 if response != "notfound" else 0.0))
+                else:  # mode == "theme_to_keywords"
+                    if response == "notfound":
+                        suggestions.extend([(item, kw, 1.0) for kw in []])
+                    else:
+                        suggested_keywords = [kw.strip() for kw in response.split(
+                            ",") if kw.strip() in targets][:20]
+                        suggestions.extend([(item, kw, 1.0)
+                                           for kw in suggested_keywords])
             except Exception as e:
-                st.error(
-                    f"Erreur lors de l'appel au LLM pour le mot-clé {keyword} : {e}")
+                st.error(f"Erreur lors de l'appel au LLM pour {item} : {e}")
             progress_bar.progress((i + 1) / total)
+
         return suggestions
+
+    def suggest_keywords(self, theme, keywords):
+        """Suggérer des mots-clés pour une thématique en utilisant le LLM."""
+        if not keywords:
+            return []
+        suggestions = self.suggest_with_llm(
+            [theme], keywords, mode="theme_to_keywords")
+        return [kw for _, kw, _ in suggestions]
+
+    def suggest_category_for_keyword(self, keyword, themes):
+        """Suggérer la catégorie la plus proche pour un mot-clé donné en utilisant le LLM."""
+        if not themes:
+            return []
+        suggestions = self.suggest_with_llm(
+            [keyword], themes, mode="keyword_to_theme")
+        return [(theme, conf) for _, theme, conf in suggestions if theme != "notfound"]
+
+    def suggest_mass_categories(self, keywords, themes):
+        """Suggérer des catégories pour tous les mots-clés non assignés en utilisant le LLM."""
+        if not keywords or not themes:
+            return []
+        return self.suggest_with_llm(keywords, themes, mode="keyword_to_theme")
 
     def display(self):
         """Afficher l'interface Streamlit."""
@@ -363,60 +323,16 @@ class KeywordClusteringWidget(Widget):
         )
 
         # Paramètres
-        col1, col2 = st.columns(2)
-        with col1:
-            seuil = st.slider(
-                t("similarity_threshold"),
-                min_value=0.0,
-                max_value=1.0,
-                value=0.8,
-                step=0.01,
-                key=f"{self.prefix}_seuil"
-            )
-        with col2:
-            fuzzy_ratio = st.slider(
-                t("fuzzy_ratio"),
-                min_value=70,
-                max_value=100,
-                value=90,
-                step=5,
-                key=f"{self.prefix}_fuzzy_ratio"
-            )
+        st.slider(
+            t("fuzzy_ratio"),
+            min_value=70,
+            max_value=100,
+            value=90,
+            step=5,
+            key=f"{self.prefix}_fuzzy_ratio"
+        )
 
-        # Étape 1 : Suggérer de nouvelles thématiques
-        st.subheader(t("suggest_themes"))
-        if not remaining_keywords:
-            st.warning(t("no_keywords_left"))
-        else:
-            n_clusters = st.slider(
-                "Nombre de thématiques à suggérer",
-                min_value=1,
-                max_value=20,
-                value=5,
-                step=1,
-                key=f"{self.prefix}_n_clusters_themes"
-            )
-            if st.button(t("suggest_themes")):
-                with st.spinner(t("results_title")):
-                    suggested_themes = self.suggest_themes(
-                        remaining_keywords, n_clusters)
-                    st.session_state[f"{self.prefix}_suggested_themes"] = suggested_themes
-            if f"{self.prefix}_suggested_themes" in st.session_state and st.session_state[f"{self.prefix}_suggested_themes"]:
-                selected_themes = st.multiselect(
-                    t("select_themes"),
-                    options=st.session_state[f"{self.prefix}_suggested_themes"],
-                    default=[],
-                    key=f"{self.prefix}_select_themes"
-                )
-                if selected_themes and st.button(t("confirm_themes")):
-                    for theme in selected_themes:
-                        if theme not in self.themes:
-                            self.themes[theme] = []
-                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
-                        self.themes)
-                    st.rerun()
-
-        # Étape 2 : Suggérer des mots-clés pour une thématique
+        # Étape 1 : Suggérer des mots-clés pour une thématique
         st.subheader(t("suggest_keywords"))
         if self.themes:
             selected_theme = st.selectbox(
@@ -426,10 +342,17 @@ class KeywordClusteringWidget(Widget):
             )
             st.write(
                 f"**{t('current_keywords')}**: {', '.join(self.themes[selected_theme]) if self.themes[selected_theme] else 'Aucun'}")
+            show_all_keywords_suggest = st.checkbox(
+                t("show_all_keywords"),
+                value=False,
+                key=f"{self.prefix}_show_all_keywords_suggest"
+            )
+            keywords_to_suggest = list(keywords.keys(
+            )) if show_all_keywords_suggest else list(remaining_keywords.keys())
             if st.button(t("suggest_keywords")):
                 with st.spinner(t("results_title")):
                     suggested_keywords = self.suggest_keywords(
-                        selected_theme, remaining_keywords, seuil)
+                        selected_theme, keywords_to_suggest)
                     st.session_state[f"{self.prefix}_suggested_keywords"] = suggested_keywords
             if f"{self.prefix}_suggested_keywords" in st.session_state and st.session_state[f"{self.prefix}_suggested_keywords"]:
                 selected_keywords = st.multiselect(
@@ -445,7 +368,7 @@ class KeywordClusteringWidget(Widget):
                         self.themes)
                     st.rerun()
 
-        # Étape 3 : Suggérer une catégorie pour un mot-clé
+        # Étape 2 : Suggérer une catégorie pour un mot-clé
         st.subheader(t("suggest_category"))
         if not remaining_keywords:
             st.warning(t("no_keywords_left"))
@@ -458,10 +381,10 @@ class KeywordClusteringWidget(Widget):
             if st.button(t("suggest_category")):
                 with st.spinner(t("results_title")):
                     suggested_categories = self.suggest_category_for_keyword(
-                        selected_keyword, self.themes.keys(), seuil)
+                        selected_keyword, self.themes.keys())
                     if suggested_categories:
                         df = pd.DataFrame(suggested_categories, columns=[
-                                          "Category", "Similarity"])
+                                          "Category", "Confidence"])
                         st.session_state[f"{self.prefix}_suggested_categories"] = df
                     else:
                         st.warning("Aucune catégorie suggérée.")
@@ -482,7 +405,7 @@ class KeywordClusteringWidget(Widget):
                         self.themes)
                     st.rerun()
 
-        # Étape 4 : Suggérer des catégories pour tous les mots-clés non assignés
+        # Étape 3 : Suggérer des catégories pour tous les mots-clés non assignés
         st.subheader(t("suggest_mass_categories"))
         if not remaining_keywords:
             st.warning(t("no_keywords_left"))
@@ -490,7 +413,7 @@ class KeywordClusteringWidget(Widget):
             if st.button(t("suggest_mass_categories")):
                 with st.spinner(t("results_title")):
                     suggested_mass_categories = self.suggest_mass_categories(
-                        remaining_keywords, self.themes.keys(), seuil)
+                        remaining_keywords, self.themes.keys())
                     if suggested_mass_categories:
                         df = pd.DataFrame(suggested_mass_categories, columns=[
                                           "Keyword", "Category", "Confidence"])
@@ -503,7 +426,7 @@ class KeywordClusteringWidget(Widget):
                 # Afficher le DataFrame avec mode de sélection multi-row
                 selected = st.dataframe(
                     st.session_state[f"{self.prefix}_suggested_mass_categories"],
-                    selection_mode=["multi-row"],
+                    selection_mode="multi-row",
                     on_select="rerun",
                     key=f"{self.prefix}_mass_categories_dataframe"
                 )
@@ -519,3 +442,65 @@ class KeywordClusteringWidget(Widget):
                         st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
                             self.themes)
                         st.rerun()
+
+        # Étape 4 : Assigner manuellement des mots-clés à une thématique
+        st.subheader(t("assign_keywords"))
+        if not self.themes:
+            st.warning("Aucune thématique disponible.")
+        else:
+            selected_theme = st.selectbox(
+                t("select_theme"),
+                options=list(self.themes.keys()),
+                key=f"{self.prefix}_assign_theme"
+            )
+            st.write(
+                f"**{t('current_keywords')}**: {', '.join(self.themes[selected_theme]) if self.themes[selected_theme] else 'Aucun'}")
+
+            # Filtre par une autre thématique
+            filter_theme = st.selectbox(
+                t("filter_by_theme"),
+                options=["Aucun filtre"] + list(self.themes.keys()),
+                key=f"{self.prefix}_filter_theme"
+            )
+
+            # Checkbox pour afficher tous les mots-clés
+            show_all_keywords = st.checkbox(
+                t("show_all_keywords"),
+                value=False,
+                key=f"{self.prefix}_show_all_keywords"
+            )
+
+            # Préparer la liste des mots-clés à afficher
+            if show_all_keywords:
+                keywords_to_show = list(keywords.keys())
+            else:
+                keywords_to_show = list(remaining_keywords.keys())
+
+            # Appliquer le filtre par thématique
+            if filter_theme != "Aucun filtre":
+                keywords_to_show = [
+                    kw for kw in keywords_to_show if kw in self.themes[filter_theme]]
+
+            # Créer un DataFrame pour les mots-clés
+            if keywords_to_show:
+                df_keywords = pd.DataFrame({"Keyword": keywords_to_show})
+                # Afficher le DataFrame avec mode de sélection multi-row
+                selected_keywords = st.dataframe(
+                    df_keywords,
+                    selection_mode="multi-row",
+                    on_select="rerun",
+                    key=f"{self.prefix}_keywords_dataframe"
+                )
+                if st.button(t("add_selected_keywords")):
+                    selected_rows = selected_keywords["selection"]["rows"]
+                    if selected_rows:
+                        for row in selected_rows:
+                            keyword = df_keywords.loc[row, "Keyword"]
+                            if keyword not in self.themes[selected_theme]:
+                                self.themes[selected_theme].append(keyword)
+                        st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
+                            self.themes)
+                        st.rerun()
+            else:
+                st.warning(
+                    "Aucun mot-clé à afficher avec les filtres actuels.")
