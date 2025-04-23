@@ -3,7 +3,7 @@ from app import Plugin
 import streamlit as st
 import os
 from typing import List, Dict, Any, Optional
-from social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI
+from lib.social_api import TwitterAPI, BlueskyAPI, TelegramAPI, GhostAPI
 from lib.youtube_api import YoutubeAPI
 
 translations["en"].update({
