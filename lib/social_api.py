@@ -185,6 +185,39 @@ class TwitterAPI:
             st.error(f"Twitter API Timeline Error: {str(e)}")
             return []
 
+    def get_following_timeline_v1(self, max_results: int = 20) -> List[Dict[str, Any]]:
+        try:
+            api_v1 = self.client_v1
+            response = api_v1.home_timeline(
+                count=max_results,
+                exclude_replies=True,
+                include_entities=True
+            )
+            tweets = []
+            for tweet in response:
+                tweets.append({
+                    'id': str(tweet.id),
+                    'text': tweet.text,
+                    'user': tweet.user.screen_name,
+                    'name': tweet.user.name,
+                    'profile_image_url': tweet.user.profile_image_url_https,
+                    'created_at': tweet.created_at.isoformat(),
+                    'lang': tweet.lang,
+                    'source': tweet.source,
+                    'public_metrics': {
+                        'retweet_count': tweet.retweet_count,
+                        'reply_count': 0,  # Non disponible en v1, défini à 0
+                        'like_count': tweet.favorite_count,
+                        'quote_count': 0  # Non disponible en v1, défini à 0
+                    },
+                    'url': f"https://twitter.com/{tweet.user.screen_name}/status/{tweet.id}",
+                    'parent_id': str(tweet.in_reply_to_status_id) if tweet.in_reply_to_status_id else None
+                })
+            return tweets
+        except Exception as e:
+            st.error(f"Twitter API V1 Timeline Error: {str(e)}")
+            return []
+
     def organize_tweets_into_threads(self, tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Regrouper les tweets par thread
         threads = {}
@@ -221,19 +254,43 @@ class TwitterAPI:
 
     def get_rate_limit_status(self) -> Dict[str, Any]:
         try:
-            # Utiliser l'API v1 via tweepy.API pour récupérer les limites de taux
             api_v1 = self.client_v1
             status = api_v1.rate_limit_status()
-            # Extraire les informations pertinentes pour l'endpoint de la timeline
+            # import streamlit as st
+            # st.write(status)
+            # Extraire les informations pour les endpoints pertinents
             timeline_limit = status['resources']['statuses']['/statuses/home_timeline']
+            update_limit = status['resources']['tweets&POST']['/tweets&POST']
             return {
-                'remaining': timeline_limit['remaining'],
-                'limit': timeline_limit['limit'],
-                'reset': datetime.fromtimestamp(timeline_limit['reset']).isoformat()
+                'timeline': {
+                    'remaining': timeline_limit['remaining'],
+                    'limit': timeline_limit['limit'],
+                    'reset': datetime.fromtimestamp(timeline_limit['reset']).isoformat() if timeline_limit['reset'] else None
+                },
+                'update': {
+                    'remaining': update_limit['remaining'],
+                    'limit': update_limit['limit'],
+                    'reset': datetime.fromtimestamp(update_limit['reset']).isoformat() if update_limit['reset'] else None
+                }
             }
         except Exception as e:
             st.error(f"Twitter API Rate Limit Error: {str(e)}")
-            return {'remaining': 0, 'limit': 0, 'reset': None}
+            return {
+                'timeline': {'remaining': 0, 'limit': 0, 'reset': None},
+                'update': {'remaining': 0, 'limit': 0, 'reset': None}
+            }
+
+    def create_tweet_v1(self, text: str, in_reply_to_tweet_id: str = None) -> bool:
+        try:
+            api_v1 = self.client_v1
+            status = api_v1.update_status(
+                status=text,
+                in_reply_to_status_id=in_reply_to_tweet_id
+            )
+            return bool(status)
+        except Exception as e:
+            st.error(f"Twitter API V1 Create Tweet Error: {str(e)}")
+            return False
 
 
 class BlueskyAPI:

@@ -157,26 +157,46 @@ class PromotetwitterPlugin(Plugin):
             st.error("Veuillez configurer votre User ID dans les paramètres.")
             return
 
-        twitter_api = TwitterAPI(self.plugin_manager.config)
-        rate_limit = twitter_api.get_rate_limit_status()
-        st.subheader("Statut des limites de taux")
-        if rate_limit['remaining'] is not None:
-            st.write(
-                f"Requêtes restantes : {rate_limit['remaining']} sur {rate_limit['limit']}")
-            st.write(f"Réinitialisation : {rate_limit['reset']}")
-        else:
-            st.warning("Impossible de récupérer les limites de taux.")
+        # Case à cocher pour choisir l'API
+        use_api_v1 = st.checkbox(
+            "Utiliser l'API v1 (limité à 20 tweets)", value=False)
+
+        # Afficher les limites de taux
+        if use_api_v1:
+            twitter_api = TwitterAPI(self.plugin_manager.config)
+            rate_limit = twitter_api.get_rate_limit_status()
+            st.subheader("Statut des limites de taux")
+            st.write("**Timeline (home_timeline)** :")
+            if rate_limit['timeline']['remaining'] is not None:
+                st.write(
+                    f"Requêtes restantes : {rate_limit['timeline']['remaining']} sur {rate_limit['timeline']['limit']}")
+                st.write(
+                    f"Réinitialisation : {rate_limit['timeline']['reset']}")
+            else:
+                st.warning(
+                    "Impossible de récupérer les limites de taux pour la timeline.")
+            st.write("**Publication de tweets (update)** :")
+            if rate_limit['update']['remaining'] is not None:
+                st.write(
+                    f"Requêtes restantes : {rate_limit['update']['remaining']} sur {rate_limit['update']['limit']}")
+                st.write(f"Réinitialisation : {rate_limit['update']['reset']}")
+            else:
+                st.warning(
+                    "Impossible de récupérer les limites de taux pour la publication.")
 
         # Bouton pour récupérer la timeline
         if st.button("Récupérer la timeline"):
             with st.spinner("Récupération des tweets..."):
-                st.session_state.tweets = twitter_api.get_following_timeline(
-                    user_id, max_results=100)
+                if use_api_v1:
+                    st.session_state.tweets = twitter_api.get_following_timeline_v1(
+                        max_results=20)
+                else:
+                    st.session_state.tweets = twitter_api.get_following_timeline(
+                        user_id, max_results=100)
 
         # Afficher les threads
         if st.session_state.tweets:
             st.subheader("Threads récents des abonnements")
-            st.write(st.session_state.tweets)
             threads = twitter_api.organize_tweets_into_threads(
                 st.session_state.tweets)
             selected_tweet = None
@@ -233,11 +253,16 @@ class PromotetwitterPlugin(Plugin):
             if st.button("Poster la réponse"):
                 if response_text:
                     with st.spinner("Publication de la réponse..."):
-                        twitter_api = TwitterAPI(self.plugin_manager.config)
-                        response = twitter_api.create_tweet(
-                            text=response_text,
-                            in_reply_to_tweet_id=tweet['id']
-                        )
+                        if use_api_v1:
+                            response = twitter_api.create_tweet_v1(
+                                text=response_text,
+                                in_reply_to_tweet_id=tweet['id']
+                            )
+                        else:
+                            response = twitter_api.create_tweet(
+                                text=response_text,
+                                in_reply_to_tweet_id=tweet['id']
+                            )
                         if response:
                             st.success("Réponse publiée avec succès !")
                             st.session_state.selected_tweet = None  # Réinitialiser la sélection
