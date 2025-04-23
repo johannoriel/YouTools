@@ -157,32 +157,67 @@ class PromotetwitterPlugin(Plugin):
             st.error("Veuillez configurer votre User ID dans les paramètres.")
             return
 
+        twitter_api = TwitterAPI(self.plugin_manager.config)
+        rate_limit = twitter_api.get_rate_limit_status()
+        st.subheader("Statut des limites de taux")
+        if rate_limit['remaining'] is not None:
+            st.write(
+                f"Requêtes restantes : {rate_limit['remaining']} sur {rate_limit['limit']}")
+            st.write(f"Réinitialisation : {rate_limit['reset']}")
+        else:
+            st.warning("Impossible de récupérer les limites de taux.")
+
         # Bouton pour récupérer la timeline
         if st.button("Récupérer la timeline"):
             with st.spinner("Récupération des tweets..."):
-                twitter_api = TwitterAPI(self.plugin_manager.config)
                 st.session_state.tweets = twitter_api.get_following_timeline(
                     user_id, max_results=100)
 
-        # Afficher les tweets
+        # Afficher les threads
         if st.session_state.tweets:
-            st.subheader("Tweets récents des abonnements")
+            st.subheader("Threads récents des abonnements")
+            st.write(st.session_state.tweets)
+            threads = twitter_api.organize_tweets_into_threads(
+                st.session_state.tweets)
             selected_tweet = None
-            for i, tweet in enumerate(st.session_state.tweets):
-                with st.expander(f"@{tweet['user']} - {tweet['created_at']}"):
-                    st.image(tweet['profile_image_url'], width=50)
-                    st.write(f"**{tweet['name']} (@{tweet['user']})**")
-                    st.write(tweet['text'])
-                    st.write(f"**Langue** : {tweet['lang']}")
-                    st.write(f"**Source** : {tweet['source']}")
-                    st.write(f"**Métriques** : {tweet['public_metrics']['like_count']} likes, "
-                             f"{tweet['public_metrics']['retweet_count']} retweets, "
-                             f"{tweet['public_metrics']['reply_count']} réponses, "
-                             f"{tweet['public_metrics']['quote_count']} citations")
-                    st.markdown(f"[Voir le tweet]({tweet['url']})")
-                    if st.button(f"Sélectionner pour répondre", key=f"select_tweet_{i}"):
-                        selected_tweet = tweet
-                        st.session_state.selected_tweet = tweet
+            for i, thread in enumerate(threads):
+                root_tweet = thread['root_tweet']
+                with st.expander(f"Thread de @{root_tweet['user']} - {root_tweet['created_at']}"):
+                    # Afficher le tweet racine
+                    st.image(root_tweet['profile_image_url'], width=50)
+                    st.write(
+                        f"**{root_tweet['name']} (@{root_tweet['user']})**")
+                    st.write(root_tweet['text'])
+                    st.write(f"**Langue** : {root_tweet['lang']}")
+                    st.write(f"**Source** : {root_tweet['source']}")
+                    st.write(f"**Métriques** : {root_tweet['public_metrics']['like_count']} likes, "
+                             f"{root_tweet['public_metrics']['retweet_count']} retweets, "
+                             f"{root_tweet['public_metrics']['reply_count']} réponses, "
+                             f"{root_tweet['public_metrics']['quote_count']} citations")
+                    st.markdown(f"[Voir le tweet]({root_tweet['url']})")
+                    if st.button(f"Sélectionner pour répondre au tweet racine", key=f"select_root_tweet_{i}"):
+                        selected_tweet = root_tweet
+                        st.session_state.selected_tweet = root_tweet
+
+                    # Afficher les réponses dans des sous-expanders
+                    if thread['replies']:
+                        st.write("**Réponses dans ce thread** :")
+                        for j, reply in enumerate(thread['replies']):
+                            with st.expander(f"Réponse de @{reply['user']} - {reply['created_at']}"):
+                                st.image(reply['profile_image_url'], width=50)
+                                st.write(
+                                    f"**{reply['name']} (@{reply['user']})**")
+                                st.write(reply['text'])
+                                st.write(f"**Langue** : {reply['lang']}")
+                                st.write(f"**Source** : {reply['source']}")
+                                st.write(f"**Métriques** : {reply['public_metrics']['like_count']} likes, "
+                                         f"{reply['public_metrics']['retweet_count']} retweets, "
+                                         f"{reply['public_metrics']['reply_count']} réponses, "
+                                         f"{reply['public_metrics']['quote_count']} citations")
+                                st.markdown(f"[Voir le tweet]({reply['url']})")
+                                if st.button(f"Sélectionner pour répondre", key=f"select_reply_tweet_{i}_{j}"):
+                                    selected_tweet = reply
+                                    st.session_state.selected_tweet = reply
 
         # Section pour répondre manuellement
         if 'selected_tweet' in st.session_state and st.session_state.selected_tweet:

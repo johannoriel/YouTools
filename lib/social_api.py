@@ -144,7 +144,7 @@ class TwitterAPI:
             response = self.client.get_home_timeline(
                 max_results=max_results,
                 tweet_fields=["created_at", "text", "author_id",
-                              "public_metrics", "lang", "source"],
+                              "public_metrics", "lang", "source", "referenced_tweets"],
                 expansions=["author_id"],
                 user_fields=["name", "username", "profile_image_url"],
                 # Exclure les réponses et retweets pour une timeline plus propre
@@ -155,6 +155,13 @@ class TwitterAPI:
             for tweet in response.data:
                 user = next(
                     u for u in response.includes['users'] if u.id == tweet.author_id)
+                # Chercher le parent_id dans referenced_tweets (type "replied_to")
+                parent_id = None
+                if tweet.referenced_tweets:
+                    for ref_tweet in tweet.referenced_tweets:
+                        if ref_tweet.type == "replied_to":
+                            parent_id = str(ref_tweet.id)
+                            break
                 tweets.append({
                     'id': str(tweet.id),
                     'text': tweet.text,
@@ -170,12 +177,63 @@ class TwitterAPI:
                         'like_count': tweet.public_metrics['like_count'],
                         'quote_count': tweet.public_metrics['quote_count']
                     },
-                    'url': f"https://twitter.com/{user.username}/status/{tweet.id}"
+                    'url': f"https://twitter.com/{user.username}/status/{tweet.id}",
+                    'parent_id': parent_id
                 })
             return tweets
         except Exception as e:
             st.error(f"Twitter API Timeline Error: {str(e)}")
             return []
+
+    def organize_tweets_into_threads(self, tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Regrouper les tweets par thread
+        threads = {}
+        for tweet in tweets:
+            if tweet['parent_id'] is None:
+                # Tweet racine (pas de parent)
+                threads[tweet['id']] = {'root_tweet': tweet, 'replies': []}
+            else:
+                # Tweet réponse : chercher le thread parent
+                root_id = tweet['parent_id']
+                while root_id:
+                    # Remonter jusqu'à la racine du thread
+                    parent_tweet = next(
+                        (t for t in tweets if t['id'] == root_id), None)
+                    if parent_tweet and parent_tweet['parent_id']:
+                        root_id = parent_tweet['parent_id']
+                    else:
+                        break
+                if root_id and root_id in threads:
+                    threads[root_id]['replies'].append(tweet)
+                else:
+                    # Si le parent n'est pas dans les tweets récupérés, créer un thread orphelin
+                    threads[tweet['id']] = {'root_tweet': tweet, 'replies': []}
+
+        # Convertir les threads en liste pour l'affichage
+        thread_list = []
+        for thread_id, thread in threads.items():
+            thread_list.append({
+                'root_tweet': thread['root_tweet'],
+                'replies': thread['replies']
+            })
+
+        return thread_list
+
+    def get_rate_limit_status(self) -> Dict[str, Any]:
+        try:
+            # Utiliser l'API v1 via tweepy.API pour récupérer les limites de taux
+            api_v1 = self.client_v1
+            status = api_v1.rate_limit_status()
+            # Extraire les informations pertinentes pour l'endpoint de la timeline
+            timeline_limit = status['resources']['statuses']['/statuses/home_timeline']
+            return {
+                'remaining': timeline_limit['remaining'],
+                'limit': timeline_limit['limit'],
+                'reset': datetime.fromtimestamp(timeline_limit['reset']).isoformat()
+            }
+        except Exception as e:
+            st.error(f"Twitter API Rate Limit Error: {str(e)}")
+            return {'remaining': 0, 'limit': 0, 'reset': None}
 
 
 class BlueskyAPI:
