@@ -36,7 +36,8 @@ translations["en"].update({
     "filter_by_theme": "Filter by another theme",
     "no_filter": "No filter",
     "show_all_keywords": "Show all keywords",
-    "add_selected_keywords": "Add Selected Keywords"
+    "add_selected_keywords": "Add Selected Keywords",
+    "search_keywords": "Search Keywords for a Theme"
 })
 
 translations["fr"].update({
@@ -68,7 +69,8 @@ translations["fr"].update({
     "filter_by_theme": "Filtrer par une autre thématique",
     "no_filter": "Aucun filtre",
     "show_all_keywords": "Afficher tous les mots-clés",
-    "add_selected_keywords": "Ajouter les mots-clés sélectionnés"
+    "add_selected_keywords": "Ajouter les mots-clés sélectionnés",
+    "search_keywords": "Chercher les mots-clés pour une thématique"
 })
 
 
@@ -277,14 +279,18 @@ class KeywordClusteringWidget(Widget):
             key=f"{self.prefix}_themes_text_input"
         )
         self.themes = self.text_to_themes(themes_text)
-        if st.button(t("save_themes")):
+        if st.button(t("save_themes"), key=f"{self.prefix}_save_themes_button"):
             self.save_themes(self.themes)
             st.session_state[f"{self.prefix}_themes_text"] = themes_text
 
     def display_keywords_loading(self):
         """Afficher la section de chargement des mots-clés."""
         st.subheader(t("keywords_file"))
-        json_file = st.file_uploader(t("upload_json"), type=["json"])
+        json_file = st.file_uploader(
+            t("upload_json"),
+            type=["json"],
+            key=f"{self.prefix}_json_uploader"
+        )
         keywords = load_keywords(self.work_directory, st.session_state.get(
             f"{self.prefix}_fuzzy_ratio", 90), json_file)
         if not keywords:
@@ -349,7 +355,7 @@ class KeywordClusteringWidget(Widget):
             )
             keywords_to_suggest = list(keywords.keys(
             )) if show_all_keywords_suggest else list(remaining_keywords.keys())
-            if st.button(t("suggest_keywords")):
+            if st.button(t("suggest_keywords"), key=f"{self.prefix}_suggest_keywords_button"):
                 with st.spinner(t("results_title")):
                     suggested_keywords = self.suggest_keywords(
                         selected_theme, keywords_to_suggest)
@@ -361,7 +367,7 @@ class KeywordClusteringWidget(Widget):
                     default=[],
                     key=f"{self.prefix}_select_keywords"
                 )
-                if selected_keywords and st.button(t("add_keywords")):
+                if selected_keywords and st.button(t("add_keywords"), key=f"{self.prefix}_add_keywords_button"):
                     self.themes[selected_theme].extend(
                         [k for k in selected_keywords if k not in self.themes[selected_theme]])
                     st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
@@ -379,7 +385,7 @@ class KeywordClusteringWidget(Widget):
                 options=list(remaining_keywords.keys()),
                 key=f"{self.prefix}_select_keyword"
             )
-            if st.button(t("suggest_category")):
+            if st.button(t("suggest_category"), key=f"{self.prefix}_suggest_category_button"):
                 with st.spinner(t("results_title")):
                     suggested_categories = self.suggest_category_for_keyword(
                         selected_keyword, self.themes.keys())
@@ -397,7 +403,7 @@ class KeywordClusteringWidget(Widget):
                     default=[],
                     key=f"{self.prefix}_select_categories"
                 )
-                if selected_categories and st.button(t("confirm_categories")):
+                if selected_categories and st.button(t("confirm_categories"), key=f"{self.prefix}_confirm_categories_button"):
                     for category in selected_categories:
                         if category in self.themes:
                             if selected_keyword not in self.themes[category]:
@@ -412,7 +418,7 @@ class KeywordClusteringWidget(Widget):
         if not remaining_keywords:
             st.warning(t("no_keywords_left"))
         else:
-            if st.button(t("suggest_mass_categories")):
+            if st.button(t("suggest_mass_categories"), key=f"{self.prefix}_suggest_mass_categories_button"):
                 with st.spinner(t("results_title")):
                     suggested_mass_categories = self.suggest_mass_categories(
                         remaining_keywords, self.themes.keys())
@@ -430,19 +436,18 @@ class KeywordClusteringWidget(Widget):
                     on_select="rerun",
                     key=f"{self.prefix}_mass_categories_dataframe"
                 )
-                if st.button(t("confirm_categories")):
+                if st.button(t("confirm_categories"), key=f"{self.prefix}_confirm_mass_categories_button"):
                     selected_rows = selected["selection"]["rows"]
                     if selected_rows:
-                        # debug st.write(selected_rows)
                         for row in selected_rows:
                             keyword = st.session_state[f"{self.prefix}_suggested_mass_categories"].iloc[row]["Keyword"]
                             category = st.session_state[f"{self.prefix}_suggested_mass_categories"].iloc[row]["Category"]
-                            st.write(f"{keyword}, {category}")
                             if category in self.themes and category != "notfound":
                                 if keyword not in self.themes[category]:
                                     self.themes[category].append(keyword)
                         st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
                             self.themes)
+                        st.rerun()
 
     def display_assign_keywords(self, keywords, remaining_keywords):
         """Afficher la section pour assigner manuellement des mots-clés à une thématique."""
@@ -480,7 +485,7 @@ class KeywordClusteringWidget(Widget):
                     on_select="rerun",
                     key=f"{self.prefix}_keywords_dataframe"
                 )
-                if st.button(t("add_selected_keywords")):
+                if st.button(t("add_selected_keywords"), key=f"{self.prefix}_add_selected_keywords_button"):
                     selected_rows = selected_keywords["selection"]["rows"]
                     if selected_rows:
                         for row in selected_rows:
@@ -493,6 +498,53 @@ class KeywordClusteringWidget(Widget):
             else:
                 st.warning(
                     "Aucun mot-clé à afficher avec les filtres actuels.")
+
+    def display_search_keywords(self, keywords, remaining_keywords):
+        """Afficher la section pour chercher des mots-clés pour une thématique avec un DataFrame."""
+        st.subheader(t("search_keywords"))
+        if not self.themes:
+            st.warning("Aucune thématique disponible.")
+        else:
+            selected_theme = st.selectbox(
+                t("select_theme"),
+                options=list(self.themes.keys()),
+                key=f"{self.prefix}_search_theme"
+            )
+            st.write(
+                f"**{t('current_keywords')}**: {', '.join(self.themes[selected_theme]) if self.themes[selected_theme] else 'Aucun'}")
+            show_all_keywords_search = st.checkbox(
+                t("show_all_keywords"),
+                value=False,
+                key=f"{self.prefix}_show_all_keywords_search"
+            )
+            keywords_to_search = list(keywords.keys()) if show_all_keywords_search else list(
+                remaining_keywords.keys())
+            if st.button(t("suggest_keywords"), key=f"{self.prefix}_search_keywords_button"):
+                with st.spinner(t("results_title")):
+                    suggested_keywords = self.suggest_keywords(
+                        selected_theme, keywords_to_search)
+                    if suggested_keywords:
+                        df = pd.DataFrame({"Keyword": suggested_keywords})
+                        st.session_state[f"{self.prefix}_searched_keywords"] = df
+                    else:
+                        st.warning("Aucun mot-clé suggéré.")
+            if f"{self.prefix}_searched_keywords" in st.session_state and not st.session_state[f"{self.prefix}_searched_keywords"].empty:
+                selected = st.dataframe(
+                    st.session_state[f"{self.prefix}_searched_keywords"],
+                    selection_mode="multi-row",
+                    on_select="rerun",
+                    key=f"{self.prefix}_searched_keywords_dataframe"
+                )
+                if st.button(t("add_selected_keywords"), key=f"{self.prefix}_add_searched_keywords_button"):
+                    selected_rows = selected["selection"]["rows"]
+                    if selected_rows:
+                        for row in selected_rows:
+                            keyword = st.session_state[f"{self.prefix}_searched_keywords"].loc[row, "Keyword"]
+                            if keyword not in self.themes[selected_theme]:
+                                self.themes[selected_theme].append(keyword)
+                        st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
+                            self.themes)
+                        st.rerun()
 
     def display(self):
         """Afficher l'interface Streamlit en utilisant des sous-fonctions."""
@@ -530,3 +582,6 @@ class KeywordClusteringWidget(Widget):
 
         # Étape 4 : Assigner manuellement des mots-clés à une thématique
         self.display_assign_keywords(keywords, remaining_keywords)
+
+        # Étape 5 : Chercher les mots-clés pour une thématique
+        self.display_search_keywords(keywords, remaining_keywords)
