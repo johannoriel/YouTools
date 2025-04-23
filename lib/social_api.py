@@ -15,6 +15,7 @@ import pytz
 from langdetect import detect
 from googlesearch import search
 
+
 class TwitterAPI:
     def __init__(self, config):
         self.client = tweepy.Client(
@@ -137,6 +138,44 @@ class TwitterAPI:
         except Exception as e:
             st.error(f"Twitter API v2 Create Tweet Error: {str(e)}")
             return None
+
+    def get_following_timeline(self, user_id: str, max_results: int = 100) -> List[Dict[str, Any]]:
+        try:
+            response = self.client.get_home_timeline(
+                max_results=max_results,
+                tweet_fields=["created_at", "text", "author_id",
+                              "public_metrics", "lang", "source"],
+                expansions=["author_id"],
+                user_fields=["name", "username", "profile_image_url"],
+                # Exclure les réponses et retweets pour une timeline plus propre
+                exclude=["replies", "retweets"],
+                user_auth=True
+            )
+            tweets = []
+            for tweet in response.data:
+                user = next(
+                    u for u in response.includes['users'] if u.id == tweet.author_id)
+                tweets.append({
+                    'id': str(tweet.id),
+                    'text': tweet.text,
+                    'user': user.username,
+                    'name': user.name,
+                    'profile_image_url': user.profile_image_url,
+                    'created_at': tweet.created_at.isoformat(),
+                    'lang': tweet.lang,
+                    'source': tweet.source,
+                    'public_metrics': {
+                        'retweet_count': tweet.public_metrics['retweet_count'],
+                        'reply_count': tweet.public_metrics['reply_count'],
+                        'like_count': tweet.public_metrics['like_count'],
+                        'quote_count': tweet.public_metrics['quote_count']
+                    },
+                    'url': f"https://twitter.com/{user.username}/status/{tweet.id}"
+                })
+            return tweets
+        except Exception as e:
+            st.error(f"Twitter API Timeline Error: {str(e)}")
+            return []
 
 
 class BlueskyAPI:
@@ -337,7 +376,8 @@ class BlueskyAPI:
                     try:
                         # Récupérer le post via l'API atproto
                         post_uri = f"at://{handle}/app.bsky.feed.post/{post_id}"
-                        post_response = self.client.get_post_thread(uri=post_uri)
+                        post_response = self.client.get_post_thread(
+                            uri=post_uri)
 
                         # Extraire les détails du post principal
                         post = post_response.thread.post
@@ -348,7 +388,8 @@ class BlueskyAPI:
                             'url': url
                         })
                     except Exception as post_error:
-                        st.warning(f"Impossible de récupérer le post {post_id} : {str(post_error)}")
+                        st.warning(
+                            f"Impossible de récupérer le post {post_id} : {str(post_error)}")
                         # Ajouter un placeholder si la récupération échoue
                         posts.append({
                             'id': post_id,
