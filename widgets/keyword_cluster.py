@@ -37,8 +37,11 @@ translations["en"].update({
     "remaining_count": "Remaining keywords count",
     "remaining_weight": "Remaining keywords total weight",
     "suggest_category": "Suggest Category for Keyword",
+    "suggest_mass_categories": "Suggest Categories for All Keywords",
     "suggested_categories": "Suggested Categories",
     "confirm_categories": "Confirm Category Selection",
+    "notfound": "No theme found",
+    "filter_similarity": "Filter by minimum similarity"
 })
 
 translations["fr"].update({
@@ -66,9 +69,13 @@ translations["fr"].update({
     "remaining_count": "Nombre de mots-clés restants",
     "remaining_weight": "Poids total des mots-clés restants",
     "suggest_category": "Suggérer une catégorie pour un mot-clé",
+    "suggest_mass_categories": "Suggérer des catégories pour tous les mots-clés",
     "suggested_categories": "Catégories suggérées",
     "confirm_categories": "Confirmer la sélection des catégories",
+    "notfound": "Aucune thématique trouvée",
+    "filter_similarity": "Filtrer par similarité minimale"
 })
+
 
 @st.cache_data
 def load_keywords(work_directory, fuzzy_ratio=90, json_file=None):
@@ -93,7 +100,8 @@ def load_keywords(work_directory, fuzzy_ratio=90, json_file=None):
     if not keywords:
         return None
 
-    keywords = {k.lower(): v for k, v in keywords.items() if isinstance(v, (int, float))}
+    keywords = {k.lower(): v for k, v in keywords.items()
+                if isinstance(v, (int, float))}
     # Fusionner les mots-clés similaires
     merged_keywords = {}
     used = set()
@@ -107,6 +115,7 @@ def load_keywords(work_directory, fuzzy_ratio=90, json_file=None):
                         used.add(k2)
             used.add(k1)
     return merged_keywords
+
 
 class KeywordClusteringWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
@@ -134,7 +143,8 @@ class KeywordClusteringWidget(Widget):
         self.themes = self.load_themes()
         # Initialiser l'état de session
         if f"{self.prefix}_themes_text" not in st.session_state:
-            st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
+            st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
+                self.themes)
 
     def load_themes(self):
         """Charger les thématiques depuis themes.json ou utiliser la liste par défaut."""
@@ -145,7 +155,8 @@ class KeywordClusteringWidget(Widget):
                     themes = json.load(f)
                 return {k.lower(): v for k, v in themes.items()}
             except Exception as e:
-                st.warning(f"Erreur lors du chargement de themes.json : {e}. Utilisation de la liste par défaut.")
+                st.warning(
+                    f"Erreur lors du chargement de themes.json : {e}. Utilisation de la liste par défaut.")
         return self.default_themes
 
     def save_themes(self, themes):
@@ -169,7 +180,8 @@ class KeywordClusteringWidget(Widget):
             if ":" in line:
                 theme, keywords = line.split(":", 1)
                 theme = theme.strip().lower()
-                keywords = [k.strip().lower() for k in keywords.split(",") if k.strip()]
+                keywords = [k.strip().lower()
+                            for k in keywords.split(",") if k.strip()]
                 themes[theme] = keywords
         return themes
 
@@ -178,7 +190,8 @@ class KeywordClusteringWidget(Widget):
         assigned_keywords = set()
         for mots in themes.values():
             assigned_keywords.update(mots)
-        remaining = {k: v for k, v in keywords.items() if k not in assigned_keywords}
+        remaining = {k: v for k, v in keywords.items()
+                     if k not in assigned_keywords}
         count = len(remaining)
         weight = sum(remaining.values())
         return remaining, count, weight
@@ -196,7 +209,8 @@ class KeywordClusteringWidget(Widget):
         """Charger le modèle SentenceTransformer."""
         if self.model is None:
             with st.spinner(t("results_title")):
-                self.model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+                self.model = SentenceTransformer(
+                    "paraphrase-multilingual-MiniLM-L12-v2")
         return self.model
 
     def suggest_themes(self, keywords, n_clusters=5):
@@ -208,7 +222,8 @@ class KeywordClusteringWidget(Widget):
         X = np.array(list(embeddings.values()))
 
         # Clustering avec K-Means
-        kmeans = KMeans(n_clusters=min(n_clusters, len(keywords)), random_state=42)
+        kmeans = KMeans(n_clusters=min(
+            n_clusters, len(keywords)), random_state=42)
         labels = kmeans.fit_predict(X)
 
         # Regrouper les mots par cluster
@@ -239,7 +254,8 @@ class KeywordClusteringWidget(Widget):
             if sim > seuil:
                 suggestions.append((mot, sim))
         # Trier par similarité décroissante et limiter à 20 suggestions
-        suggestions = sorted(suggestions, key=lambda x: x[1], reverse=True)[:20]
+        suggestions = sorted(
+            suggestions, key=lambda x: x[1], reverse=True)[:20]
         return [mot for mot, _ in suggestions]
 
     def suggest_category_for_keyword(self, keyword, themes, seuil=0.8):
@@ -256,6 +272,38 @@ class KeywordClusteringWidget(Widget):
                 suggestions.append((theme, sim))
         # Trier par similarité décroissante
         suggestions = sorted(suggestions, key=lambda x: x[1], reverse=True)
+        return suggestions
+
+    def suggest_mass_categories(self, keywords, themes, seuil=0.7):
+        """Suggérer des catégories pour tous les mots-clés non assignés en utilisant un LLM."""
+        if not keywords or not themes:
+            return []
+        suggestions = []
+        total = len(keywords)
+        progress_bar = st.progress(0)
+        themes_list = ", ".join(themes)
+
+        for i, keyword in enumerate(keywords):
+            # Créer le prompt pour le LLM
+            prompt = (
+                f"Étant donné le mot-clé \"{keyword}\" et la liste suivante de thématiques : {themes_list}, "
+                "sélectionnez la thématique la plus appropriée à laquelle le mot-clé appartient. "
+                "Si aucune thématique n'est pertinente, retournez \"notfound\". "
+                "Fournissez uniquement le nom de la thématique ou \"notfound\" comme réponse."
+            )
+            try:
+                # Appeler le LLM
+                response = self.plugin_manager.get_plugin(
+                    self.name).process_with_llm(prompt)
+                # Nettoyer la réponse pour enlever les espaces ou caractères indésirables
+                response = response.strip().lower()
+                if response in themes or response == "notfound":
+                    suggestions.append(
+                        (keyword, response, 1.0 if response != "notfound" else 0.0))
+            except Exception as e:
+                st.error(
+                    f"Erreur lors de l'appel au LLM pour le mot-clé {keyword} : {e}")
+            progress_bar.progress((i + 1) / total)
         return suggestions
 
     def display(self):
@@ -278,22 +326,27 @@ class KeywordClusteringWidget(Widget):
         # Chargement des mots-clés
         st.subheader(t("keywords_file"))
         json_file = st.file_uploader(t("upload_json"), type=["json"])
-        keywords = load_keywords(self.work_directory, st.session_state.get(f"{self.prefix}_fuzzy_ratio", 90), json_file)
+        keywords = load_keywords(self.work_directory, st.session_state.get(
+            f"{self.prefix}_fuzzy_ratio", 90), json_file)
         if not keywords:
             st.warning(t("no_file"))
             return
 
         # Afficher les mots-clés restants et thématisés
         st.subheader(t("remaining_keywords"))
-        remaining_keywords, remaining_count, remaining_weight = self.get_remaining_keywords(keywords, self.themes)
-        thematized_keywords = self.get_thematized_keywords(keywords, self.themes)
+        remaining_keywords, remaining_count, remaining_weight = self.get_remaining_keywords(
+            keywords, self.themes)
+        thematized_keywords = self.get_thematized_keywords(
+            keywords, self.themes)
 
         col1, col2, col3, col4 = st.columns(4)
 
         col1.write(f"**{t('remaining_count')}**: {remaining_count}")
         col2.write(f"**{t('remaining_weight')}**: {remaining_weight}")
-        remaining_text = "\n".join([f"{k}: {v}" for k, v in remaining_keywords.items()])
-        thematized_text = "\n".join([f"{k}: {v}" for k, v in thematized_keywords.items()])
+        remaining_text = "\n".join(
+            [f"{k}: {v}" for k, v in remaining_keywords.items()])
+        thematized_text = "\n".join(
+            [f"{k}: {v}" for k, v in thematized_keywords.items()])
         col3.text_area(
             t("remaining_keywords"),
             value=remaining_text if remaining_text else "Aucun",
@@ -345,7 +398,8 @@ class KeywordClusteringWidget(Widget):
             )
             if st.button(t("suggest_themes")):
                 with st.spinner(t("results_title")):
-                    suggested_themes = self.suggest_themes(remaining_keywords, n_clusters)
+                    suggested_themes = self.suggest_themes(
+                        remaining_keywords, n_clusters)
                     st.session_state[f"{self.prefix}_suggested_themes"] = suggested_themes
             if f"{self.prefix}_suggested_themes" in st.session_state and st.session_state[f"{self.prefix}_suggested_themes"]:
                 selected_themes = st.multiselect(
@@ -358,7 +412,8 @@ class KeywordClusteringWidget(Widget):
                     for theme in selected_themes:
                         if theme not in self.themes:
                             self.themes[theme] = []
-                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
+                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
+                        self.themes)
                     st.rerun()
 
         # Étape 2 : Suggérer des mots-clés pour une thématique
@@ -369,10 +424,12 @@ class KeywordClusteringWidget(Widget):
                 options=list(self.themes.keys()),
                 key=f"{self.prefix}_select_theme"
             )
-            st.write(f"**{t('current_keywords')}**: {', '.join(self.themes[selected_theme]) if self.themes[selected_theme] else 'Aucun'}")
+            st.write(
+                f"**{t('current_keywords')}**: {', '.join(self.themes[selected_theme]) if self.themes[selected_theme] else 'Aucun'}")
             if st.button(t("suggest_keywords")):
                 with st.spinner(t("results_title")):
-                    suggested_keywords = self.suggest_keywords(selected_theme, remaining_keywords, seuil)
+                    suggested_keywords = self.suggest_keywords(
+                        selected_theme, remaining_keywords, seuil)
                     st.session_state[f"{self.prefix}_suggested_keywords"] = suggested_keywords
             if f"{self.prefix}_suggested_keywords" in st.session_state and st.session_state[f"{self.prefix}_suggested_keywords"]:
                 selected_keywords = st.multiselect(
@@ -382,8 +439,10 @@ class KeywordClusteringWidget(Widget):
                     key=f"{self.prefix}_select_keywords"
                 )
                 if selected_keywords and st.button(t("add_keywords")):
-                    self.themes[selected_theme].extend([k for k in selected_keywords if k not in self.themes[selected_theme]])
-                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
+                    self.themes[selected_theme].extend(
+                        [k for k in selected_keywords if k not in self.themes[selected_theme]])
+                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
+                        self.themes)
                     st.rerun()
 
         # Étape 3 : Suggérer une catégorie pour un mot-clé
@@ -398,16 +457,19 @@ class KeywordClusteringWidget(Widget):
             )
             if st.button(t("suggest_category")):
                 with st.spinner(t("results_title")):
-                    suggested_categories = self.suggest_category_for_keyword(selected_keyword, self.themes.keys(), seuil)
+                    suggested_categories = self.suggest_category_for_keyword(
+                        selected_keyword, self.themes.keys(), seuil)
                     if suggested_categories:
-                        df = pd.DataFrame(suggested_categories, columns=["Category", "Similarity"])
+                        df = pd.DataFrame(suggested_categories, columns=[
+                                          "Category", "Similarity"])
                         st.session_state[f"{self.prefix}_suggested_categories"] = df
                     else:
                         st.warning("Aucune catégorie suggérée.")
             if f"{self.prefix}_suggested_categories" in st.session_state and not st.session_state[f"{self.prefix}_suggested_categories"].empty:
                 selected_categories = st.multiselect(
                     t("suggested_categories"),
-                    options=st.session_state[f"{self.prefix}_suggested_categories"]["Category"].tolist(),
+                    options=st.session_state[f"{self.prefix}_suggested_categories"]["Category"].tolist(
+                    ),
                     default=[],
                     key=f"{self.prefix}_select_categories"
                 )
@@ -416,5 +478,44 @@ class KeywordClusteringWidget(Widget):
                         if category in self.themes:
                             if selected_keyword not in self.themes[category]:
                                 self.themes[category].append(selected_keyword)
-                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(self.themes)
+                    st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
+                        self.themes)
                     st.rerun()
+
+        # Étape 4 : Suggérer des catégories pour tous les mots-clés non assignés
+        st.subheader(t("suggest_mass_categories"))
+        if not remaining_keywords:
+            st.warning(t("no_keywords_left"))
+        else:
+            if st.button(t("suggest_mass_categories")):
+                with st.spinner(t("results_title")):
+                    suggested_mass_categories = self.suggest_mass_categories(
+                        remaining_keywords, self.themes.keys(), seuil)
+                    if suggested_mass_categories:
+                        df = pd.DataFrame(suggested_mass_categories, columns=[
+                                          "Keyword", "Category", "Confidence"])
+                        # Trier par catégorie pour faciliter la revue
+                        df = df.sort_values(by="Category")
+                        st.session_state[f"{self.prefix}_suggested_mass_categories"] = df
+                    else:
+                        st.warning("Aucune catégorie suggérée.")
+            if f"{self.prefix}_suggested_mass_categories" in st.session_state and not st.session_state[f"{self.prefix}_suggested_mass_categories"].empty:
+                # Afficher le DataFrame avec mode de sélection multi-row
+                selected = st.dataframe(
+                    st.session_state[f"{self.prefix}_suggested_mass_categories"],
+                    selection_mode=["multi-row"],
+                    on_select="rerun",
+                    key=f"{self.prefix}_mass_categories_dataframe"
+                )
+                if st.button(t("confirm_categories")):
+                    selected_rows = selected["selection"]["rows"]
+                    if selected_rows:
+                        for row in selected_rows:
+                            keyword = st.session_state[f"{self.prefix}_suggested_mass_categories"].loc[row, "Keyword"]
+                            category = st.session_state[f"{self.prefix}_suggested_mass_categories"].loc[row, "Category"]
+                            if category in self.themes and category != "notfound":
+                                if keyword not in self.themes[category]:
+                                    self.themes[category].append(keyword)
+                        st.session_state[f"{self.prefix}_themes_text"] = self.themes_to_text(
+                            self.themes)
+                        st.rerun()

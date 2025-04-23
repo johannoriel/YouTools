@@ -29,8 +29,10 @@ def save_config(config: Dict[str, Any]):
 def set_lang(language):
     st.session_state.lang = language
 
+
 def t(key: str) -> str:
     return translations[st.session_state.lang].get(key, key)
+
 
 class Widget:
     def __init__(self, name, prefix, plugin_manager):
@@ -40,8 +42,10 @@ class Widget:
 
     def process_with_llm(self, prompt: str, sysprompt: str, context: str, repeat_on_failure: bool = True, number_repeat: int = 2) -> str:
         llm = self.plugin_manager.get_plugin('llm')
-        response = llm.process_with_llm(prompt, sysprompt, context, repeat_on_failure, number_repeat)
+        response = llm.process_with_llm(
+            prompt, sysprompt, context, repeat_on_failure, number_repeat)
         return response
+
 
 class Plugin:
     def __init__(self, name, plugin_manager):
@@ -88,10 +92,14 @@ class Plugin:
     def get_sidebar_config_ui(self, expander, config: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
-    def process_with_llm(self, prompt: str, sysprompt: str, context: str, repeat_on_failure: bool = True, number_repeat: int = 2) -> str:
-        print(f"Generating with internal plugin LLM")
+    def process_with_llm(self, prompt: str, sysprompt: str = None, context: str = None, repeat_on_failure: bool = True, number_repeat: int = 2) -> str:
         llm = self.plugin_manager.get_plugin('llm')
-        response = llm.process_with_llm(prompt, sysprompt, context, repeat_on_failure, number_repeat)
+        if sysprompt is None:
+            sysprompt = self.plugin_manager.config['llm']['llm_sys_prompt']
+        if context is None:
+            context = ""
+        response = llm.process_with_llm(
+            prompt, sysprompt, context, repeat_on_failure, number_repeat)
         return response
 
 

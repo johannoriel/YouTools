@@ -14,7 +14,7 @@ import csv
 from lib.youtube_api import YoutubeAPI
 from datetime import datetime
 import pytz
-#from brave import Brave
+# from brave import Brave
 import requests
 import yt_dlp
 
@@ -151,6 +151,7 @@ VIDEO_CSV_HEADERS = [
     "channel_id", "channel_title", "subscriber_count", "comment_count", "relevance_score"
 ]
 
+
 class TrendwatcherPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
@@ -162,12 +163,12 @@ class TrendwatcherPlugin(Plugin):
                 "search_texts": self.search_texts_duckduckgo,
                 "config": {}  # Pas de config supplémentaire pour DDG
             },
-            #"brave": {
+            # "brave": {
             #    "name": t("trendwatcher_search_engine_brave"),
             #    "search_videos": self.search_videos_brave,
             #    "search_texts": self.search_texts_brave,
             #    "config": {"api_key": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_brave_api_key", "")}
-            #},
+            # },
             "google": {
                 "name": t("trendwatcher_search_engine_google"),
                 "search_videos": self.search_videos_google,
@@ -283,14 +284,15 @@ class TrendwatcherPlugin(Plugin):
         for fmt in date_formats:
             try:
                 result = datetime.strptime(date_str, fmt)
-                #if debug:
+                # if debug:
                 #    st.write(t("trendwatcher_debug_date").format(date_str=date_str, result=result))
                 return result
             except ValueError:
                 continue
 
         if debug:
-            st.write(t("trendwatcher_debug_date").format(date_str=date_str, result="Failed to parse"))
+            st.write(t("trendwatcher_debug_date").format(
+                date_str=date_str, result="Failed to parse"))
         return None
 
     def search_videos_duckduckgo(self, query, keyword, useragents, valid_video_domains, debug=False):
@@ -331,7 +333,8 @@ class TrendwatcherPlugin(Plugin):
             published_date = self.parse_date(video["published"], debug=debug)
             if published_date and published_date > cutoff_date:
                 title = video["title"].replace("|", "")
-                language = detect(video["title"]) if video["title"] else "unknown"
+                language = detect(
+                    video["title"]) if video["title"] else "unknown"
                 is_youtube = domain in ["youtube.com", "youtu.be"]
 
                 results.append({
@@ -387,14 +390,15 @@ class TrendwatcherPlugin(Plugin):
 
         return results
 
-
     def search_videos_brave(self, query, keyword, useragents, valid_video_domains, debug=False):
         """Search for recent videos with URL validation using Brave Search"""
         from urllib.parse import urlparse
 
-        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_brave_api_key", "")
+        api_key = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_brave_api_key", "")
         if not api_key:
-            st.error(t("trendwatcher_error").format(error="Brave Search API key is required."))
+            st.error(t("trendwatcher_error").format(
+                error="Brave Search API key is required."))
             return []
 
         brave = Brave(api_key)
@@ -410,7 +414,8 @@ class TrendwatcherPlugin(Plugin):
             if debug:
                 st.write(f"Brave Search response for videos: {search_results}")
             # Vérifier si la réponse contient des résultats vidéos
-            video_results = search_results.get("videos", {}).get("results", []) if search_results.get("videos") else []
+            video_results = search_results.get("videos", {}).get(
+                "results", []) if search_results.get("videos") else []
             if not video_results:
                 if debug:
                     st.warning(f"No video results found for query: {query}")
@@ -424,7 +429,8 @@ class TrendwatcherPlugin(Plugin):
                 title = video.get("title", "")
                 if not url or not title:
                     if debug:
-                        st.warning(f"Skipping video with missing url or title for query: {query}")
+                        st.warning(
+                            f"Skipping video with missing url or title for query: {query}")
                     continue
 
                 try:
@@ -446,8 +452,10 @@ class TrendwatcherPlugin(Plugin):
                     continue
 
                 # Extraire la date de publication
-                published_date_str = video.get("meta", {}).get("published_date", "") or video.get("published_date", "")
-                published_date = self.parse_date(published_date_str, debug=debug)
+                published_date_str = video.get("meta", {}).get(
+                    "published_date", "") or video.get("published_date", "")
+                published_date = self.parse_date(
+                    published_date_str, debug=debug)
                 if published_date and published_date > cutoff_date:
                     title = title.replace("|", "")
                     language = detect(title) if title else "unknown"
@@ -472,14 +480,17 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"Brave Search error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"Brave Search error: {str(e)}"))
             return []
 
     def search_texts_brave(self, query, keyword, useragents, debug=False):
         """Search for recent text articles using Brave Search"""
-        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_brave_api_key", "")
+        api_key = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_brave_api_key", "")
         if not api_key:
-            st.error(t("trendwatcher_error").format(error="Brave Search API key is required."))
+            st.error(t("trendwatcher_error").format(
+                error="Brave Search API key is required."))
             return []
 
         brave = Brave(api_key)
@@ -495,7 +506,8 @@ class TrendwatcherPlugin(Plugin):
             if debug:
                 st.write(f"Brave Search response for web: {search_results}")
             # Vérifier si la réponse contient des résultats web
-            web_results = search_results.get("web", {}).get("results", []) if search_results.get("web") else []
+            web_results = search_results.get("web", {}).get(
+                "results", []) if search_results.get("web") else []
             if not web_results:
                 if debug:
                     st.warning(f"No web results found for query: {query}")
@@ -507,7 +519,8 @@ class TrendwatcherPlugin(Plugin):
                 title = text.get("title", "")
                 if not url or not title:
                     if debug:
-                        st.warning(f"Skipping article with missing url or title for query: {query}")
+                        st.warning(
+                            f"Skipping article with missing url or title for query: {query}")
                     continue
 
                 title = title.replace("|", "")
@@ -532,18 +545,21 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"Brave Search error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"Brave Search error: {str(e)}"))
             return []
-
 
     def search_videos_google(self, query, keyword, useragents, valid_video_domains, debug=False):
         """Search for recent videos using Google Custom Search API"""
         from urllib.parse import urlparse
 
-        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_api_key", "")
-        cx_id = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_cx_id", "")
+        api_key = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_google_api_key", "")
+        cx_id = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_google_cx_id", "")
         if not api_key or not cx_id:
-            st.error(t("trendwatcher_error").format(error="Google API key and CX ID are required."))
+            st.error(t("trendwatcher_error").format(
+                error="Google API key and CX ID are required."))
             return []
 
         base_url = "https://www.googleapis.com/customsearch/v1"
@@ -614,15 +630,19 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"Google Search error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"Google Search error: {str(e)}"))
             return []
 
     def search_texts_google(self, query, keyword, useragents, debug=False):
         """Search for recent text articles using Google Custom Search API"""
-        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_api_key", "")
-        cx_id = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_cx_id", "")
+        api_key = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_google_api_key", "")
+        cx_id = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_google_cx_id", "")
         if not api_key or not cx_id:
-            st.error(t("trendwatcher_error").format(error="Google API key and CX ID are required."))
+            st.error(t("trendwatcher_error").format(
+                error="Google API key and CX ID are required."))
             return []
 
         base_url = "https://www.googleapis.com/customsearch/v1"
@@ -671,7 +691,8 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"Google Search error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"Google Search error: {str(e)}"))
             return []
 
     def search_videos_ytdlp(self, query, keyword, useragents, valid_video_domains, debug=False):
@@ -723,12 +744,14 @@ class TrendwatcherPlugin(Plugin):
                 upload_date = entry.get("upload_date", "")
                 if upload_date:
                     try:
-                        published_date = datetime.strptime(upload_date, "%Y%m%d")
+                        published_date = datetime.strptime(
+                            upload_date, "%Y%m%d")
                         if published_date <= cutoff_date:
                             continue
                     except ValueError:
                         if debug:
-                            st.warning(f"Invalid date format for {url}: {upload_date}")
+                            st.warning(
+                                f"Invalid date format for {url}: {upload_date}")
                         continue
                 else:
                     published_date = datetime.now()  # Suppose récent si pas de date
@@ -755,7 +778,8 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"yt-dlp error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"yt-dlp error: {str(e)}"))
             return []
 
     def search_texts_ytdlp(self, query, keyword, useragents, debug=False):
@@ -769,9 +793,11 @@ class TrendwatcherPlugin(Plugin):
         from urllib.parse import urlparse
         import requests
 
-        server_url = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_searxng_server_url", "")
+        server_url = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_searxng_server_url", "")
         if not server_url:
-            st.error(t("trendwatcher_error").format(error="SearxNG server URL is required."))
+            st.error(t("trendwatcher_error").format(
+                error="SearxNG server URL is required."))
             return []
 
         # Configure query for videos (restrict to YouTube)
@@ -787,7 +813,8 @@ class TrendwatcherPlugin(Plugin):
 
         try:
             headers = {"User-Agent": random.choice(useragents)}
-            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            response = requests.get(
+                search_url, params=params, headers=headers, timeout=10)
             if response.status_code != 200:
                 if debug:
                     st.error(f"SearxNG API error: {response.text}")
@@ -844,16 +871,19 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"SearxNG Search error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"SearxNG Search error: {str(e)}"))
             return []
 
     def search_texts_searxng(self, query, keyword, useragents, debug=False):
         """Search for recent text articles using SearxNG"""
         import requests
 
-        server_url = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_searxng_server_url", "")
+        server_url = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_searxng_server_url", "")
         if not server_url:
-            st.error(t("trendwatcher_error").format(error="SearxNG server URL is required."))
+            st.error(t("trendwatcher_error").format(
+                error="SearxNG server URL is required."))
             return []
 
         search_url = f"{server_url.rstrip('/')}/search"
@@ -868,7 +898,8 @@ class TrendwatcherPlugin(Plugin):
 
         try:
             headers = {"User-Agent": random.choice(useragents)}
-            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            response = requests.get(
+                search_url, params=params, headers=headers, timeout=10)
             if response.status_code != 200:
                 if debug:
                     st.error(f"SearxNG API error: {response.text}")
@@ -903,7 +934,8 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"SearxNG Search error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"SearxNG Search error: {str(e)}"))
             return []
 
     def search_videos_bing(self, query, keyword, useragents, valid_video_domains, debug=False):
@@ -911,9 +943,11 @@ class TrendwatcherPlugin(Plugin):
         from urllib.parse import urlparse
         import requests
 
-        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_bing_api_key", "")
+        api_key = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_bing_api_key", "")
         if not api_key:
-            st.error(t("trendwatcher_error").format(error="Bing API key is required."))
+            st.error(t("trendwatcher_error").format(
+                error="Bing API key is required."))
             return []
 
         search_url = "https://api.bing.microsoft.com/v7.0/search"
@@ -929,7 +963,8 @@ class TrendwatcherPlugin(Plugin):
         }
 
         try:
-            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            response = requests.get(
+                search_url, params=params, headers=headers, timeout=10)
             if response.status_code != 200:
                 if debug:
                     st.error(f"Bing API error: {response.text}")
@@ -940,7 +975,8 @@ class TrendwatcherPlugin(Plugin):
             cutoff_date = datetime.now() - timedelta(days=7)
 
             # Bing returns videos in 'videos' or 'webPages' depending on query
-            items = data.get("videos", {}).get("value", []) or data.get("webPages", {}).get("value", [])
+            items = data.get("videos", {}).get("value", []) or data.get(
+                "webPages", {}).get("value", [])
 
             for item in items[:5]:
                 url = item.get("url") or item.get("contentUrl", "")
@@ -968,7 +1004,8 @@ class TrendwatcherPlugin(Plugin):
 
                 # Bing may provide datePublished
                 date_str = item.get("datePublished", "")
-                published_date = self.parse_date(date_str, debug=debug) if date_str else None
+                published_date = self.parse_date(
+                    date_str, debug=debug) if date_str else None
                 if published_date and published_date <= cutoff_date:
                     continue
 
@@ -994,16 +1031,19 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"Bing Search error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"Bing Search error: {str(e)}"))
             return []
 
     def search_texts_bing(self, query, keyword, useragents, debug=False):
         """Search for recent text articles using Bing Web Search API"""
         import requests
 
-        api_key = self.plugin_manager.config.get(self.name, {}).get("trendwatcher_bing_api_key", "")
+        api_key = self.plugin_manager.config.get(
+            self.name, {}).get("trendwatcher_bing_api_key", "")
         if not api_key:
-            st.error(t("trendwatcher_error").format(error="Bing API key is required."))
+            st.error(t("trendwatcher_error").format(
+                error="Bing API key is required."))
             return []
 
         search_url = "https://api.bing.microsoft.com/v7.0/search"
@@ -1019,7 +1059,8 @@ class TrendwatcherPlugin(Plugin):
         }
 
         try:
-            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            response = requests.get(
+                search_url, params=params, headers=headers, timeout=10)
             if response.status_code != 200:
                 if debug:
                     st.error(f"Bing API error: {response.text}")
@@ -1054,14 +1095,15 @@ class TrendwatcherPlugin(Plugin):
             return results
         except Exception as e:
             if debug:
-                st.error(t("trendwatcher_error").format(error=f"Bing Search error: {str(e)}"))
+                st.error(t("trendwatcher_error").format(
+                    error=f"Bing Search error: {str(e)}"))
             return []
-
 
     def search_trends(self, main_keyword, synonyms, useragents, search_mode="or", search_engine="duckduckgo", debug=False):
         """Search for recent videos and web content"""
         # Get search engine methods
-        engine = self.SEARCH_ENGINES.get(search_engine, self.SEARCH_ENGINES["duckduckgo"])
+        engine = self.SEARCH_ENGINES.get(
+            search_engine, self.SEARCH_ENGINES["duckduckgo"])
         search_videos = engine["search_videos"]
         search_texts = engine["search_texts"]
 
@@ -1085,7 +1127,8 @@ class TrendwatcherPlugin(Plugin):
             queries = [(f'"{main_keyword}"', main_keyword)]
             queries.extend((f'"{syn}"', main_keyword) for syn in synonyms)
             if search_engine == "duckduckgo":
-                queries = [(f"{q} site:youtube.com OR -inurl:(signup login)", k) for q, k in queries]
+                queries = [(f"{q} site:youtube.com OR -inurl:(signup login)", k)
+                           for q, k in queries]
             elif search_engine == "google":
                 queries = [(f"{q} site:youtube.com", k) for q, k in queries]
             elif search_engine == "searxng":
@@ -1093,7 +1136,8 @@ class TrendwatcherPlugin(Plugin):
             elif search_engine == "bing":
                 queries = [(f"{q} site:youtube.com", k) for q, k in queries]
             if debug:
-                st.write(t("trendwatcher_debug_query").format(query=", ".join(q for q, _ in queries)))
+                st.write(t("trendwatcher_debug_query").format(
+                    query=", ".join(q for q, _ in queries)))
 
         # List of valid video platform domains
         valid_video_domains = [
@@ -1109,13 +1153,17 @@ class TrendwatcherPlugin(Plugin):
         try:
             all_results = []
             for query, keyword in queries:
-                video_results = search_videos(query, keyword, useragents, valid_video_domains, debug=debug)
-                text_results = search_texts(query, keyword, useragents, debug=debug)
+                video_results = search_videos(
+                    query, keyword, useragents, valid_video_domains, debug=debug)
+                text_results = search_texts(
+                    query, keyword, useragents, debug=debug)
                 all_results.extend(video_results + text_results)
 
             if debug:
-                video_count = sum(1 for r in all_results if r.get("type") == "video")
-                text_count = sum(1 for r in all_results if r.get("type") == "web")
+                video_count = sum(
+                    1 for r in all_results if r.get("type") == "video")
+                text_count = sum(
+                    1 for r in all_results if r.get("type") == "web")
                 st.write(t("trendwatcher_debug_results").format(
                     count=len(all_results),
                     vids=video_count,
@@ -1157,15 +1205,18 @@ class TrendwatcherPlugin(Plugin):
 
                 # Extract required fields
                 channel_id = info.get("channel_id", "N/A")
-                channel_title = info.get("channel", "N/A")  # 'channel' contains the channel name
+                # 'channel' contains the channel name
+                channel_title = info.get("channel", "N/A")
                 subscriber_count = info.get("channel_follower_count", "N/A")
 
                 # Format subscriber_count
                 if isinstance(subscriber_count, int):
-                    subscriber_count = f"{subscriber_count:,}".replace(",", " ") + " subscribers"
+                    subscriber_count = f"{subscriber_count:,}".replace(
+                        ",", " ") + " subscribers"
 
                 if debug:
-                    st.write(f"Extracted from {video_url}: channel_id={channel_id}, channel_title={channel_title}, subscriber_count={subscriber_count}")
+                    st.write(
+                        f"Extracted from {video_url}: channel_id={channel_id}, channel_title={channel_title}, subscriber_count={subscriber_count}")
 
                 return {
                     "channel_id": channel_id,
@@ -1175,7 +1226,8 @@ class TrendwatcherPlugin(Plugin):
 
         except Exception as e:
             if debug:
-                st.write(f"Error extracting channel info with yt-dlp for {video_url}: {str(e)}")
+                st.write(
+                    f"Error extracting channel info with yt-dlp for {video_url}: {str(e)}")
             return {
                 "channel_id": "N/A",
                 "channel_title": "N/A",
@@ -1208,19 +1260,22 @@ class TrendwatcherPlugin(Plugin):
 
                 # Format subscriber_count
                 if isinstance(subscriber_count, int):
-                    subscriber_count = str(subscriber_count)  # Convert to string without spaces or suffix
+                    # Convert to string without spaces or suffix
+                    subscriber_count = str(subscriber_count)
                 else:
                     subscriber_count = ""  # Replace "N/A" with empty string
 
                 # Format view_count
                 if isinstance(view_count, int):
-                    view_count = str(view_count)  # Convert to string without spaces
+                    # Convert to string without spaces
+                    view_count = str(view_count)
                 else:
                     view_count = ""  # Replace "N/A" with empty string
 
                 # Format comment_count
                 if isinstance(comment_count, int):
-                    comment_count = str(comment_count)  # Convert to string without spaces
+                    # Convert to string without spaces
+                    comment_count = str(comment_count)
                 else:
                     comment_count = ""  # Replace "N/A" with empty string
 
@@ -1233,8 +1288,8 @@ class TrendwatcherPlugin(Plugin):
 
                 if debug:
                     st.write(f"Extracted from {video_url}: channel_id={channel_id}, channel_title={channel_title}, "
-                            f"subscriber_count={subscriber_count}, view_count={view_count}, "
-                            f"comment_count={comment_count}, published_at={published_at}")
+                             f"subscriber_count={subscriber_count}, view_count={view_count}, "
+                             f"comment_count={comment_count}, published_at={published_at}")
 
                 return {
                     "channel_id": channel_id,
@@ -1247,7 +1302,8 @@ class TrendwatcherPlugin(Plugin):
 
         except Exception as e:
             if debug:
-                st.write(f"Error extracting video metadata with yt-dlp for {video_url}: {str(e)}")
+                st.write(
+                    f"Error extracting video metadata with yt-dlp for {video_url}: {str(e)}")
             return {
                 "channel_id": "N/A",
                 "channel_title": "N/A",
@@ -1281,7 +1337,8 @@ class TrendwatcherPlugin(Plugin):
         debug_mode = st.session_state.get("debug_mode", False)
 
         # Initialize YoutubeAPI for relevance score
-        youtube_api = YoutubeAPI(self.plugin_manager.config if self.plugin_manager else {})
+        youtube_api = YoutubeAPI(
+            self.plugin_manager.config if self.plugin_manager else {})
 
         # Write videos CSV
         with open(video_file, "w", newline="", encoding="utf-8") as f:
@@ -1295,7 +1352,8 @@ class TrendwatcherPlugin(Plugin):
 
                 if is_youtube:
                     # Fetch metadata only for selected videos
-                    metadata = self.extract_video_metadata_yt_dlp(video["url"], debug=debug_mode)
+                    metadata = self.extract_video_metadata_yt_dlp(
+                        video["url"], debug=debug_mode)
 
                     # Calculate relevance score
                     published_at = metadata["published_at"]
@@ -1306,11 +1364,14 @@ class TrendwatcherPlugin(Plugin):
                             if published_at:
                                 try:
                                     # Parse YYYY-MM-DD and convert to ISO format
-                                    date_obj = datetime.strptime(published_at, "%Y-%m-%d")
-                                    published_at_iso = date_obj.strftime("%Y-%m-%dT00:00:00Z")
+                                    date_obj = datetime.strptime(
+                                        published_at, "%Y-%m-%d")
+                                    published_at_iso = date_obj.strftime(
+                                        "%Y-%m-%dT00:00:00Z")
                                 except ValueError as e:
                                     if debug_mode:
-                                        st.write(f"Error parsing date {published_at} for {video['url']}: {str(e)}")
+                                        st.write(
+                                            f"Error parsing date {published_at} for {video['url']}: {str(e)}")
                                     published_at_iso = None
                             else:
                                 published_at_iso = None
@@ -1321,10 +1382,12 @@ class TrendwatcherPlugin(Plugin):
                                     "subscriber_count": int(metadata["subscriber_count"] or 0),
                                     "comment_count": int(metadata["comment_count"] or 0)
                                 }
-                                relevance_score = youtube_api.calculate_relevance_score(video_data)
+                                relevance_score = youtube_api.calculate_relevance_score(
+                                    video_data)
                         except Exception as e:
                             if debug_mode:
-                                st.write(f"Error calculating relevance score for {video['url']}: {str(e)}")
+                                st.write(
+                                    f"Error calculating relevance score for {video['url']}: {str(e)}")
                 else:
                     metadata = {
                         "view_count": "",
@@ -1389,11 +1452,16 @@ class TrendwatcherPlugin(Plugin):
     def trend_watcher(self, config):
         st.header(t("trendwatcher_header"))
 
-        keywords_config = config.get(self.name, {}).get("trendwatcher_keywords", t("trendwatcher_keywords_default"))
-        useragents = config.get(self.name, {}).get("trendwatcher_useragents", t("trendwatcher_useragents_default")).split("\n")
-        delay_min = float(config.get(self.name, {}).get("trendwatcher_delay_min", 1))
-        delay_max = float(config.get(self.name, {}).get("trendwatcher_delay_max", 3))
-        working_dir = config.get(self.name, {}).get("working_dir", t("trendwatcher_working_dir_default"))
+        keywords_config = config.get(self.name, {}).get(
+            "trendwatcher_keywords", t("trendwatcher_keywords_default"))
+        useragents = config.get(self.name, {}).get(
+            "trendwatcher_useragents", t("trendwatcher_useragents_default")).split("\n")
+        delay_min = float(config.get(self.name, {}).get(
+            "trendwatcher_delay_min", 1))
+        delay_max = float(config.get(self.name, {}).get(
+            "trendwatcher_delay_max", 3))
+        working_dir = config.get(self.name, {}).get(
+            "working_dir", t("trendwatcher_working_dir_default"))
 
         keywords_input = st.text_area(
             t("trendwatcher_keywords_label"),
@@ -1424,23 +1492,27 @@ class TrendwatcherPlugin(Plugin):
             )
 
         # Add search engine selection
-        search_engine_options = {engine_id: engine["name"] for engine_id, engine in self.SEARCH_ENGINES.items()}
+        search_engine_options = {
+            engine_id: engine["name"] for engine_id, engine in self.SEARCH_ENGINES.items()}
         search_engine_name = st.selectbox(
             t("trendwatcher_search_engine_label"),
             list(search_engine_options.values()),
             index=0,
             key="search_engine"
         )
-        search_engine = next(k for k, v in search_engine_options.items() if v == search_engine_name)
+        search_engine = next(
+            k for k, v in search_engine_options.items() if v == search_engine_name)
 
         # Add search mode selection
         search_mode = st.selectbox(
             t("trendwatcher_search_mode_label"),
-            [t("trendwatcher_search_mode_or"), t("trendwatcher_search_mode_subsearches")],
+            [t("trendwatcher_search_mode_or"), t(
+                "trendwatcher_search_mode_subsearches")],
             index=0,
             key="search_mode"
         )
-        search_mode_value = "or" if search_mode == t("trendwatcher_search_mode_or") else "subsearches"
+        search_mode_value = "or" if search_mode == t(
+            "trendwatcher_search_mode_or") else "subsearches"
 
         # Initialize session state
         if "trendwatcher_results" not in st.session_state:
@@ -1462,11 +1534,13 @@ class TrendwatcherPlugin(Plugin):
                         if ":" in line:
                             main_keyword, synonyms = line.split(":", 1)
                             main_keyword = main_keyword.strip()
-                            synonyms = [s.strip() for s in synonyms.split(",") if s.strip()]
+                            synonyms = [s.strip()
+                                        for s in synonyms.split(",") if s.strip()]
                         else:
                             main_keyword = line
                             synonyms = []
-                        keyword_configs.append({"main": main_keyword, "synonyms": synonyms})
+                        keyword_configs.append(
+                            {"main": main_keyword, "synonyms": synonyms})
 
                 # Limit keywords in debug mode
                 if debug_mode and len(keyword_configs) > max_keywords_debug:
@@ -1496,11 +1570,14 @@ class TrendwatcherPlugin(Plugin):
 
         if st.session_state.trendwatcher_results:
             # Split into videos and texts
-            video_results = [r for r in st.session_state.trendwatcher_results if r["type"] == "video"]
-            text_results = [r for r in st.session_state.trendwatcher_results if r["type"] == "web"]
+            video_results = [
+                r for r in st.session_state.trendwatcher_results if r["type"] == "video"]
+            text_results = [
+                r for r in st.session_state.trendwatcher_results if r["type"] == "web"]
 
             # Filters
-            all_keywords = list(set(r["keyword"] for r in st.session_state.trendwatcher_results))
+            all_keywords = list(
+                set(r["keyword"] for r in st.session_state.trendwatcher_results))
             selected_keywords = st.multiselect(
                 t("trendwatcher_keyword_filter"),
                 all_keywords,
@@ -1508,7 +1585,8 @@ class TrendwatcherPlugin(Plugin):
                 key="keyword_filter"
             )
 
-            all_languages = list(set(r["language"] for r in st.session_state.trendwatcher_results))
+            all_languages = list(
+                set(r["language"] for r in st.session_state.trendwatcher_results))
             selected_language = st.selectbox(
                 t("trendwatcher_language_filter"),
                 ["All"] + all_languages,
@@ -1541,7 +1619,8 @@ class TrendwatcherPlugin(Plugin):
                     )
                     video_df["Select"] = st.session_state.select_all_videos
                     edited_video_df = st.data_editor(
-                        video_df[["Select", "title", "url", "keyword", "language"]],
+                        video_df[["Select", "title",
+                                  "url", "keyword", "language"]],
                         column_config={
                             "Select": st.column_config.CheckboxColumn(
                                 "Select for Export",
@@ -1571,7 +1650,8 @@ class TrendwatcherPlugin(Plugin):
                         key="video_selector"
                     )
                     video_df.update(edited_video_df[["Select"]])
-                    selected_video_urls = video_df[video_df["Select"]]["url"].tolist()
+                    selected_video_urls = video_df[video_df["Select"]]["url"].tolist(
+                    )
                     if debug_mode:
                         st.write("Selected video URLs:", selected_video_urls)
                 else:
@@ -1590,7 +1670,8 @@ class TrendwatcherPlugin(Plugin):
                     )
                     text_df["Select"] = st.session_state.select_all_texts
                     edited_text_df = st.data_editor(
-                        text_df[["Select", "title", "url", "keyword", "language"]],
+                        text_df[["Select", "title", "url",
+                                 "keyword", "language"]],
                         column_config={
                             "Select": st.column_config.CheckboxColumn(
                                 "Select for Export",
@@ -1620,7 +1701,8 @@ class TrendwatcherPlugin(Plugin):
                         key="text_selector"
                     )
                     text_df.update(edited_text_df[["Select"]])
-                    selected_text_urls = text_df[text_df["Select"]]["url"].tolist()
+                    selected_text_urls = text_df[text_df["Select"]]["url"].tolist(
+                    )
                     if debug_mode:
                         st.write("Selected text URLs:", selected_text_urls)
                 else:
@@ -1635,27 +1717,32 @@ class TrendwatcherPlugin(Plugin):
                         try:
                             video_dir = None
                             if selected_video_urls:
-                                video_dir = self.save_videos_to_csv(working_dir, selected_keywords, selected_video_urls)
+                                video_dir = self.save_videos_to_csv(
+                                    working_dir, selected_keywords, selected_video_urls)
 
                             article_dir = None
                             if selected_text_urls:
-                                article_dir = self.save_articles_to_csv(working_dir, selected_keywords, selected_text_urls)
+                                article_dir = self.save_articles_to_csv(
+                                    working_dir, selected_keywords, selected_text_urls)
 
                             if video_dir or article_dir:
-                                st.success(t("trendwatcher_save_success").format(dir=video_dir or article_dir))
+                                st.success(t("trendwatcher_save_success").format(
+                                    dir=video_dir or article_dir))
                             else:
                                 st.warning("No results selected for export.")
                         except Exception as e:
-                            st.error(t("trendwatcher_error").format(error=str(e)))
+                            st.error(
+                                t("trendwatcher_error").format(error=str(e)))
                 else:
-                    st.warning("Please select at least one video or article to export.")
+                    st.warning(
+                        "Please select at least one video or article to export.")
         else:
             st.info(t("trendwatcher_no_results"))
 
     def keyword_cluster(self, config):
         from widgets.keyword_cluster import KeywordClusteringWidget
-        KeywordClusteringWidget("kwc", "kwc", plugin_manager=self.plugin_manager).display()
-
+        KeywordClusteringWidget("trendwatcher", "kwc",
+                                plugin_manager=self.plugin_manager).display()
 
     def run(self, config):
         """Main plugin logic"""
@@ -1664,6 +1751,7 @@ class TrendwatcherPlugin(Plugin):
             self.trend_watcher(config)
         with tab2:
             self.keyword_cluster(config)
+
 
 if __name__ == "__main__":
     st.write("Trendwatcher Plugin standalone test")
