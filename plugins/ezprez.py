@@ -569,7 +569,7 @@ def generate_animation_css(animation_type, target_column=None, is_exit=False):
             css += """
             @keyframes randomZoom {
                 0% { transform: scale(1); }
-                100% { transform: scale(1.1); }
+                100% { transform: scale(1.15); }
             }
             """
 
