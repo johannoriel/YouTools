@@ -2,7 +2,6 @@ from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from plugins.common import remove_quotes
-from duckduckgo_search import DDGS
 import random
 import time
 from datetime import datetime, timedelta
@@ -12,11 +11,21 @@ import os
 import re
 import csv
 from lib.youtube_api import YoutubeAPI
-from datetime import datetime
-import pytz
-# from brave import Brave
-import requests
 import yt_dlp
+from lib.search_engines import (
+    search_videos_duckduckgo,
+    search_texts_duckduckgo,
+    search_videos_google,
+    search_texts_google,
+    search_videos_ytdlp,
+    search_texts_ytdlp,
+    search_videos_searxng,
+    search_texts_searxng,
+    search_videos_bing,
+    search_texts_bing,
+    parse_date,
+    extract_youtube_id
+)
 
 # Translations
 translations["en"].update({
@@ -50,9 +59,6 @@ translations["en"].update({
     "trendwatcher_texts_table": "Text Articles",
     "trendwatcher_working_dir": "Working Directory",
     "trendwatcher_working_dir_default": "~/Videos",
-    "trendwatcher_results": "Results for '{keyword}':",
-    "trendwatcher_no_results": "No recent results found within 7 days",
-    "trendwatcher_error": "Error during search: {error}",
     "trendwatcher_save_success": "Results saved to {dir}",
     "trendwatcher_save_button": "Save Results",
     "trendwatcher_table_view_count": "View Count",
@@ -79,7 +85,6 @@ translations["en"].update({
     "trendwatcher_search_engine_bing": "Bing Web Search",
     "trendwatcher_bing_api_key_label": "Bing API Key",
     "trendwatcher_bing_api_key_help": "Enter your Bing Web Search API key (get it from portal.azure.com)",
-
 })
 
 translations["fr"].update({
@@ -113,9 +118,6 @@ translations["fr"].update({
     "trendwatcher_texts_table": "Articles Textes",
     "trendwatcher_working_dir": "Répertoire de travail",
     "trendwatcher_working_dir_default": "~/Vidéos",
-    "trendwatcher_results": "Résultats pour '{keyword}':",
-    "trendwatcher_no_results": "Aucun résultat récent trouvé dans les 7 derniers jours",
-    "trendwatcher_error": "Erreur pendant la recherche : {error}",
     "trendwatcher_save_success": "Résultats sauvegardés dans {dir}",
     "trendwatcher_save_button": "Sauvegarder les résultats",
     "trendwatcher_table_view_count": "Nombre de vues",
@@ -142,7 +144,6 @@ translations["fr"].update({
     "trendwatcher_search_engine_bing": "Recherche Web Bing",
     "trendwatcher_bing_api_key_label": "Clé API Bing",
     "trendwatcher_bing_api_key_help": "Entrez votre clé API Bing Web Search (obtenez-la sur portal.azure.com)",
-
 })
 
 # Official CSV headers
@@ -159,20 +160,28 @@ class TrendwatcherPlugin(Plugin):
         self.SEARCH_ENGINES = {
             "duckduckgo": {
                 "name": t("trendwatcher_search_engine_duckduckgo"),
-                "search_videos": self.search_videos_duckduckgo,
-                "search_texts": self.search_texts_duckduckgo,
-                "config": {}  # Pas de config supplémentaire pour DDG
+                "search_videos": search_videos_duckduckgo,
+                "search_texts": search_texts_duckduckgo,
+                "config": {}
             },
-            # "brave": {
-            #    "name": t("trendwatcher_search_engine_brave"),
-            #    "search_videos": self.search_videos_brave,
-            #    "search_texts": self.search_texts_brave,
-            #    "config": {"api_key": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_brave_api_key", "")}
-            # },
             "google": {
                 "name": t("trendwatcher_search_engine_google"),
-                "search_videos": self.search_videos_google,
-                "search_texts": self.search_texts_google,
+                "search_videos": lambda *args, **kwargs: search_videos_google(
+                    *args,
+                    api_key=self.plugin_manager.config.get(
+                        self.name, {}).get("trendwatcher_google_api_key", ""),
+                    cx_id=self.plugin_manager.config.get(
+                        self.name, {}).get("trendwatcher_google_cx_id", ""),
+                    **kwargs
+                ),
+                "search_texts": lambda *args, **kwargs: search_texts_google(
+                    *args,
+                    api_key=self.plugin_manager.config.get(
+                        self.name, {}).get("trendwatcher_google_api_key", ""),
+                    cx_id=self.plugin_manager.config.get(
+                        self.name, {}).get("trendwatcher_google_cx_id", ""),
+                    **kwargs
+                ),
                 "config": {
                     "api_key": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_api_key", ""),
                     "cx_id": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_google_cx_id", "")
@@ -180,22 +189,42 @@ class TrendwatcherPlugin(Plugin):
             },
             "ytdlp": {
                 "name": t("trendwatcher_search_engine_ytdlp"),
-                "search_videos": self.search_videos_ytdlp,
-                "search_texts": self.search_texts_ytdlp,  # Ne renvoie rien pour textes
+                "search_videos": search_videos_ytdlp,
+                "search_texts": search_texts_ytdlp,
                 "config": {}
             },
             "searxng": {
                 "name": t("trendwatcher_search_engine_searxng"),
-                "search_videos": self.search_videos_searxng,
-                "search_texts": self.search_texts_searxng,
+                "search_videos": lambda *args, **kwargs: search_videos_searxng(
+                    *args,
+                    server_url=self.plugin_manager.config.get(self.name, {}).get(
+                        "trendwatcher_searxng_server_url", ""),
+                    **kwargs
+                ),
+                "search_texts": lambda *args, **kwargs: search_texts_searxng(
+                    *args,
+                    server_url=self.plugin_manager.config.get(self.name, {}).get(
+                        "trendwatcher_searxng_server_url", ""),
+                    **kwargs
+                ),
                 "config": {
                     "server_url": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_searxng_server_url", "")
                 }
             },
             "bing": {
                 "name": t("trendwatcher_search_engine_bing"),
-                "search_videos": self.search_videos_bing,
-                "search_texts": self.search_texts_bing,
+                "search_videos": lambda *args, **kwargs: search_videos_bing(
+                    *args,
+                    api_key=self.plugin_manager.config.get(
+                        self.name, {}).get("trendwatcher_bing_api_key", ""),
+                    **kwargs
+                ),
+                "search_texts": lambda *args, **kwargs: search_texts_bing(
+                    *args,
+                    api_key=self.plugin_manager.config.get(
+                        self.name, {}).get("trendwatcher_bing_api_key", ""),
+                    **kwargs
+                ),
                 "config": {
                     "api_key": lambda: self.plugin_manager.config.get(self.name, {}).get("trendwatcher_bing_api_key", "")
                 }
@@ -269,947 +298,23 @@ class TrendwatcherPlugin(Plugin):
             {"name": "Keyword cluster", "plugin": "trendwatcher"},
         ]
 
-    def parse_date(self, date_str, debug=False):
-        """Try parsing date in multiple formats"""
-        date_formats = [
-            "%Y-%m-%dT%H:%M:%S.%f",
-            "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%dT%H:%M:%S%z",
-            "%Y-%m-%dT%H:%M:%S.0000000"
-        ]
-
-        if "+" in date_str or "-" in date_str[-6:]:
-            date_str = date_str.rsplit("+", 1)[0].rsplit("-", 1)[0]
-
-        for fmt in date_formats:
-            try:
-                result = datetime.strptime(date_str, fmt)
-                # if debug:
-                #    st.write(t("trendwatcher_debug_date").format(date_str=date_str, result=result))
-                return result
-            except ValueError:
-                continue
-
-        if debug:
-            st.write(t("trendwatcher_debug_date").format(
-                date_str=date_str, result="Failed to parse"))
-        return None
-
-    def search_videos_duckduckgo(self, query, keyword, useragents, valid_video_domains, debug=False):
-        """Search for recent videos with URL validation using DuckDuckGo"""
-        from urllib.parse import urlparse
-
-        # Create new DDGS instance with random User-Agent
-        headers = {"User-Agent": random.choice(useragents)}
-        ddgs = DDGS(headers=headers)
-
-        video_results = ddgs.videos(
-            keywords=query,
-            region="fr-fr",
-            timelimit="w",
-            max_results=5
-        )
-
-        results = []
-        cutoff_date = datetime.now() - timedelta(days=7)
-
-        for video in video_results:
-            try:
-                parsed_url = urlparse(video["content"])
-                domain = parsed_url.netloc.lower().replace("www.", "")
-                if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
-                    st.warning(
-                        f"Non-video URL detected: {video['content']} "
-                        f"for keyword '{keyword}'. Skipping."
-                    )
-                    continue
-            except Exception as e:
-                st.warning(
-                    f"Invalid URL: {video['content']} "
-                    f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
-                )
-                continue
-
-            published_date = self.parse_date(video["published"], debug=debug)
-            if published_date and published_date > cutoff_date:
-                title = video["title"].replace("|", "")
-                language = detect(
-                    video["title"]) if video["title"] else "unknown"
-                is_youtube = domain in ["youtube.com", "youtu.be"]
-
-                results.append({
-                    "keyword": keyword,
-                    "url": video["content"],
-                    "video_id": self.extract_youtube_id(video["content"]) if is_youtube else "N/A",
-                    "title": title,
-                    "view_count": "",
-                    "language": language,
-                    "published_at": "",
-                    "channel_id": "N/A",
-                    "channel_title": "N/A",
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "video"
-                })
-
-        return results
-
-    def search_texts_duckduckgo(self, query, keyword, useragents, debug=False):
-        """Search for recent text articles using DuckDuckGo"""
-        headers = {"User-Agent": random.choice(useragents)}
-        ddgs = DDGS(headers=headers)
-
-        text_results = ddgs.text(
-            keywords=query,
-            region="fr-fr",
-            timelimit="w",
-            max_results=5
-        )
-
-        results = []
-        for text in text_results:
-            title = text["title"].replace("|", "")
-            language = detect(text["title"]) if text["title"] else "unknown"
-            if debug:
-                st.write(f"Text article: [{title}]({text['href']})")
-            results.append({
-                "keyword": keyword,
-                "url": text["href"],
-                "title": title,
-                "view_count": "",
-                "language": language,
-                "published_at": "",
-                "channel_id": "N/A",
-                "channel_title": "N/A",
-                "subscriber_count": "",
-                "comment_count": "",
-                "relevance_score": 0,
-                "type": "web"
-            })
-
-        return results
-
-    def search_videos_brave(self, query, keyword, useragents, valid_video_domains, debug=False):
-        """Search for recent videos with URL validation using Brave Search"""
-        from urllib.parse import urlparse
-
-        api_key = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_brave_api_key", "")
-        if not api_key:
-            st.error(t("trendwatcher_error").format(
-                error="Brave Search API key is required."))
-            return []
-
-        brave = Brave(api_key)
-        try:
-            # Utiliser raw=True pour éviter la validation Pydantic
-            search_results = brave.search(
-                q=query,
-                count=5,
-                result_filter="videos",
-                freshness="pw",
-                raw=True
-            )
-            if debug:
-                st.write(f"Brave Search response for videos: {search_results}")
-            # Vérifier si la réponse contient des résultats vidéos
-            video_results = search_results.get("videos", {}).get(
-                "results", []) if search_results.get("videos") else []
-            if not video_results:
-                if debug:
-                    st.warning(f"No video results found for query: {query}")
-                return []
-
-            results = []
-            cutoff_date = datetime.now() - timedelta(days=7)
-
-            for video in video_results[:5]:
-                url = video.get("url", "")
-                title = video.get("title", "")
-                if not url or not title:
-                    if debug:
-                        st.warning(
-                            f"Skipping video with missing url or title for query: {query}")
-                    continue
-
-                try:
-                    parsed_url = urlparse(url)
-                    domain = parsed_url.netloc.lower().replace("www.", "")
-                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
-                        if debug:
-                            st.warning(
-                                f"Non-video URL detected: {url} "
-                                f"for keyword '{keyword}'. Skipping."
-                            )
-                        continue
-                except Exception as e:
-                    if debug:
-                        st.warning(
-                            f"Invalid URL: {url} "
-                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
-                        )
-                    continue
-
-                # Extraire la date de publication
-                published_date_str = video.get("meta", {}).get(
-                    "published_date", "") or video.get("published_date", "")
-                published_date = self.parse_date(
-                    published_date_str, debug=debug)
-                if published_date and published_date > cutoff_date:
-                    title = title.replace("|", "")
-                    language = detect(title) if title else "unknown"
-                    is_youtube = domain in ["youtube.com", "youtu.be"]
-
-                    results.append({
-                        "keyword": keyword,
-                        "url": url,
-                        "video_id": self.extract_youtube_id(url) if is_youtube else "N/A",
-                        "title": title,
-                        "view_count": "",
-                        "language": language,
-                        "published_at": "",
-                        "channel_id": "N/A",
-                        "channel_title": "N/A",
-                        "subscriber_count": "",
-                        "comment_count": "",
-                        "relevance_score": 0,
-                        "type": "video"
-                    })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"Brave Search error: {str(e)}"))
-            return []
-
-    def search_texts_brave(self, query, keyword, useragents, debug=False):
-        """Search for recent text articles using Brave Search"""
-        api_key = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_brave_api_key", "")
-        if not api_key:
-            st.error(t("trendwatcher_error").format(
-                error="Brave Search API key is required."))
-            return []
-
-        brave = Brave(api_key)
-        try:
-            # Utiliser raw=True pour éviter la validation Pydantic
-            search_results = brave.search(
-                q=query,
-                count=5,
-                result_filter="web",
-                freshness="pw",
-                raw=True
-            )
-            if debug:
-                st.write(f"Brave Search response for web: {search_results}")
-            # Vérifier si la réponse contient des résultats web
-            web_results = search_results.get("web", {}).get(
-                "results", []) if search_results.get("web") else []
-            if not web_results:
-                if debug:
-                    st.warning(f"No web results found for query: {query}")
-                return []
-
-            results = []
-            for text in web_results[:5]:
-                url = text.get("url", "")
-                title = text.get("title", "")
-                if not url or not title:
-                    if debug:
-                        st.warning(
-                            f"Skipping article with missing url or title for query: {query}")
-                    continue
-
-                title = title.replace("|", "")
-                language = detect(title) if title else "unknown"
-                if debug:
-                    st.write(f"Text article: [{title}]({url})")
-                results.append({
-                    "keyword": keyword,
-                    "url": url,
-                    "title": title,
-                    "view_count": "",
-                    "language": language,
-                    "published_at": "",
-                    "channel_id": "N/A",
-                    "channel_title": "N/A",
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "web"
-                })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"Brave Search error: {str(e)}"))
-            return []
-
-    def search_videos_google(self, query, keyword, useragents, valid_video_domains, debug=False):
-        """Search for recent videos using Google Custom Search API"""
-        from urllib.parse import urlparse
-
-        api_key = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_google_api_key", "")
-        cx_id = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_google_cx_id", "")
-        if not api_key or not cx_id:
-            st.error(t("trendwatcher_error").format(
-                error="Google API key and CX ID are required."))
-            return []
-
-        base_url = "https://www.googleapis.com/customsearch/v1"
-        params = {
-            "q": f"{query} site:youtube.com",
-            "key": api_key,
-            "cx": cx_id,
-            "num": 5,
-            "dateRestrict": "w1"  # Limiter à 1 semaine
-        }
-
-        try:
-            headers = {"User-Agent": random.choice(useragents)}
-            response = requests.get(base_url, params=params, headers=headers)
-            if response.status_code != 200:
-                if debug:
-                    st.error(f"Google API error: {response.text}")
-                return []
-            data = response.json()
-
-            results = []
-            cutoff_date = datetime.now() - timedelta(days=7)
-
-            for item in data.get("items", [])[:5]:
-                url = item.get("link", "")
-                title = item.get("title", "").replace("|", "")
-                if not url or not title:
-                    continue
-
-                try:
-                    parsed_url = urlparse(url)
-                    domain = parsed_url.netloc.lower().replace("www.", "")
-                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
-                        if debug:
-                            st.warning(
-                                f"Non-video URL detected: {url} "
-                                f"for keyword '{keyword}'. Skipping."
-                            )
-                        continue
-                except Exception as e:
-                    if debug:
-                        st.warning(
-                            f"Invalid URL: {url} "
-                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
-                        )
-                    continue
-
-                # Google ne fournit pas toujours la date exacte, on suppose récent
-                language = detect(title) if title else "unknown"
-                is_youtube = domain in ["youtube.com", "youtu.be"]
-
-                results.append({
-                    "keyword": keyword,
-                    "url": url,
-                    "video_id": self.extract_youtube_id(url) if is_youtube else "N/A",
-                    "title": title,
-                    "view_count": "",
-                    "language": language,
-                    "published_at": "",
-                    "channel_id": "N/A",
-                    "channel_title": "N/A",
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "video"
-                })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"Google Search error: {str(e)}"))
-            return []
-
-    def search_texts_google(self, query, keyword, useragents, debug=False):
-        """Search for recent text articles using Google Custom Search API"""
-        api_key = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_google_api_key", "")
-        cx_id = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_google_cx_id", "")
-        if not api_key or not cx_id:
-            st.error(t("trendwatcher_error").format(
-                error="Google API key and CX ID are required."))
-            return []
-
-        base_url = "https://www.googleapis.com/customsearch/v1"
-        params = {
-            "q": query,
-            "key": api_key,
-            "cx": cx_id,
-            "num": 5,
-            "dateRestrict": "w1"  # Limiter à 1 semaine
-        }
-
-        try:
-            headers = {"User-Agent": random.choice(useragents)}
-            response = requests.get(base_url, params=params, headers=headers)
-            if response.status_code != 200:
-                if debug:
-                    st.error(f"Google API error: {response.text}")
-                return []
-            data = response.json()
-
-            results = []
-            for item in data.get("items", [])[:5]:
-                url = item.get("link", "")
-                title = item.get("title", "").replace("|", "")
-                if not url or not title:
-                    continue
-
-                language = detect(title) if title else "unknown"
-                if debug:
-                    st.write(f"Text article: [{title}]({url})")
-                results.append({
-                    "keyword": keyword,
-                    "url": url,
-                    "title": title,
-                    "view_count": "",
-                    "language": language,
-                    "published_at": "",
-                    "channel_id": "N/A",
-                    "channel_title": "N/A",
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "web"
-                })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"Google Search error: {str(e)}"))
-            return []
-
-    def search_videos_ytdlp(self, query, keyword, useragents, valid_video_domains, debug=False):
-        """Search for recent videos using yt-dlp"""
-        from urllib.parse import urlparse
-
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,  # Ne télécharge pas, juste les métadonnées
-            "max_downloads": 5,
-            "dateafter": (datetime.now() - timedelta(days=7)).strftime("%Y%m%d"),
-        }
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Rechercher sur YouTube
-                search_query = f"ytsearch5:{query}"  # Limite à 5 résultats
-                info = ydl.extract_info(search_query, download=False)
-
-            results = []
-            cutoff_date = datetime.now() - timedelta(days=7)
-
-            for entry in info.get("entries", [])[:5]:
-                url = entry.get("url", "") or entry.get("webpage_url", "")
-                title = entry.get("title", "").replace("|", "")
-                if not url or not title:
-                    continue
-
-                try:
-                    parsed_url = urlparse(url)
-                    domain = parsed_url.netloc.lower().replace("www.", "")
-                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
-                        if debug:
-                            st.warning(
-                                f"Non-video URL detected: {url} "
-                                f"for keyword '{keyword}'. Skipping."
-                            )
-                        continue
-                except Exception as e:
-                    if debug:
-                        st.warning(
-                            f"Invalid URL: {url} "
-                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
-                        )
-                    continue
-
-                # Vérifier la date
-                upload_date = entry.get("upload_date", "")
-                if upload_date:
-                    try:
-                        published_date = datetime.strptime(
-                            upload_date, "%Y%m%d")
-                        if published_date <= cutoff_date:
-                            continue
-                    except ValueError:
-                        if debug:
-                            st.warning(
-                                f"Invalid date format for {url}: {upload_date}")
-                        continue
-                else:
-                    published_date = datetime.now()  # Suppose récent si pas de date
-
-                language = detect(title) if title else "unknown"
-                is_youtube = domain in ["youtube.com", "youtu.be"]
-
-                results.append({
-                    "keyword": keyword,
-                    "url": url,
-                    "video_id": entry.get("id", "N/A") if is_youtube else "N/A",
-                    "title": title,
-                    "view_count": str(entry.get("view_count", "")),
-                    "language": language,
-                    "published_at": upload_date,
-                    "channel_id": entry.get("channel_id", "N/A"),
-                    "channel_title": entry.get("uploader", "N/A"),
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "video"
-                })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"yt-dlp error: {str(e)}"))
-            return []
-
-    def search_texts_ytdlp(self, query, keyword, useragents, debug=False):
-        """Search for text articles using yt-dlp (not supported, returns empty)"""
-        if debug:
-            st.warning("yt-dlp does not support text article search.")
-        return []
-
-    def search_videos_searxng(self, query, keyword, useragents, valid_video_domains, debug=False):
-        """Search for recent videos using SearxNG"""
-        from urllib.parse import urlparse
-        import requests
-
-        server_url = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_searxng_server_url", "")
-        if not server_url:
-            st.error(t("trendwatcher_error").format(
-                error="SearxNG server URL is required."))
-            return []
-
-        # Configure query for videos (restrict to YouTube)
-        search_url = f"{server_url.rstrip('/')}/search"
-        params = {
-            "q": f"{query} site:youtube.com",
-            "categories": "general,videos",
-            "time_range": "week",  # Limit to past week
-            "format": "json",
-            "safesearch": 0,
-            "language": "all"
-        }
-
-        try:
-            headers = {"User-Agent": random.choice(useragents)}
-            response = requests.get(
-                search_url, params=params, headers=headers, timeout=10)
-            if response.status_code != 200:
-                if debug:
-                    st.error(f"SearxNG API error: {response.text}")
-                return []
-            data = response.json()
-
-            results = []
-            cutoff_date = datetime.now() - timedelta(days=7)
-
-            for item in data.get("results", [])[:5]:
-                url = item.get("url", "")
-                title = item.get("title", "").replace("|", "")
-                if not url or not title:
-                    continue
-
-                try:
-                    parsed_url = urlparse(url)
-                    domain = parsed_url.netloc.lower().replace("www.", "")
-                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
-                        if debug:
-                            st.warning(
-                                f"Non-video URL detected: {url} "
-                                f"for keyword '{keyword}'. Skipping."
-                            )
-                        continue
-                except Exception as e:
-                    if debug:
-                        st.warning(
-                            f"Invalid URL: {url} "
-                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
-                        )
-                    continue
-
-                # SearxNG may not provide exact dates, assume recent
-                language = detect(title) if title else "unknown"
-                is_youtube = domain in ["youtube.com", "youtu.be"]
-
-                results.append({
-                    "keyword": keyword,
-                    "url": url,
-                    "video_id": self.extract_youtube_id(url) if is_youtube else "N/A",
-                    "title": title,
-                    "view_count": "",
-                    "language": language,
-                    "published_at": "",
-                    "channel_id": "N/A",
-                    "channel_title": "N/A",
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "video"
-                })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"SearxNG Search error: {str(e)}"))
-            return []
-
-    def search_texts_searxng(self, query, keyword, useragents, debug=False):
-        """Search for recent text articles using SearxNG"""
-        import requests
-
-        server_url = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_searxng_server_url", "")
-        if not server_url:
-            st.error(t("trendwatcher_error").format(
-                error="SearxNG server URL is required."))
-            return []
-
-        search_url = f"{server_url.rstrip('/')}/search"
-        params = {
-            "q": query,
-            "categories": "general",
-            "time_range": "week",
-            "format": "json",
-            "safesearch": 0,
-            "language": "all"
-        }
-
-        try:
-            headers = {"User-Agent": random.choice(useragents)}
-            response = requests.get(
-                search_url, params=params, headers=headers, timeout=10)
-            if response.status_code != 200:
-                if debug:
-                    st.error(f"SearxNG API error: {response.text}")
-                return []
-            data = response.json()
-
-            results = []
-            for item in data.get("results", [])[:5]:
-                url = item.get("url", "")
-                title = item.get("title", "").replace("|", "")
-                if not url or not title:
-                    continue
-
-                language = detect(title) if title else "unknown"
-                if debug:
-                    st.write(f"Text article: [{title}]({url})")
-                results.append({
-                    "keyword": keyword,
-                    "url": url,
-                    "title": title,
-                    "view_count": "",
-                    "language": language,
-                    "published_at": "",
-                    "channel_id": "N/A",
-                    "channel_title": "N/A",
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "web"
-                })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"SearxNG Search error: {str(e)}"))
-            return []
-
-    def search_videos_bing(self, query, keyword, useragents, valid_video_domains, debug=False):
-        """Search for recent videos using Bing Web Search API"""
-        from urllib.parse import urlparse
-        import requests
-
-        api_key = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_bing_api_key", "")
-        if not api_key:
-            st.error(t("trendwatcher_error").format(
-                error="Bing API key is required."))
-            return []
-
-        search_url = "https://api.bing.microsoft.com/v7.0/search"
-        params = {
-            "q": f"{query} site:youtube.com",
-            "count": 5,
-            "freshness": "Week",  # Limit to past week
-            "responseFilter": "Videos,Webpages"
-        }
-        headers = {
-            "Ocp-Apim-Subscription-Key": api_key,
-            "User-Agent": random.choice(useragents)
-        }
-
-        try:
-            response = requests.get(
-                search_url, params=params, headers=headers, timeout=10)
-            if response.status_code != 200:
-                if debug:
-                    st.error(f"Bing API error: {response.text}")
-                return []
-            data = response.json()
-
-            results = []
-            cutoff_date = datetime.now() - timedelta(days=7)
-
-            # Bing returns videos in 'videos' or 'webPages' depending on query
-            items = data.get("videos", {}).get("value", []) or data.get(
-                "webPages", {}).get("value", [])
-
-            for item in items[:5]:
-                url = item.get("url") or item.get("contentUrl", "")
-                title = item.get("name", "").replace("|", "")
-                if not url or not title:
-                    continue
-
-                try:
-                    parsed_url = urlparse(url)
-                    domain = parsed_url.netloc.lower().replace("www.", "")
-                    if not any(domain == valid_domain or domain.endswith("." + valid_domain) for valid_domain in valid_video_domains):
-                        if debug:
-                            st.warning(
-                                f"Non-video URL detected: {url} "
-                                f"for keyword '{keyword}'. Skipping."
-                            )
-                        continue
-                except Exception as e:
-                    if debug:
-                        st.warning(
-                            f"Invalid URL: {url} "
-                            f"for keyword '{keyword}'. Error: {str(e)}. Skipping."
-                        )
-                    continue
-
-                # Bing may provide datePublished
-                date_str = item.get("datePublished", "")
-                published_date = self.parse_date(
-                    date_str, debug=debug) if date_str else None
-                if published_date and published_date <= cutoff_date:
-                    continue
-
-                language = detect(title) if title else "unknown"
-                is_youtube = domain in ["youtube.com", "youtu.be"]
-
-                results.append({
-                    "keyword": keyword,
-                    "url": url,
-                    "video_id": self.extract_youtube_id(url) if is_youtube else "N/A",
-                    "title": title,
-                    "view_count": "",
-                    "language": language,
-                    "published_at": "",
-                    "channel_id": "N/A",
-                    "channel_title": "N/A",
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "video"
-                })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"Bing Search error: {str(e)}"))
-            return []
-
-    def search_texts_bing(self, query, keyword, useragents, debug=False):
-        """Search for recent text articles using Bing Web Search API"""
-        import requests
-
-        api_key = self.plugin_manager.config.get(
-            self.name, {}).get("trendwatcher_bing_api_key", "")
-        if not api_key:
-            st.error(t("trendwatcher_error").format(
-                error="Bing API key is required."))
-            return []
-
-        search_url = "https://api.bing.microsoft.com/v7.0/search"
-        params = {
-            "q": query,
-            "count": 5,
-            "freshness": "Week",
-            "responseFilter": "Webpages"
-        }
-        headers = {
-            "Ocp-Apim-Subscription-Key": api_key,
-            "User-Agent": random.choice(useragents)
-        }
-
-        try:
-            response = requests.get(
-                search_url, params=params, headers=headers, timeout=10)
-            if response.status_code != 200:
-                if debug:
-                    st.error(f"Bing API error: {response.text}")
-                return []
-            data = response.json()
-
-            results = []
-            for item in data.get("webPages", {}).get("value", [])[:5]:
-                url = item.get("url", "")
-                title = item.get("name", "").replace("|", "")
-                if not url or not title:
-                    continue
-
-                language = detect(title) if title else "unknown"
-                if debug:
-                    st.write(f"Text article: [{title}]({url})")
-                results.append({
-                    "keyword": keyword,
-                    "url": url,
-                    "title": title,
-                    "view_count": "",
-                    "language": language,
-                    "published_at": "",
-                    "channel_id": "N/A",
-                    "channel_title": "N/A",
-                    "subscriber_count": "",
-                    "comment_count": "",
-                    "relevance_score": 0,
-                    "type": "web"
-                })
-
-            return results
-        except Exception as e:
-            if debug:
-                st.error(t("trendwatcher_error").format(
-                    error=f"Bing Search error: {str(e)}"))
-            return []
-
-    def search_trends(self, main_keyword, synonyms, useragents, search_mode="or", search_engine="duckduckgo", debug=False):
-        """Search for recent videos and web content"""
-        # Get search engine methods
-        engine = self.SEARCH_ENGINES.get(
-            search_engine, self.SEARCH_ENGINES["duckduckgo"])
-        search_videos = engine["search_videos"]
-        search_texts = engine["search_texts"]
-
-        # Prepare query based on search mode
-        if search_mode == "or":
-            query_terms = [main_keyword] + synonyms
-            query = " OR ".join(f'"{term}"' for term in query_terms if term)
-            if search_engine == "duckduckgo":
-                query += " site:youtube.com OR -inurl:(signup login)"
-            elif search_engine == "google":
-                query += " site:youtube.com"
-            elif search_engine == "searxng":
-                query += " site:youtube.com"  # SearxNG supports site: operator
-            elif search_engine == "bing":
-                query += " site:youtube.com"
-            # ytdlp and others don't need specific restrictions
-            if debug:
-                st.write(t("trendwatcher_debug_query").format(query=query))
-            queries = [(query, main_keyword)]
-        else:
-            queries = [(f'"{main_keyword}"', main_keyword)]
-            queries.extend((f'"{syn}"', main_keyword) for syn in synonyms)
-            if search_engine == "duckduckgo":
-                queries = [(f"{q} site:youtube.com OR -inurl:(signup login)", k)
-                           for q, k in queries]
-            elif search_engine == "google":
-                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
-            elif search_engine == "searxng":
-                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
-            elif search_engine == "bing":
-                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
-            if debug:
-                st.write(t("trendwatcher_debug_query").format(
-                    query=", ".join(q for q, _ in queries)))
-
-        # List of valid video platform domains
-        valid_video_domains = [
-            "youtube.com",
-            "youtu.be",
-            "dailymotion.com",
-            "vimeo.com",
-            "bilibili.com",
-            "twitch.tv",
-            "tiktok.com"
-        ]
-
-        try:
-            all_results = []
-            for query, keyword in queries:
-                video_results = search_videos(
-                    query, keyword, useragents, valid_video_domains, debug=debug)
-                text_results = search_texts(
-                    query, keyword, useragents, debug=debug)
-                all_results.extend(video_results + text_results)
-
-            if debug:
-                video_count = sum(
-                    1 for r in all_results if r.get("type") == "video")
-                text_count = sum(
-                    1 for r in all_results if r.get("type") == "web")
-                st.write(t("trendwatcher_debug_results").format(
-                    count=len(all_results),
-                    vids=video_count,
-                    texts=text_count
-                ))
-
-            return all_results
-        except Exception as e:
-            return str(e)
-
-    def extract_youtube_id(self, url):
-        """Extract YouTube video ID from URL"""
-        patterns = [
-            r"(?:v=|\/)([0-9A-Za-z_-]{11}).*",
-            r"(?:embed\/)([0-9A-Za-z_-]{11})",
-            r"(?:watch\?v=)([0-9A-Za-z_-]{11})"
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, url)
-            if match:
-                return match.group(1)
-        return "N/A"
-
     def extract_channel_info_yt_dlp(self, video_url, debug=False):
         """Extract channel ID, title, and subscriber count using yt-dlp"""
         try:
-            import yt_dlp
-
-            # Configure yt-dlp options
             ydl_opts = {
-                "quiet": True,  # Suppress console output
+                "quiet": True,
                 "no_warnings": True,
-                "extract_flat": True,  # Don't download, just extract metadata
+                "extract_flat": True,
                 "force_generic_extractor": False,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
 
-                # Extract required fields
                 channel_id = info.get("channel_id", "N/A")
-                # 'channel' contains the channel name
                 channel_title = info.get("channel", "N/A")
                 subscriber_count = info.get("channel_follower_count", "N/A")
 
-                # Format subscriber_count
                 if isinstance(subscriber_count, int):
                     subscriber_count = f"{subscriber_count:,}".replace(
                         ",", " ") + " subscribers"
@@ -1237,20 +342,16 @@ class TrendwatcherPlugin(Plugin):
     def extract_video_metadata_yt_dlp(self, video_url, debug=False):
         """Extract video metadata including channel info, view count, comment count, and published date using yt-dlp"""
         try:
-            import yt_dlp
-
-            # Configure yt-dlp options
             ydl_opts = {
-                "quiet": True,  # Suppress console output
+                "quiet": True,
                 "no_warnings": True,
-                "extract_flat": True,  # Don't download, just extract metadata
+                "extract_flat": True,
                 "force_generic_extractor": False,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
 
-                # Extract required fields
                 channel_id = info.get("channel_id", "N/A")
                 channel_title = info.get("channel", "N/A")
                 subscriber_count = info.get("channel_follower_count", "N/A")
@@ -1258,28 +359,21 @@ class TrendwatcherPlugin(Plugin):
                 comment_count = info.get("comment_count", "N/A")
                 published_at = info.get("upload_date", "N/A")
 
-                # Format subscriber_count
                 if isinstance(subscriber_count, int):
-                    # Convert to string without spaces or suffix
                     subscriber_count = str(subscriber_count)
                 else:
-                    subscriber_count = ""  # Replace "N/A" with empty string
+                    subscriber_count = ""
 
-                # Format view_count
                 if isinstance(view_count, int):
-                    # Convert to string without spaces
                     view_count = str(view_count)
                 else:
-                    view_count = ""  # Replace "N/A" with empty string
+                    view_count = ""
 
-                # Format comment_count
                 if isinstance(comment_count, int):
-                    # Convert to string without spaces
                     comment_count = str(comment_count)
                 else:
-                    comment_count = ""  # Replace "N/A" with empty string
+                    comment_count = ""
 
-                # Format published_at (comes as YYYYMMDD, convert to YYYY-MM-DD)
                 if published_at != "N/A":
                     try:
                         published_at = f"{published_at[:4]}-{published_at[4:6]}-{published_at[6:8]}"
@@ -1318,52 +412,38 @@ class TrendwatcherPlugin(Plugin):
         from urllib.parse import urlparse
         from datetime import datetime
 
-        # Expand ~ in working_dir
         working_dir = os.path.expanduser(working_dir)
         os.makedirs(working_dir, exist_ok=True)
 
         video_file = os.path.join(working_dir, "video_list.csv")
-
-        # Use official headers
         headers = VIDEO_CSV_HEADERS
 
-        # Filter results based on selected_keywords and selected_urls
         filtered_results = [
             r for r in st.session_state.trendwatcher_results
             if r["keyword"] in selected_keywords and r["url"] in selected_urls and r["type"] == "video"
         ]
 
-        # Get debug mode from session state
         debug_mode = st.session_state.get("debug_mode", False)
-
-        # Initialize YoutubeAPI for relevance score
         youtube_api = YoutubeAPI(
             self.plugin_manager.config if self.plugin_manager else {})
 
-        # Write videos CSV
         with open(video_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(headers)
             for video in filtered_results:
-                # Check if the video is from YouTube
                 parsed_url = urlparse(video["url"])
                 domain = parsed_url.netloc.lower().replace("www.", "")
                 is_youtube = domain in ["youtube.com", "youtu.be"]
 
                 if is_youtube:
-                    # Fetch metadata only for selected videos
                     metadata = self.extract_video_metadata_yt_dlp(
                         video["url"], debug=debug_mode)
-
-                    # Calculate relevance score
                     published_at = metadata["published_at"]
                     relevance_score = 0
                     if published_at and metadata["subscriber_count"] and metadata["comment_count"]:
                         try:
-                            # Convert YYYY-MM-DD to YYYY-MM-DDTHH:MM:SSZ
                             if published_at:
                                 try:
-                                    # Parse YYYY-MM-DD and convert to ISO format
                                     date_obj = datetime.strptime(
                                         published_at, "%Y-%m-%d")
                                     published_at_iso = date_obj.strftime(
@@ -1418,22 +498,17 @@ class TrendwatcherPlugin(Plugin):
 
     def save_articles_to_csv(self, working_dir, selected_keywords, selected_urls):
         """Save selected article results to CSV file"""
-        # Expand ~ in working_dir
         working_dir = os.path.expanduser(working_dir)
         os.makedirs(working_dir, exist_ok=True)
 
         article_file = os.path.join(working_dir, "article_list.csv")
-
-        # CSV headers
         headers = ["keyword", "url", "title", "views", "language", "date"]
 
-        # Filter results based on selected_keywords and selected_urls
         filtered_results = [
             r for r in st.session_state.trendwatcher_results
             if r["keyword"] in selected_keywords and r["url"] in selected_urls and r["type"] == "web"
         ]
 
-        # Write articles CSV
         with open(article_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(headers)
@@ -1448,6 +523,77 @@ class TrendwatcherPlugin(Plugin):
                 ])
 
         return working_dir
+
+    def search_trends(self, main_keyword, synonyms, useragents, search_mode="or", search_engine="duckduckgo", debug=False):
+        """Search for recent videos and web content"""
+        engine = self.SEARCH_ENGINES.get(
+            search_engine, self.SEARCH_ENGINES["duckduckgo"])
+        search_videos = engine["search_videos"]
+        search_texts = engine["search_texts"]
+
+        if search_mode == "or":
+            query_terms = [main_keyword] + synonyms
+            query = " OR ".join(f'"{term}"' for term in query_terms if term)
+            if search_engine == "duckduckgo":
+                query += " site:youtube.com OR -inurl:(signup login)"
+            elif search_engine == "google":
+                query += " site:youtube.com"
+            elif search_engine == "searxng":
+                query += " site:youtube.com"
+            elif search_engine == "bing":
+                query += " site:youtube.com"
+            if debug:
+                st.write(t("trendwatcher_debug_query").format(query=query))
+            queries = [(query, main_keyword)]
+        else:
+            queries = [(f'"{main_keyword}"', main_keyword)]
+            queries.extend((f'"{syn}"', main_keyword) for syn in synonyms)
+            if search_engine == "duckduckgo":
+                queries = [(f"{q} site:youtube.com OR -inurl:(signup login)", k)
+                           for q, k in queries]
+            elif search_engine == "google":
+                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+            elif search_engine == "searxng":
+                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+            elif search_engine == "bing":
+                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+            if debug:
+                st.write(t("trendwatcher_debug_query").format(
+                    query=", ".join(q for q, _ in queries)))
+
+        valid_video_domains = [
+            "youtube.com",
+            "youtu.be",
+            "dailymotion.com",
+            "vimeo.com",
+            "bilibili.com",
+            "twitch.tv",
+            "tiktok.com"
+        ]
+
+        try:
+            all_results = []
+            for query, keyword in queries:
+                video_results = search_videos(
+                    query, keyword, useragents, valid_video_domains, debug=debug)
+                text_results = search_texts(
+                    query, keyword, useragents, debug=debug)
+                all_results.extend(video_results + text_results)
+
+            if debug:
+                video_count = sum(
+                    1 for r in all_results if r.get("type") == "video")
+                text_count = sum(
+                    1 for r in all_results if r.get("type") == "web")
+                st.write(t("trendwatcher_debug_results").format(
+                    count=len(all_results),
+                    vids=video_count,
+                    texts=text_count
+                ))
+
+            return all_results
+        except Exception as e:
+            return str(e)
 
     def trend_watcher(self, config):
         st.header(t("trendwatcher_header"))
@@ -1480,7 +626,6 @@ class TrendwatcherPlugin(Plugin):
 
         debug_mode = st.checkbox(t("trendwatcher_debug"), value=False)
 
-        # Add number input for max keywords in debug mode
         max_keywords_debug = 3
         if debug_mode:
             max_keywords_debug = st.number_input(
@@ -1491,7 +636,6 @@ class TrendwatcherPlugin(Plugin):
                 step=1
             )
 
-        # Add search engine selection
         search_engine_options = {
             engine_id: engine["name"] for engine_id, engine in self.SEARCH_ENGINES.items()}
         search_engine_name = st.selectbox(
@@ -1503,7 +647,6 @@ class TrendwatcherPlugin(Plugin):
         search_engine = next(
             k for k, v in search_engine_options.items() if v == search_engine_name)
 
-        # Add search mode selection
         search_mode = st.selectbox(
             t("trendwatcher_search_mode_label"),
             [t("trendwatcher_search_mode_or"), t(
@@ -1514,7 +657,6 @@ class TrendwatcherPlugin(Plugin):
         search_mode_value = "or" if search_mode == t(
             "trendwatcher_search_mode_or") else "subsearches"
 
-        # Initialize session state
         if "trendwatcher_results" not in st.session_state:
             st.session_state.trendwatcher_results = []
         if "debug_mode" not in st.session_state:
@@ -1526,7 +668,6 @@ class TrendwatcherPlugin(Plugin):
 
         if st.button(t("trendwatcher_search_button"), key="search_trends"):
             with st.spinner(t("trendwatcher_processing")):
-                # Parse keywords with synonyms
                 keyword_configs = []
                 for line in keywords_input.split("\n"):
                     line = line.strip()
@@ -1542,7 +683,6 @@ class TrendwatcherPlugin(Plugin):
                         keyword_configs.append(
                             {"main": main_keyword, "synonyms": synonyms})
 
-                # Limit keywords in debug mode
                 if debug_mode and len(keyword_configs) > max_keywords_debug:
                     st.warning(
                         f"Debug mode: Limiting to first {max_keywords_debug} keywords: {', '.join(k['main'] for k in keyword_configs[:max_keywords_debug])}"
@@ -1569,13 +709,11 @@ class TrendwatcherPlugin(Plugin):
                 st.session_state.debug_mode = debug_mode
 
         if st.session_state.trendwatcher_results:
-            # Split into videos and texts
             video_results = [
                 r for r in st.session_state.trendwatcher_results if r["type"] == "video"]
             text_results = [
                 r for r in st.session_state.trendwatcher_results if r["type"] == "web"]
 
-            # Filters
             all_keywords = list(
                 set(r["keyword"] for r in st.session_state.trendwatcher_results))
             selected_keywords = st.multiselect(
@@ -1594,7 +732,6 @@ class TrendwatcherPlugin(Plugin):
                 key="language_filter"
             )
 
-            # Filter and create DataFrames
             def filter_df(results):
                 df = pd.DataFrame(results)
                 if selected_keywords:
@@ -1606,7 +743,6 @@ class TrendwatcherPlugin(Plugin):
                 df = df[cols]
                 return df
 
-            # Videos table
             selected_video_urls = []
             if video_results:
                 st.subheader(t("trendwatcher_videos_table"))
@@ -1657,7 +793,6 @@ class TrendwatcherPlugin(Plugin):
                 else:
                     st.info("No videos match the filters.")
 
-            # Texts table
             selected_text_urls = []
             if text_results:
                 st.subheader(t("trendwatcher_texts_table"))
@@ -1744,13 +879,20 @@ class TrendwatcherPlugin(Plugin):
         KeywordClusteringWidget("trendwatcher", "kwc",
                                 plugin_manager=self.plugin_manager).display()
 
+    def video_list(self, config):
+        from widgets.video_list import VideoListWidget
+        VideoListWidget("trendwatcher", "vlc",
+                        plugin_manager=self.plugin_manager).display()
+
     def run(self, config):
         """Main plugin logic"""
-        tab1, tab2 = st.tabs(["Surveiller", "Keyword cluster"])
+        tab1, tab2, tab3 = st.tabs(["Surveiller", "Keyword cluster", "Video List"])
         with tab1:
             self.trend_watcher(config)
         with tab2:
             self.keyword_cluster(config)
+        with tab3:
+            self.video_list(config)
 
 
 if __name__ == "__main__":
