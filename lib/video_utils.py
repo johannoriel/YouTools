@@ -14,6 +14,9 @@ import numpy as np
 import spacy
 from pyannote.audio import Pipeline
 import yt_dlp
+import getpass
+import tempfile
+import subprocess
 
 
 def convert_time_to_seconds(time_str):

@@ -3,12 +3,10 @@ from app import Plugin
 from plugins.common import list_all_video_files
 import streamlit as st
 import os
-import subprocess
 import json
-import tempfile
-import getpass
 import ast
 from lib.video_utils import transcribe_video_whisper_cli
+from widgets.yt_transcript import YoutubeTranscriptWidget
 
 
 # Ajout des traductions spécifiques à ce plugin
@@ -92,6 +90,8 @@ translations["fr"].update({
 class TranscriptPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
+        self.yt_transcript_widget = YoutubeTranscriptWidget(
+            "transcript", "transcript", plugin_manager)
         if 'prompts' not in st.session_state:
             st.session_state.prompts = {}
 
@@ -296,7 +296,7 @@ class TranscriptPlugin(Plugin):
                     )
 
     def run_remote(self, config):
-        pass
+        self.yt_transcript_widget.display()
 
     def run(self, config):
         """Main plugin logic"""
