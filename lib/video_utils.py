@@ -15,6 +15,7 @@ import spacy
 from pyannote.audio import Pipeline
 import yt_dlp
 
+
 def convert_time_to_seconds(time_str):
     # Convert a time string "mm:ss" to seconds
     if isinstance(time_str, str):
@@ -24,6 +25,7 @@ def convert_time_to_seconds(time_str):
         return time_str
     else:
         return 0
+
 
 def extract_video_section(input_path, output_dir, start_time=None, end_time=None, video_length=None):
     # If no start_time and end_time are provided, return the full video path
@@ -35,28 +37,33 @@ def extract_video_section(input_path, output_dir, start_time=None, end_time=None
     end_sec = convert_time_to_seconds(end_time) if end_time else video_length
 
     # Extract the video section using moviepy
-    new_file_name = os.path.join(output_dir, "section_" + os.path.basename(input_path))
+    new_file_name = os.path.join(
+        output_dir, "section_" + os.path.basename(input_path))
     print(f"Extracting section {start_sec} -> {end_sec}...")
-    ffmpeg_extract_subclip(input_path, start_sec, end_sec, targetname=new_file_name)
+    ffmpeg_extract_subclip(input_path, start_sec,
+                           end_sec, targetname=new_file_name)
     print(f"Section extracted {new_file_name}")
 
     # Delete the full downloaded video to save space
-    #os.remove(input_path) #debug only
+    # os.remove(input_path) #debug only
 
     return new_file_name
+
 
 def download_video_dlp(url, output_dir, start_time=None, end_time=None):
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': os.path.join(output_dir, 'downloaded_video.%(ext)s')
     }
-    #print(ydl_opts)
+    # print(ydl_opts)
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
 
-    new_file_name = extract_video_section(filename, output_dir, start_time, end_time)
+    new_file_name = extract_video_section(
+        filename, output_dir, start_time, end_time)
     return new_file_name, info
+
 
 def download_audio_with_auth(url, output_dir, cookie_file):
     ydl_opts = {
@@ -70,6 +77,7 @@ def download_audio_with_auth(url, output_dir, cookie_file):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         return ydl.prepare_filename(info)
+
 
 def image_to_base64(image_path):
     """Convertit une image en URL de données Base64."""
@@ -91,7 +99,8 @@ def scan_videos(directory, extensions, recursive=True):
         relative_dir = os.path.relpath(os.path.dirname(file_path), root_dir)
 
         cap = cv2.VideoCapture(file_path)
-        duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS) if cap.isOpened() else 0
+        duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / \
+            cap.get(cv2.CAP_PROP_FPS) if cap.isOpened() else 0
         cap.release()
 
         return {
@@ -110,14 +119,16 @@ def scan_videos(directory, extensions, recursive=True):
             for file in files:
                 if any(file.lower().endswith(ext) for ext in extensions):
                     video_path = os.path.join(root, file)
-                    video_data.append(process_video_file(video_path, directory))
+                    video_data.append(
+                        process_video_file(video_path, directory))
     else:
         # Mode non-récursif
         for file in os.listdir(directory):
             if any(file.lower().endswith(ext) for ext in extensions):
                 video_path = os.path.join(directory, file)
                 if os.path.isfile(video_path):  # Vérification supplémentaire
-                    video_data.append(process_video_file(video_path, directory))
+                    video_data.append(
+                        process_video_file(video_path, directory))
 
     return pd.DataFrame(video_data)
 
@@ -521,6 +532,7 @@ def insert_video(main_clip, start_sec, video_path_insert, target_size):
     ])
     return new_clip, duration_change
 
+
 def calculate_target_size(source_size, target_size):
     """
     Calcule la taille cible en conservant l'aspect ratio de la source
@@ -550,6 +562,7 @@ def calculate_target_size(source_size, target_size):
 
     return (new_width, new_height)
 
+
 def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target_size, background="video"):
     """Remplace une section par une autre vidéo en conservant l'aspect ratio.
 
@@ -575,12 +588,15 @@ def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target
     if background == "video":
         background_clip = main_clip.subclipped(start_sec, end_sec)
     elif background == "green":
-        background_clip = ColorClip(size=target_size, color=(0, 255, 0), duration=min(replace_clip.duration, original_duration))
+        background_clip = ColorClip(size=target_size, color=(
+            0, 255, 0), duration=min(replace_clip.duration, original_duration))
     else:  # par défaut fond noir
-        background_clip = ColorClip(size=target_size, color=(0, 0, 0), duration=min(replace_clip.duration, original_duration))
+        background_clip = ColorClip(size=target_size, color=(
+            0, 0, 0), duration=min(replace_clip.duration, original_duration))
 
     # Redimensionnement et positionnement avec API MoviePy 2.0
-    resized_clip = replace_clip.with_effects([vfx.Resize(width=new_size[0], height=new_size[1])])
+    resized_clip = replace_clip.with_effects(
+        [vfx.Resize(width=new_size[0], height=new_size[1])])
     x_center = (target_size[0] - new_size[0]) // 2
     y_center = (target_size[1] - new_size[1]) // 2
 
@@ -588,7 +604,8 @@ def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target
     if replace_clip.duration > original_duration:
         replace_clip = CompositeVideoClip([
             background_clip,
-            resized_clip.subclipped(0, original_duration).with_position((x_center, y_center))
+            resized_clip.subclipped(0, original_duration).with_position(
+                (x_center, y_center))
         ])
     else:
         replace_clip = CompositeVideoClip([
@@ -602,13 +619,15 @@ def replace_with_video(main_clip, start_sec, end_sec, video_path_replace, target
     # Ajouter le reste de la vidéo originale si la vidéo de remplacement est plus courte
     if replace_clip.duration < original_duration:
         remaining_duration = original_duration - replace_clip.duration
-        filler_clip = main_clip.subclipped(end_sec - remaining_duration, end_sec)
+        filler_clip = main_clip.subclipped(
+            end_sec - remaining_duration, end_sec)
         clips.append(filler_clip)
 
     clips.append(main_clip.subclipped(end_sec))
 
     new_clip = concatenate_videoclips(clips)
     return new_clip, duration_change
+
 
 def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, target_size, background="video"):
     """Remplace une section par une vidéo en conservant l'audio original, avec option de fond.
@@ -635,12 +654,15 @@ def replace_video_keep_audio(main_clip, start_sec, end_sec, video_path_replace, 
     if background == "video":
         background_clip = main_clip.subclipped(start_sec, end_sec)
     elif background == "green":
-        background_clip = ColorClip(size=target_size, color=(0, 255, 0), duration=replace_clip.duration)
+        background_clip = ColorClip(size=target_size, color=(
+            0, 255, 0), duration=replace_clip.duration)
     else:  # par défaut fond noir (comportement original)
-        background_clip = ColorClip(size=target_size, color=(0, 0, 0), duration=replace_clip.duration)
+        background_clip = ColorClip(size=target_size, color=(
+            0, 0, 0), duration=replace_clip.duration)
 
     # Redimensionnement et positionnement avec API MoviePy 2.0
-    resized_clip = replace_clip.with_effects([vfx.Resize(width=new_size[0], height=new_size[1])])
+    resized_clip = replace_clip.with_effects(
+        [vfx.Resize(width=new_size[0], height=new_size[1])])
     x_center = (target_size[0] - new_size[0]) // 2
     y_center = (target_size[1] - new_size[1]) // 2
 
@@ -906,7 +928,8 @@ def replace_audio(main_clip, start_sec, end_sec, audio_path, target_size):
     new_audio_duration = audio_clip.duration
 
     # Calculer le facteur de vitesse pour ajuster la vidéo à la durée de l'audio
-    speed_factor = original_duration / new_audio_duration if new_audio_duration != 0 else 1.0
+    speed_factor = original_duration / \
+        new_audio_duration if new_audio_duration != 0 else 1.0
 
     # Extraire la section à modifier
     section_clip = main_clip.subclipped(start_sec, end_sec)
@@ -954,7 +977,8 @@ def insert_audio(main_clip, start_sec, audio_path, target_size):
 
     # Vérifier start_sec
     if start_sec < 0 or start_sec > main_clip.duration:
-        raise ValueError(f"start_sec ({start_sec}) is out of bounds for clip duration ({main_clip.duration})")
+        raise ValueError(
+            f"start_sec ({start_sec}) is out of bounds for clip duration ({main_clip.duration})")
 
     audio_clip = None
     static_clip = None
@@ -990,3 +1014,83 @@ def insert_audio(main_clip, start_sec, audio_path, target_size):
         raise ValueError("new_clip has no audio after concatenation")
 
     return new_clip, audio_duration
+
+
+def transcribe_video_whisper_cli(video_path, output_format, whisper_path, whisper_model, ffmpeg_path, lang):
+    """Transcrit une vidéo en utilisant whisper.cpp en ligne de commande.
+
+    Args:
+        video_path (str): Chemin vers le fichier vidéo à transcrire
+        output_format (str): Format de sortie ('txt' ou 'srt')
+        whisper_path (str): Chemin vers l'exécutable whisper.cpp
+        whisper_model (str): Modèle whisper à utiliser (tiny, base, small, medium, large)
+        ffmpeg_path (str): Chemin vers l'exécutable ffmpeg
+        lang (str): Langue de la vidéo (code à 2 lettres)
+
+    Returns:
+        str: Le contenu de la transcription ou None en cas d'erreur
+    """
+    print("Executed by user :", getpass.getuser())
+
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
+        temp_audio_path = temp_audio.name
+
+    try:
+        # Conversion de la vidéo en audio WAV 16kHz
+        print(f"Conversion to {temp_audio_path} 16bits...")
+        ffmpeg_command = [
+            ffmpeg_path, '-y',
+            '-i', video_path,
+            '-acodec', 'pcm_s16le',
+            '-ar', '16000',
+            temp_audio_path
+        ]
+        print("Commande ffmpeg:", " ".join(ffmpeg_command))
+        try:
+            result = subprocess.run(
+                ffmpeg_command, check=True, capture_output=True, text=True)
+            print("Output STDOUT:", result.stdout)
+        except subprocess.CalledProcessError as e:
+            print("Error while executing ffmpeg:")
+            print(e.stderr)
+
+        # Transcription avec whisper.cpp
+        print(f"Transcription with whisper {whisper_model}...")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{output_format}") as temp_output:
+            output_file = temp_output.name
+        file_without_extension, file_extension = os.path.splitext(output_file)
+        expanded_whisper_path = os.path.expanduser(whisper_path)
+        whisper_command = [
+            expanded_whisper_path,
+            "-m", f"{os.path.dirname(expanded_whisper_path)}/models/ggml-{whisper_model}.bin",
+            "-f", temp_audio_path,
+            "-l", lang,
+            "-of", file_without_extension,
+            "-otxt" if output_format == "txt" else "-osrt"
+        ]
+        print("Command whisper:", " ".join(whisper_command))
+        try:
+            result = subprocess.run(
+                whisper_command, check=True, capture_output=True, text=True)
+            print("Sortie STDOUT:", result.stdout)
+        except subprocess.CalledProcessError as e:
+            print("Error while executing whisper:")
+            print(e.stderr)
+        print('Transcription done')
+
+        with open(output_file, 'r') as f:
+            transcript = f.read()
+
+        os.remove(output_file)
+        return transcript
+
+    except subprocess.CalledProcessError as e:
+        st.error(f"{t('transcript_error_transcribing')}{e.stderr}")
+        return None
+
+    finally:
+        # Nettoyage des fichiers temporaires
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+        if os.path.exists(f"transcript.{output_format}"):
+            os.remove(f"transcript.{output_format}")

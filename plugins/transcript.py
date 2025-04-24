@@ -8,6 +8,7 @@ import json
 import tempfile
 import getpass
 import ast
+from lib.video_utils import transcribe_video_whisper_cli
 
 
 # Ajout des traductions spécifiques à ce plugin
@@ -87,6 +88,7 @@ translations["fr"].update({
     "promt_result_display": "Resultat",
 })
 
+
 class TranscriptPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
@@ -123,7 +125,7 @@ class TranscriptPlugin(Plugin):
         return [{"name": t("transcript_tab"), "plugin": "transcript"}]
 
     def transcribe_video(self, video_path, output_format, whisper_path=None, whisper_model=None, ffmpeg_path=None, lang=None):
-        print("Executed by user :", getpass.getuser())
+        """Wrapper autour de transcribe_video_whisper_cli qui gère les paramètres par défaut de la classe."""
         if whisper_path is None:
             whisper_path = os.path.expanduser(self.get_config("whisper_path"))
         if ffmpeg_path is None:
@@ -133,71 +135,14 @@ class TranscriptPlugin(Plugin):
         if lang is None:
             lang = self.plugin_manager.config["common"]["language"]
 
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
-            temp_audio_path = temp_audio.name
-
-        try:
-            # Conversion de la vidéo en audio WAV 16kHz
-            print(f"Conversion to {temp_audio_path} 16bits...")
-            ffmpeg_command = [
-                ffmpeg_path, '-y',
-                '-i', video_path,
-                '-acodec', 'pcm_s16le',
-                '-ar', '16000',
-                temp_audio_path
-            ]
-            print("Commande ffmpeg:", " ".join(ffmpeg_command))
-            try:
-                result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
-                print("Output STDOUT:", result.stdout)
-                #print("Sortie STDERR:", result.stderr)
-            except subprocess.CalledProcessError as e:
-                print("Error while executing ffmpeg:")
-                print(e.stderr)  # Affiche le message d'erreur de ffmpeg
-
-
-            # Transcription avec whisper.cpp
-            print(f"Transcription with whisper {whisper_model}...")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{output_format}") as temp_output:
-                output_file = temp_output.name
-            file_without_extension, file_extension = os.path.splitext(output_file)
-            expanded_whisper_path = os.path.expanduser(whisper_path)
-            whisper_command = [
-                expanded_whisper_path,
-                "-m", f"{os.path.dirname(expanded_whisper_path)}/models/ggml-{whisper_model}.bin",
-                "-f", temp_audio_path,
-                "-l", lang,
-                "-of", file_without_extension,
-                "-otxt" if output_format == "txt" else "-osrt"
-            ]
-            print("Command whisper:", " ".join(whisper_command))
-            try:
-                result = subprocess.run(whisper_command, check=True, capture_output=True, text=True)
-                print("Sortie STDOUT:", result.stdout)
-                #print("Sortie STDERR:", result.stderr)
-            except subprocess.CalledProcessError as e:
-                print("Error while executing whisper:")
-                print(e.stderr)  # Affiche le message d'erreur de whisper
-            print('Transcription done')
-
-            with open(output_file, 'r') as f:
-                transcript = f.read()
-
-            os.remove(output_file)
-            #os.remove(temp_audio_path)
-
-            return transcript
-
-        except subprocess.CalledProcessError as e:
-            st.error(f"{t('transcript_error_transcribing')}{e.stderr}")
-            return None
-
-        finally:
-            # Nettoyage des fichiers temporaires
-            if os.path.exists(temp_audio_path):
-                os.remove(temp_audio_path)
-            if os.path.exists(f"transcript.{output_format}"):
-                os.remove(f"transcript.{output_format}")
+        return transcribe_video_whisper_cli(
+            video_path=video_path,
+            output_format=output_format,
+            whisper_path=whisper_path,
+            whisper_model=whisper_model,
+            ffmpeg_path=ffmpeg_path,
+            lang=lang
+        )
 
     def manage_prompts(self, config):
         st.subheader(t("prompt_management"))
@@ -210,25 +155,31 @@ class TranscriptPlugin(Plugin):
         try:
             if isinstance(config['transcript']['prompts'], str):
                 # Utiliser ast.literal_eval pour évaluer en toute sécurité la chaîne comme un dictionnaire Python
-                st.session_state.prompts = ast.literal_eval(config['transcript']['prompts'])
+                st.session_state.prompts = ast.literal_eval(
+                    config['transcript']['prompts'])
             else:
                 st.session_state.prompts = config['transcript']['prompts']
         except (SyntaxError, ValueError):
-            st.error("Erreur lors du décodage des prompts de la configuration. Réinitialisation à un dictionnaire vide.")
+            st.error(
+                "Erreur lors du décodage des prompts de la configuration. Réinitialisation à un dictionnaire vide.")
             st.session_state.prompts = {}
 
         # Afficher les prompts existants
         prompt_options = list(st.session_state.prompts.keys()) + ['Custom']
-        selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="prompt_select")
+        selected_prompt = st.selectbox(
+            t("select_prompt"), options=prompt_options, key="prompt_select")
 
         if selected_prompt == 'Custom':
-            prompt_content = st.text_area(t("custom_prompt"), "", key="custom_prompt")
+            prompt_content = st.text_area(
+                t("custom_prompt"), "", key="custom_prompt")
         else:
-            prompt_content = st.text_area(t("edit_prompt"), st.session_state.prompts.get(selected_prompt, ""), key="edit_prompt")
+            prompt_content = st.text_area(t("edit_prompt"), st.session_state.prompts.get(
+                selected_prompt, ""), key="edit_prompt")
 
         # Ajouter ou modifier un prompt
         col1, col2, col3 = st.columns([1, 1, 1])
-        new_prompt_name = col1.text_input(t("new_prompt_name"), key="new_prompt_name")
+        new_prompt_name = col1.text_input(
+            t("new_prompt_name"), key="new_prompt_name")
         if col1.button(t("add_prompt"), key="add_prompt"):
             if new_prompt_name:
                 st.session_state.prompts[new_prompt_name] = prompt_content
@@ -263,7 +214,7 @@ class TranscriptPlugin(Plugin):
         )
         return response
 
-    def run(self, config):
+    def run_local(self, config):
         st.header(t("transcript_header"))
 
         # Gestion des prompts (indépendante du transcript)
@@ -278,14 +229,17 @@ class TranscriptPlugin(Plugin):
             st.info(f"{t('transcript_no_videos')} {work_directory}")
             return
 
-        selected_video = st.selectbox(t("transcript_select_video"), options=[v[0] for v in videos])
-        selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
+        selected_video = st.selectbox(
+            t("transcript_select_video"), options=[v[0] for v in videos])
+        selected_video_path = next(v[1]
+                                   for v in videos if v[0] == selected_video)
 
         output_format = st.radio(t("transcript_output_format"), ["txt", "srt"])
 
         if st.button(t("transcript_transcribe_button")):
             with st.spinner(t("transcript_transcribing")):
-                transcript = self.transcribe_video(selected_video_path, output_format)
+                transcript = self.transcribe_video(
+                    selected_video_path, output_format)
                 st.session_state.transcript = transcript
                 st.session_state.show_transcript = True
                 with open(os.path.join(work_directory, "transcript.txt"), "w", encoding="utf-8") as f:
@@ -293,7 +247,8 @@ class TranscriptPlugin(Plugin):
 
         if st.session_state.get('show_transcript', False):
             st.success(t("transcript_transcription_done"))
-            st.text_area(t("transcript_content"), st.session_state.transcript, height=300)
+            st.text_area(t("transcript_content"),
+                         st.session_state.transcript, height=300)
 
             col1, col2 = st.columns(2)
             with col1:
@@ -314,15 +269,18 @@ class TranscriptPlugin(Plugin):
 
                 final_prompt = prompt_content
                 if selected_prompt != 'Custom':
-                    final_prompt = st.session_state.prompts[selected_prompt] + "\n" + prompt_content
+                    final_prompt = st.session_state.prompts[selected_prompt] + \
+                        "\n" + prompt_content
 
-                result = self.apply_prompt(st.session_state.transcript, final_prompt, llm_config)
+                result = self.apply_prompt(
+                    st.session_state.transcript, final_prompt, llm_config)
                 st.session_state.prompt_result = result
 
             # Affichage du résultat
             if 'prompt_result' in st.session_state:
                 st.subheader(t("prompt_result"))
-                st.text_area(t("promt_result_display"), st.session_state.prompt_result, height=300)
+                st.text_area(t("promt_result_display"),
+                             st.session_state.prompt_result, height=300)
 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -336,3 +294,14 @@ class TranscriptPlugin(Plugin):
                         file_name="prompt_result.txt",
                         mime="text/plain"
                     )
+
+    def run_remote(self, config):
+        pass
+
+    def run(self, config):
+        """Main plugin logic"""
+        tab1, tab2 = st.tabs(["Local", "Remote"])
+        with tab1:
+            self.run_local(config)
+        with tab2:
+            self.run_remote(config)
