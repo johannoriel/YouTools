@@ -16,12 +16,16 @@ translations["en"].update({
     "work_directory": "Work Directory",
     "preferred_language": "Preferred Language for Transcriptions",
     "upload_finished": "Upload finished ! ID of the video",
+    "notification_sound": "Notification sound file",
+    "play_sound": "Play notification sound",
 })
 translations["fr"].update({
     "channel_id": "ID de la chaîne YouTube",
     "work_directory": "Répertoire de travail",
     "preferred_language": "Langue préférée pour les transcriptions",
     "upload_finished": "Upload terminé ! ID de la vidéo",
+    "notification_sound": "Fichier son de notification",
+    "play_sound": "Jouer le son de notification",
 })
 
 yt_categories = {
@@ -70,6 +74,11 @@ def get_category_id(category_name):
 class CommonPlugin(Plugin):
     def get_config_fields(self):
         return {
+            "notification_sound": {
+                "type": "text",
+                "label": t("notification_sound"),
+                "default": ""
+            },
             "channel_id": {
                 "type": "text",
                 "label": t("channel_id"),
@@ -196,6 +205,15 @@ class CommonPlugin(Plugin):
     def get_tabs(self):
         return [{"name": "Commun", "plugin": "common"}]
 
+    def play_notification_sound(self):
+        """Joue un son MP3 prédéfini si configuré"""
+        sound_file = os.path.expanduser(
+            self.get_config('notification_sound'))
+        if sound_file and os.path.exists(sound_file):
+            st.audio(sound_file, format='audio/mp3', autoplay=True)
+        elif sound_file:
+            st.warning(f"Sound file not found: {sound_file}")
+
     def run(self, config):
         st.header("Common Plugin")
         st.write(f"Channel: {config['common']['channel_id']}")
@@ -203,6 +221,7 @@ class CommonPlugin(Plugin):
             f"{t('work_directory')}: {config['common']['work_directory']}")
         torch.cuda.empty_cache()
         st.write("CUDA memory reset")
+        self.play_notification_sound()
 
 
 SCOPES = [
