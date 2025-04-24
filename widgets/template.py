@@ -12,7 +12,7 @@ translations["fr"].update({
 })
 
 
-class VideoDatabaseWidget(Widget):
+class TemplateWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
 
