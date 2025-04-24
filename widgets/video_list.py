@@ -7,12 +7,12 @@ from datetime import datetime
 
 translations["en"].update({
     "video_list_title": "Video List",
-    "no_file_error": "No CSV file found. Please check the directory.",
+    "no_file_error": "No valid CSV file found. Please check the directory.",
 })
 
 translations["fr"].update({
     "video_list_title": "Liste des vidéos",
-    "no_file_error": "Aucun fichier CSV trouvé. Vérifiez le répertoire.",
+    "no_file_error": "Aucun fichier CSV valide trouvé. Vérifiez le répertoire.",
 })
 
 
@@ -32,12 +32,26 @@ class VideoListWidget(Widget):
             st.error(t("no_file_error"))
             return
 
-        # Charger et concaténer tous les fichiers CSV
+        # Colonnes attendues pour un CSV valide
+        required_columns = {'keyword', 'url', 'title', 'view_count', 'language',
+                            'published_at', 'channel_id', 'channel_title',
+                            'subscriber_count', 'comment_count', 'relevance_score'}
+
+        # Charger et concaténer les fichiers CSV valides
         dfs = []
         for csv_file in csv_files:
             file_path = os.path.join(work_directory, csv_file)
-            df = pd.read_csv(file_path)
-            dfs.append(df)
+            try:
+                df = pd.read_csv(file_path)
+                # Vérifier si le CSV contient les colonnes requises
+                if required_columns.issubset(set(df.columns)):
+                    dfs.append(df)
+            except Exception:
+                continue
+
+        if not dfs:
+            st.error(t("no_file_error"))
+            return
 
         combined_df = pd.concat(dfs, ignore_index=True)
 
