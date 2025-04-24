@@ -163,6 +163,7 @@ def is_youtube_url(url):
     parsed_url = urlparse(url)
     return parsed_url.netloc in ['youtube.com', 'www.youtube.com', 'youtu.be']
 
+
 def filter_comments(lines):
     """
     Filtre tous les commentaires entre %% et %%, qu'ils soient sur une ligne ou multilignes.
@@ -208,6 +209,8 @@ def filter_comments(lines):
     return filtered_lines
 
 # Process input lines into slides
+
+
 def process_lines(lines, directories):
     """
     Processes a list of input lines into slides based on specific rules:
@@ -499,6 +502,7 @@ def generate_animation_css(animation_type, target_column=None, is_exit=False):
                 100% { transform: translateY(100%); opacity: 1; }
             }
             """
+
         # Par défaut, cible tout le contenu principal pour les animations sortantes
         target_selector = ".stMain"
         css += f"""
@@ -561,6 +565,13 @@ def generate_animation_css(animation_type, target_column=None, is_exit=False):
                 100% { transform: rotate(0deg); }
             }
             """
+        elif animation_type == 'randomZoom':
+            css += """
+            @keyframes randomZoom {
+                0% { transform: scale(1); }
+                100% { transform: scale(1.1); }
+            }
+            """
 
         # Déterminer le sélecteur en fonction de la colonne cible
         if target_column == 'right':
@@ -571,15 +582,24 @@ def generate_animation_css(animation_type, target_column=None, is_exit=False):
             target_selector = ".stMain"  # Par défaut, cible tout le contenu principal
 
         # Appliquer l'animation aux éléments cibles
-        css += f"""
-        {target_selector} .stImage img, {target_selector} .stVideo, {target_selector} .stMarkdown > div {{
-            animation: {animation_type} 3s ease-out;
-        }}
-        {target_selector} div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
-            animation: {animation_type} 3s ease-out;
-        }}
-        </style>
-        """
+        if animation_type == 'randomZoom':
+            css += f"""
+            {target_selector} .stImage img {{
+                animation: {animation_type} 10s ease-in-out forwards;
+                transform-origin: {random.randint(10,90)}% {random.randint(10,90)}%;
+            }}
+            </style>
+            """
+        else:
+            css += f"""
+            {target_selector} .stImage img, {target_selector} .stVideo, {target_selector} .stMarkdown > div {{
+                animation: {animation_type} 3s ease-out;
+            }}
+            {target_selector} div.stVerticalBlock:has(iframe[title="st.iframe"]) {{
+                animation: {animation_type} 3s ease-out;
+            }}
+            </style>
+            """
 
     return css
 
@@ -641,7 +661,8 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
                 url = item["url"]
                 parsed_url = urlparse(url)
                 query_params = parse_qs(parsed_url.query)
-                start_time = f"{int(query_params.get('t', [0])[0])}s" if 't' in query_params and query_params['t'][0].isdigit() else None
+                start_time = f"{int(query_params.get('t', [0])[0])}s" if 't' in query_params and query_params['t'][0].isdigit(
+                ) else None
                 # Remove timestamp from URL
                 if 't' in query_params:
                     del query_params['t']
@@ -655,7 +676,8 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
                     parsed_url.fragment
                 ))
                 if start_time:
-                    center_content(in_group, st.video, clean_url, start_time=start_time)
+                    center_content(in_group, st.video, clean_url,
+                                   start_time=start_time)
                 else:
                     center_content(in_group, st.video, clean_url)
             elif item["type"] == "image":
@@ -772,6 +794,32 @@ class EzprezPlugin(Plugin):
                     {'presentation_mode': True, 'input_text': st.session_state.get('input_text', ''),
                         'slides': process_lines(st.session_state.get('input_text', '').split("\n"), directories)}))
 
+            # Existing presentation controls (green background, vertical center, font size)
+            green_bg = st.checkbox(
+                t("ezprez_green_bg_label"), value=False, key="green_bg")
+            if green_bg:
+                st.markdown("""
+                    <style>
+                    .stMain { background-color: #00FF00; }
+                    .stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain h5, .stMain h6,
+                    .stMain p, .stMain ul, .stMain ol, .stMain blockquote, .stMain table {
+                        background-color: #000000; color: #FFFFFF; padding: 10px; margin: 5px 0; display: inline-block;
+                    }
+                    .stMain ul, .stMain ol { display: block; padding: 10px 10px 10px 30px; }
+                    </style>
+                """, unsafe_allow_html=True)
+            st.markdown("""
+                <style>
+                .stMain h1, .stMain h2, .stMain h3 {text-align: center;}
+                </style>
+            """, unsafe_allow_html=True)
+            st.checkbox(t("ezprez_vertical_center_label"),
+                        value=False, key="vertical_center")
+            auto_scale = st.checkbox(
+                "AutoScale", value=False, key="auto_scale")
+            font_size_scale = st.slider(
+                "Font Size Scale", 1.0, 6.0, 2.0, 0.1, key="font_size_scale", disabled=auto_scale)
+
             if st.session_state['presentation_mode']:
                 st.header(t("ezprez_navigation_header"))
                 col1, col2 = st.columns(2)
@@ -834,27 +882,9 @@ class EzprezPlugin(Plugin):
                         'next_slide': min(len(st.session_state['slides']) - 1, st.session_state['current_slide'] + 1),
                         'next_slide_ready': False
                     }))
-
-                # Existing presentation controls (green background, vertical center, font size)
-                green_bg = st.checkbox(
-                    t("ezprez_green_bg_label"), value=False, key="green_bg")
-                if green_bg:
-                    st.markdown("""
-                        <style>
-                        .stMain { background-color: #00FF00; }
-                        .stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain h5, .stMain h6,
-                        .stMain p, .stMain ul, .stMain ol, .stMain blockquote, .stMain table {
-                            background-color: #000000; color: #FFFFFF; padding: 10px; margin: 5px 0; display: inline-block;
-                        }
-                        .stMain ul, .stMain ol { display: block; padding: 10px 10px 10px 30px; }
-                        </style>
-                    """, unsafe_allow_html=True)
-                st.checkbox(t("ezprez_vertical_center_label"),
-                            value=False, key="vertical_center")
-                auto_scale = st.checkbox(
-                    "AutoScale", value=False, key="auto_scale")
-                font_size_scale = st.slider(
-                    "Font Size Scale", 1.0, 6.0, 2.0, 0.1, key="font_size_scale", disabled=auto_scale)
+                    button("Random Zoom", "Ctrl+E", lambda: st.session_state.update({
+                        'current_animation': 'randomZoom',
+                    }))
 
         # Apply font size scaling
         if st.session_state['presentation_mode']:
