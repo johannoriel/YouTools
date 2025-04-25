@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from lib.youtube_db import cache_campaign_response
 from plugins.automarket import AutomarketPlugin
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 translations["en"].update({
     "generate_response_title": "Generate Responses to Comments (comment_list.csv -> response_list.csv)",
@@ -21,8 +22,6 @@ translations["en"].update({
     "export_responses": "Export Responses",
     "export_success": "Responses exported successfully to {filename}",
     "export_error": "Error during export: {error}",
-    "response_to_comment": "Response to Comment {}",
-    "edit_response": "Edit Response {}",
     "select_comment_file": "Select Comment List Files",
     "overwrite_responses_checkbox": "Overwrite existing response file",
 })
@@ -41,8 +40,6 @@ translations["fr"].update({
     "export_responses": "Exporter les réponses",
     "export_success": "Réponses exportées avec succès vers {filename}",
     "export_error": "Erreur lors de l'export : {error}",
-    "response_to_comment": "Réponse au commentaire {}",
-    "edit_response": "Modifier la réponse {}",
     "select_comment_file": "Sélectionner les fichiers de liste de commentaires",
     "overwrite_responses_checkbox": "Écraser le fichier de réponses existant",
 })
@@ -238,7 +235,7 @@ class GenerateResponseWidget(Widget):
                 # Stocker les réponses dans st.session_state
                 st.session_state['generated_responses'] = responses
 
-        # Affichage des réponses stockées dans st.session_state
+        # Affichage des réponses avec AgGrid
         if 'generated_responses' in st.session_state and st.session_state['generated_responses']:
             st.subheader(t("responses"))
             responses_df = pd.DataFrame([
@@ -256,41 +253,42 @@ class GenerateResponseWidget(Widget):
                 for resp in st.session_state['generated_responses']
             ])
 
-            response_column_config = {
-                "comment_text": st.column_config.TextColumn("Comment", width="large"),
-                "response_text": st.column_config.TextColumn("Response", width="large"),
-                "author": st.column_config.TextColumn("Author", width="medium"),
-                "video_title": st.column_config.TextColumn("Video Title", width="large"),
-                "channel_title": st.column_config.TextColumn("Channel", width="medium"),
-            }
+            # Configuration de la grille AgGrid
+            gb = GridOptionsBuilder.from_dataframe(responses_df)
+            gb.configure_column(
+                "comment_text", headerName="Comment", width=300, editable=False)
+            gb.configure_column(
+                "response_text", headerName="Response", width=300, editable=True, cellEditor='agLargeTextCellEditor', cellEditorPopup=True)
+            gb.configure_column("author", headerName="Author",
+                                width=150, editable=False)
+            gb.configure_column(
+                "video_title", headerName="Video Title", width=200, editable=False)
+            gb.configure_column(
+                "channel_title", headerName="Channel", width=150, editable=False)
+            gb.configure_column(
+                "comment_id", headerName="Comment ID", hide=True)
+            gb.configure_column("video_id", headerName="Video ID", hide=True)
+            gb.configure_column(
+                "channel_id", headerName="Channel ID", hide=True)
+            gb.configure_column("keywords", headerName="Keywords", hide=True)
+            gb.configure_selection(
+                selection_mode="multiple", use_checkbox=True)
+            gb.configure_default_column(editable=False, resizable=True)
+            grid_options = gb.build()
 
-            # Afficher le DataFrame avec sélection multi-lignes pour les réponses
-            selected_response_rows = st.dataframe(
+            # Afficher la grille
+            grid_response = AgGrid(
                 responses_df,
-                column_config=response_column_config,
-                use_container_width=True,
+                gridOptions=grid_options,
                 height=400,
-                selection_mode="multi-row",
-                on_select="rerun",
-                key=f"{self.prefix}_response_dataframe"
+                fit_columns_on_grid_load=True,
+                allow_unsafe_jscode=True,
+                update_mode=GridUpdateMode.VALUE_CHANGED | GridUpdateMode.SELECTION_CHANGED,
+                key=f"{self.prefix}_response_grid"
             )
 
-            # Permettre l'édition des réponses
-            for i, row in responses_df.iterrows():
-                st.write(t("response_to_comment").format(i + 1))
-                edited_response = st.text_area(
-                    t("edit_response").format(i + 1),
-                    value=row['response_text'],
-                    key=f"{self.prefix}_response_{i}",
-                    height=100
-                )
-                responses_df.at[i, 'response_text'] = edited_response
-
-                if len(edited_response) > 500:
-                    st.warning(t("char_limit_warning").format(
-                        len(edited_response)))
-
             # Mettre à jour st.session_state avec les réponses éditées
+            updated_df = grid_response['data']
             st.session_state['generated_responses'] = [
                 {
                     'comment_id': row['comment_id'],
@@ -303,29 +301,37 @@ class GenerateResponseWidget(Widget):
                     'video_title': row['video_title'],
                     'channel_title': row['channel_title']
                 }
-                for _, row in responses_df.iterrows()
+                for _, row in updated_df.iterrows()
             ]
+
+            # Vérification de la limite de caractères
+            for i, row in updated_df.iterrows():
+                if len(row['response_text']) > 500:
+                    st.warning(t("char_limit_warning").format(
+                        len(row['response_text'])))
+
+            # Récupérer les lignes sélectionnées
+            selected_rows = grid_response['selected_rows']
+            selected_responses = []
+            if selected_rows is not None and not selected_rows.empty:
+                selected_indices = selected_rows.index.tolist()
+                selected_responses = [
+                    st.session_state['generated_responses'][i] for i in selected_indices]
 
             # Case à cocher pour écraser le fichier
             overwrite_responses = st.checkbox(
                 t("overwrite_responses_checkbox"), key=f"{self.prefix}_overwrite_responses")
 
             # Bouton pour exporter les réponses sélectionnées
-            if st.button(t("export_responses"), key=f"{self.prefix}_export_responses") and selected_response_rows['selection']['rows']:
-                selected_indices = selected_response_rows['selection']['rows']
-                selected_responses = [
-                    st.session_state['generated_responses'][i] for i in selected_indices]
+            if st.button(t("export_responses"), key=f"{self.prefix}_export_responses") and selected_rows is not None and not selected_rows.empty:
                 self.export_responses(selected_responses,
                                       work_dir, overwrite_responses)
 
             # Bouton pour publier les réponses sélectionnées
-            if st.button(t("post_responses"), key=f"{self.prefix}_post_responses") and selected_response_rows['selection']['rows']:
+            if st.button(t("post_responses"), key=f"{self.prefix}_post_responses") and selected_rows is not None and not selected_rows.empty:
                 with st.spinner(t("posting")):
                     automarket = self.plugin_manager.get_plugin('automarket')
                     campaign_id = datetime.now().isoformat()
-                    selected_indices = selected_response_rows['selection']['rows']
-                    selected_responses = [
-                        st.session_state['generated_responses'][i] for i in selected_indices]
                     automarket.post_responses(
                         self.plugin_manager.config, selected_responses, campaign_id)
                     st.success(t("success"))
