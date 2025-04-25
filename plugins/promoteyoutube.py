@@ -5,14 +5,12 @@ import os
 from typing import List, Dict, Any
 from lib.youtube_api import YoutubeAPI
 import pandas as pd
-from widgets.get_comments import GetCommentsWidget
-from widgets.generate_response import GenerateResponseWidget
-from widgets.recentvideos import RecentVideosWidget
+
 
 # Traductions existantes conservées
 translations["en"].update({
-    "promoteyoutube_tab": "Promote YouTube",
-    "promoteyoutube_header": "Promote Content on YouTube (video_list.csv)",
+    "promoteyoutube_tab": "Promote YouTube (video_list.csv)",
+    "promoteyoutube_header": "Promote Content on YouTube",
     "promoteyoutube_transcript": "Transcript",
     "promoteyoutube_url": "Video URL",
     "promoteyoutube_keywords": "Keywords to Search",
@@ -28,8 +26,8 @@ translations["en"].update({
 })
 
 translations["fr"].update({
-    "promoteyoutube_tab": "Promotion YouTube",
-    "promoteyoutube_header": "Promouvoir le Contenu sur YouTube (video_list.csv)",
+    "promoteyoutube_tab": "Promotion YouTube (video_list.csv)",
+    "promoteyoutube_header": "Promouvoir le Contenu sur YouTube",
     "promoteyoutube_transcript": "Transcription",
     "promoteyoutube_url": "URL de la vidéo",
     "promoteyoutube_keywords": "Mots-clés à rechercher",
@@ -67,7 +65,8 @@ class PromoteyoutubePlugin(Plugin):
         return [
             {"name": t("promoteyoutube_tab"), "plugin": "promoteyoutube"},
             {"name": "Get Comments", "widget": "get_comments"},
-            {"name": "Generate Responses", "widget": "generate_response"}
+            {"name": "Generate Responses", "widget": "generate_response"},
+            {"name": "Post Responses", "widget": "post_response"}
         ]
 
     def search_videos(self, keywords: str, max_videos: int, video_order: str):
@@ -220,16 +219,23 @@ class PromoteyoutubePlugin(Plugin):
                     st.session_state['found_videos'], work_dir, overwrite)
 
     def get_comments(self, config):
+        from widgets.get_comments import GetCommentsWidget
         GetCommentsWidget("promoteyoutube", "gcw",
                           plugin_manager=self.plugin_manager).display()
 
     def generate_responses(self, config):
+        from widgets.generate_response import GenerateResponseWidget
         GenerateResponseWidget("promoteyoutube", "grw",
                                plugin_manager=self.plugin_manager).display()
 
+    def post_responses(self, config):
+        from widgets.post_response import PostResponseWidget
+        PostResponseWidget("promoteyoutube", "prw",
+                           plugin_manager=self.plugin_manager).display()
+
     def run(self, config):
-        tab1, tab2, tab3 = st.tabs(
-            [t("promoteyoutube_tab"), "Get Comments", "Generate Responses"])
+        tab1, tab2, tab3, tab4 = st.tabs(
+            [t("promoteyoutube_tab"), "Get Comments", "Generate Responses", "Post Responses"])
         with tab1:
             from widgets.recentvideos import RecentVideosWidget
             widget = RecentVideosWidget(
@@ -240,3 +246,5 @@ class PromoteyoutubePlugin(Plugin):
             self.get_comments(config)
         with tab3:
             self.generate_responses(config)
+        with tab4:
+            self.post_responses(config)

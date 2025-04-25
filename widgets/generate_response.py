@@ -5,7 +5,6 @@ import pandas as pd
 import os
 from datetime import datetime
 from lib.youtube_db import cache_campaign_response
-from plugins.automarket import AutomarketPlugin
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 translations["en"].update({
@@ -14,10 +13,6 @@ translations["en"].update({
     "generate_responses": "Generate Responses",
     "generating": "Generating responses...",
     "responses": "Suggested Responses",
-    "post_responses": "Post Responses",
-    "posting": "Posting responses...",
-    "success": "Responses posted successfully!",
-    "error": "Error posting responses: ",
     "char_limit_warning": "⚠️ This response exceeds 500 characters ({} characters). Please shorten it.",
     "export_responses": "Export Responses",
     "export_success": "Responses exported successfully to {filename}",
@@ -32,10 +27,6 @@ translations["fr"].update({
     "generate_responses": "Générer des réponses",
     "generating": "Génération des réponses...",
     "responses": "Réponses suggérées",
-    "post_responses": "Poster les réponses",
-    "posting": "Publication des réponses...",
-    "success": "Réponses publiées avec succès !",
-    "error": "Erreur lors de la publication : ",
     "char_limit_warning": "⚠️ Cette réponse dépasse 500 caractères ({} caractères). Veuillez la raccourcir.",
     "export_responses": "Exporter les réponses",
     "export_success": "Réponses exportées avec succès vers {filename}",
@@ -253,12 +244,17 @@ class GenerateResponseWidget(Widget):
                 for resp in st.session_state['generated_responses']
             ])
 
+            # Réinitialiser l'index pour garantir des indices séquentiels
+            responses_df = responses_df.reset_index(drop=True)
+
             # Configuration de la grille AgGrid
             gb = GridOptionsBuilder.from_dataframe(responses_df)
             gb.configure_column(
                 "comment_text", headerName="Comment", width=300, editable=False)
             gb.configure_column(
-                "response_text", headerName="Response", width=300, editable=True, cellEditor='agLargeTextCellEditor', cellEditorPopup=True)
+                "response_text", headerName="Response", width=300, editable=True,
+                cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '500'}
+            )
             gb.configure_column("author", headerName="Author",
                                 width=150, editable=False)
             gb.configure_column(
@@ -289,8 +285,9 @@ class GenerateResponseWidget(Widget):
 
             # Mettre à jour st.session_state avec les réponses éditées
             updated_df = grid_response['data']
-            st.session_state['generated_responses'] = [
-                {
+            updated_responses = st.session_state['generated_responses'].copy()
+            for idx, row in updated_df.iterrows():
+                updated_responses[int(idx)] = {
                     'comment_id': row['comment_id'],
                     'response': row['response_text'],
                     'target_video_id': row['video_id'],
@@ -301,8 +298,7 @@ class GenerateResponseWidget(Widget):
                     'video_title': row['video_title'],
                     'channel_title': row['channel_title']
                 }
-                for _, row in updated_df.iterrows()
-            ]
+            st.session_state['generated_responses'] = updated_responses
 
             # Vérification de la limite de caractères
             for i, row in updated_df.iterrows():
@@ -316,7 +312,7 @@ class GenerateResponseWidget(Widget):
             if selected_rows is not None and not selected_rows.empty:
                 selected_indices = selected_rows.index.tolist()
                 selected_responses = [
-                    st.session_state['generated_responses'][i] for i in selected_indices]
+                    st.session_state['generated_responses'][int(i)] for i in selected_indices]
 
             # Case à cocher pour écraser le fichier
             overwrite_responses = st.checkbox(
@@ -326,12 +322,3 @@ class GenerateResponseWidget(Widget):
             if st.button(t("export_responses"), key=f"{self.prefix}_export_responses") and selected_rows is not None and not selected_rows.empty:
                 self.export_responses(selected_responses,
                                       work_dir, overwrite_responses)
-
-            # Bouton pour publier les réponses sélectionnées
-            if st.button(t("post_responses"), key=f"{self.prefix}_post_responses") and selected_rows is not None and not selected_rows.empty:
-                with st.spinner(t("posting")):
-                    automarket = self.plugin_manager.get_plugin('automarket')
-                    campaign_id = datetime.now().isoformat()
-                    automarket.post_responses(
-                        self.plugin_manager.config, selected_responses, campaign_id)
-                    st.success(t("success"))
