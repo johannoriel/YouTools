@@ -36,7 +36,7 @@ class PostResponseWidget(Widget):
 
     def display(self):
         st.title(t("post_response_title"))
-        work_dir = self.plugin_manager.config["common"]["work_directory"]
+        work_dir = self.work_dir()
 
         # Recherche des fichiers CSV commençant par "response_list"
         response_files = [f for f in os.listdir(work_dir) if f.startswith(
@@ -78,13 +78,20 @@ class PostResponseWidget(Widget):
         combined_df = combined_df.drop_duplicates(
             subset='comment_id', keep='first')
 
+        # Réorganiser les colonnes
+        column_order = ['comment_text', 'response_text', 'author', 'video_title',
+                        'channel_title', 'comment_id', 'video_id', 'channel_id', 'keywords']
+        available_columns = [
+            col for col in column_order if col in combined_df.columns]
+        combined_df = combined_df[available_columns].reset_index(drop=True)
+
         # Configuration de la grille AgGrid
         gb = GridOptionsBuilder.from_dataframe(combined_df)
         gb.configure_column(
             "comment_text", headerName="Comment", width=300, editable=False)
         gb.configure_column(
             "response_text", headerName="Response", width=300, editable=True,
-            cellEditor='agLargeTextCellEditor', cellEditorPopup=True
+            cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '500'}
         )
         gb.configure_column("author", headerName="Author",
                             width=150, editable=False)
@@ -96,9 +103,12 @@ class PostResponseWidget(Widget):
         gb.configure_column("video_id", headerName="Video ID", hide=True)
         gb.configure_column("channel_id", headerName="Channel ID", hide=True)
         gb.configure_column("keywords", headerName="Keywords", hide=True)
-        gb.configure_selection(selection_mode="multiple", use_checkbox=True)
+        gb.configure_selection(selection_mode="multiple",
+                               use_checkbox=True, header_checkbox=True)
         gb.configure_default_column(editable=False, resizable=True)
         grid_options = gb.build()
+        grid_options['rowSelection'] = 'multiple'
+        grid_options['suppressRowClickSelection'] = True
 
         # Afficher la grille
         grid_response = AgGrid(
@@ -108,6 +118,7 @@ class PostResponseWidget(Widget):
             fit_columns_on_grid_load=True,
             allow_unsafe_jscode=True,
             update_mode=GridUpdateMode.VALUE_CHANGED | GridUpdateMode.SELECTION_CHANGED,
+            enable_enterprise_modules=True,
             key=f"{self.prefix}_response_grid"
         )
 
@@ -125,8 +136,20 @@ class PostResponseWidget(Widget):
                 'video_title': row['video_title'],
                 'channel_title': row['channel_title']
             }
-            for _, row in updated_df.iterrows()
+            for _, row in combined_df.iterrows()
         ]
+        for idx, row in updated_df.iterrows():
+            responses[int(idx)] = {
+                'comment_id': row['comment_id'],
+                'response': row['response_text'],
+                'target_video_id': row['video_id'],
+                'channel_id': row['channel_id'],
+                'keyword': row.get('keywords', ''),
+                'comment_text': row['comment_text'],
+                'author': row['author'],
+                'video_title': row['video_title'],
+                'channel_title': row['channel_title']
+            }
 
         # Vérification de la limite de caractères
         for i, row in updated_df.iterrows():
@@ -139,7 +162,7 @@ class PostResponseWidget(Widget):
         selected_responses = []
         if selected_rows is not None and not selected_rows.empty:
             selected_indices = selected_rows.index.tolist()
-            selected_responses = [responses[i] for i in selected_indices]
+            selected_responses = [responses[int(i)] for i in selected_indices]
 
         # Bouton pour publier les réponses sélectionnées
         if st.button(t("post_responses"), key=f"{self.prefix}_post_responses") and selected_rows is not None and not selected_rows.empty:

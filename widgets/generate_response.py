@@ -244,8 +244,10 @@ class GenerateResponseWidget(Widget):
                 for resp in st.session_state['generated_responses']
             ])
 
-            # Réinitialiser l'index pour garantir des indices séquentiels
-            responses_df = responses_df.reset_index(drop=True)
+            # Réorganiser les colonnes
+            column_order = ['comment_text', 'response_text', 'author', 'video_title',
+                            'channel_title', 'comment_id', 'video_id', 'channel_id', 'keywords']
+            responses_df = responses_df[column_order].reset_index(drop=True)
 
             # Configuration de la grille AgGrid
             gb = GridOptionsBuilder.from_dataframe(responses_df)
@@ -268,7 +270,7 @@ class GenerateResponseWidget(Widget):
                 "channel_id", headerName="Channel ID", hide=True)
             gb.configure_column("keywords", headerName="Keywords", hide=True)
             gb.configure_selection(
-                selection_mode="multiple", use_checkbox=True)
+                selection_mode="multiple", use_checkbox=True, header_checkbox=True)
             gb.configure_default_column(editable=False, resizable=True)
             grid_options = gb.build()
 

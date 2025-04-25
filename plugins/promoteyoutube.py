@@ -9,8 +9,8 @@ import pandas as pd
 
 # Traductions existantes conservées
 translations["en"].update({
-    "promoteyoutube_tab": "Promote YouTube (video_list.csv)",
-    "promoteyoutube_header": "Promote Content on YouTube",
+    "promoteyoutube_tab": "Promote YouTube",
+    "promoteyoutube_header": "Promote Content on YouTube (video_list.csv)",
     "promoteyoutube_transcript": "Transcript",
     "promoteyoutube_url": "Video URL",
     "promoteyoutube_keywords": "Keywords to Search",
@@ -26,8 +26,8 @@ translations["en"].update({
 })
 
 translations["fr"].update({
-    "promoteyoutube_tab": "Promotion YouTube (video_list.csv)",
-    "promoteyoutube_header": "Promouvoir le Contenu sur YouTube",
+    "promoteyoutube_tab": "Promotion YouTube",
+    "promoteyoutube_header": "Promouvoir le Contenu sur YouTube (video_list.csv)",
     "promoteyoutube_transcript": "Transcription",
     "promoteyoutube_url": "URL de la vidéo",
     "promoteyoutube_keywords": "Mots-clés à rechercher",
