@@ -30,7 +30,7 @@ from lib.search_engines import (
 # Translations
 translations["en"].update({
     "trendwatcher_tab": "Trend Watcher",
-    "trendwatcher_header": "Trend Monitoring Dashboard",
+    "trendwatcher_header": "Trend Monitoring Dashboard (searched_video_list.csv)",
     "trendwatcher_keywords_label": "Keywords to Monitor (one per line)",
     "trendwatcher_keywords_default": "AI\nblockchain\nclimate change",
     "trendwatcher_search_button": "Start Monitoring",
@@ -89,7 +89,7 @@ translations["en"].update({
 
 translations["fr"].update({
     "trendwatcher_tab": "Observateur de Tendances",
-    "trendwatcher_header": "Tableau de Bord de Suivi des Tendances",
+    "trendwatcher_header": "Tableau de Bord de Suivi des Tendances (searched_video_list.csv)",
     "trendwatcher_keywords_label": "Mots-clés à surveiller (un par ligne)",
     "trendwatcher_keywords_default": "IA\nblockchain\nchangement climatique",
     "trendwatcher_search_button": "Lancer la surveillance",
@@ -295,7 +295,9 @@ class TrendwatcherPlugin(Plugin):
         """Define plugin tabs"""
         return [
             {"name": t("trendwatcher_tab"), "plugin": "trendwatcher"},
+            {"name": "Process Videos", "plugin": "trendwatcher"},
             {"name": "Keyword cluster", "plugin": "trendwatcher"},
+            {"name": "Video List", "plugin": "trendwatcher"},
         ]
 
     def extract_channel_info_yt_dlp(self, video_url, debug=False):
@@ -407,94 +409,45 @@ class TrendwatcherPlugin(Plugin):
                 "published_at": ""
             }
 
-    def save_videos_to_csv(self, working_dir, selected_keywords, selected_urls):
+    # Modifier la méthode save_videos_to_csv
+    def save_videos_to_csv(self, working_dir, selected_keywords, selected_urls, overwrite=True):
         """Save selected video results to CSV file"""
-        from urllib.parse import urlparse
-        from datetime import datetime
-
         working_dir = os.path.expanduser(working_dir)
         os.makedirs(working_dir, exist_ok=True)
 
-        video_file = os.path.join(working_dir, "video_list.csv")
-        headers = VIDEO_CSV_HEADERS
+        base_filename = "searched_video_list.csv"
+        video_file = os.path.join(working_dir, base_filename)
+
+        if not overwrite and os.path.exists(video_file):
+            i = 1
+            while True:
+                new_filename = f"searched_video_list_{i:03d}.csv"
+                new_file = os.path.join(working_dir, new_filename)
+                if not os.path.exists(new_file):
+                    video_file = new_file
+                    break
+                i += 1
+
+        headers = ["keyword", "url", "video_id", "title", "language"]
 
         filtered_results = [
             r for r in st.session_state.trendwatcher_results
             if r["keyword"] in selected_keywords and r["url"] in selected_urls and r["type"] == "video"
         ]
 
-        debug_mode = st.session_state.get("debug_mode", False)
-        youtube_api = YoutubeAPI(
-            self.plugin_manager.config if self.plugin_manager else {})
-
         with open(video_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(headers)
             for video in filtered_results:
-                parsed_url = urlparse(video["url"])
-                domain = parsed_url.netloc.lower().replace("www.", "")
-                is_youtube = domain in ["youtube.com", "youtu.be"]
-
-                if is_youtube:
-                    metadata = self.extract_video_metadata_yt_dlp(
-                        video["url"], debug=debug_mode)
-                    published_at = metadata["published_at"]
-                    relevance_score = 0
-                    if published_at and metadata["subscriber_count"] and metadata["comment_count"]:
-                        try:
-                            if published_at:
-                                try:
-                                    date_obj = datetime.strptime(
-                                        published_at, "%Y-%m-%d")
-                                    published_at_iso = date_obj.strftime(
-                                        "%Y-%m-%dT00:00:00Z")
-                                except ValueError as e:
-                                    if debug_mode:
-                                        st.write(
-                                            f"Error parsing date {published_at} for {video['url']}: {str(e)}")
-                                    published_at_iso = None
-                            else:
-                                published_at_iso = None
-
-                            if published_at_iso:
-                                video_data = {
-                                    "published_at": published_at_iso,
-                                    "subscriber_count": int(metadata["subscriber_count"] or 0),
-                                    "comment_count": int(metadata["comment_count"] or 0)
-                                }
-                                relevance_score = youtube_api.calculate_relevance_score(
-                                    video_data)
-                        except Exception as e:
-                            if debug_mode:
-                                st.write(
-                                    f"Error calculating relevance score for {video['url']}: {str(e)}")
-                else:
-                    metadata = {
-                        "view_count": "",
-                        "published_at": "",
-                        "channel_id": "N/A",
-                        "channel_title": "N/A",
-                        "subscriber_count": "",
-                        "comment_count": ""
-                    }
-                    relevance_score = 0
-
                 writer.writerow([
                     video["keyword"],
                     video["url"],
                     video["video_id"],
                     video["title"],
-                    metadata["view_count"],
-                    video["language"],
-                    metadata["published_at"],
-                    metadata["channel_id"],
-                    metadata["channel_title"],
-                    metadata["subscriber_count"],
-                    metadata["comment_count"],
-                    relevance_score
+                    video["language"]
                 ])
 
-        return working_dir
+        return video_file
 
     def save_articles_to_csv(self, working_dir, selected_keywords, selected_urls):
         """Save selected article results to CSV file"""
@@ -657,14 +610,14 @@ class TrendwatcherPlugin(Plugin):
         search_mode_value = "or" if search_mode == t(
             "trendwatcher_search_mode_or") else "subsearches"
 
+        overwrite = st.checkbox(t("overwrite_checkbox"), value=True)
+
         if "trendwatcher_results" not in st.session_state:
             st.session_state.trendwatcher_results = []
         if "debug_mode" not in st.session_state:
             st.session_state.debug_mode = debug_mode
         if "select_all_videos" not in st.session_state:
             st.session_state.select_all_videos = False
-        if "select_all_texts" not in st.session_state:
-            st.session_state.select_all_texts = False
 
         if st.button(t("trendwatcher_search_button"), key="search_trends"):
             with st.spinner(t("trendwatcher_processing")):
@@ -711,8 +664,6 @@ class TrendwatcherPlugin(Plugin):
         if st.session_state.trendwatcher_results:
             video_results = [
                 r for r in st.session_state.trendwatcher_results if r["type"] == "video"]
-            text_results = [
-                r for r in st.session_state.trendwatcher_results if r["type"] == "web"]
 
             all_keywords = list(
                 set(r["keyword"] for r in st.session_state.trendwatcher_results))
@@ -793,84 +744,28 @@ class TrendwatcherPlugin(Plugin):
                 else:
                     st.info("No videos match the filters.")
 
-            selected_text_urls = []
-            if text_results:
-                st.subheader(t("trendwatcher_texts_table"))
-                text_df = filter_df(text_results)
-                if not text_df.empty:
-                    st.session_state.select_all_texts = st.checkbox(
-                        t("trendwatcher_select_all_texts"),
-                        value=st.session_state.select_all_texts,
-                        key="select_all_texts_checkbox"
-                    )
-                    text_df["Select"] = st.session_state.select_all_texts
-                    edited_text_df = st.data_editor(
-                        text_df[["Select", "title", "url",
-                                 "keyword", "language"]],
-                        column_config={
-                            "Select": st.column_config.CheckboxColumn(
-                                "Select for Export",
-                                help="Check to include this article in the export",
-                                default=False
-                            ),
-                            "url": st.column_config.LinkColumn(
-                                "URL",
-                                help="Click to visit the article",
-                                display_text="Visit"
-                            ),
-                            "title": st.column_config.TextColumn(
-                                "Title",
-                                help="Article title"
-                            ),
-                            "keyword": st.column_config.TextColumn(
-                                "Keyword",
-                                help="Associated keyword"
-                            ),
-                            "language": st.column_config.TextColumn(
-                                "Language",
-                                help="Detected language"
-                            )
-                        },
-                        disabled=["title", "url", "keyword", "language"],
-                        hide_index=True,
-                        key="text_selector"
-                    )
-                    text_df.update(edited_text_df[["Select"]])
-                    selected_text_urls = text_df[text_df["Select"]]["url"].tolist(
-                    )
-                    if debug_mode:
-                        st.write("Selected text URLs:", selected_text_urls)
-                else:
-                    st.info("No text articles match the filters.")
-
-            if not video_results and not text_results:
+            if not video_results:
                 st.info(t("trendwatcher_no_results"))
 
+            # Dans la méthode trend_watcher, avant le bouton de sauvegarde (juste avant if st.button(t("trendwatcher_save_button"), key="save_results"))
+            overwrite = st.checkbox(
+                t("overwrite_checkbox"), value=True, key="trendwatcher_overwrite")
+
+            # Modifier l'appel à save_videos_to_csv dans le même bloc
             if st.button(t("trendwatcher_save_button"), key="save_results"):
-                if selected_video_urls or selected_text_urls:
+                if selected_video_urls:
                     with st.spinner("Saving results..."):
                         try:
-                            video_dir = None
-                            if selected_video_urls:
-                                video_dir = self.save_videos_to_csv(
-                                    working_dir, selected_keywords, selected_video_urls)
-
-                            article_dir = None
-                            if selected_text_urls:
-                                article_dir = self.save_articles_to_csv(
-                                    working_dir, selected_keywords, selected_text_urls)
-
-                            if video_dir or article_dir:
-                                st.success(t("trendwatcher_save_success").format(
-                                    dir=video_dir or article_dir))
-                            else:
-                                st.warning("No results selected for export.")
+                            video_file = self.save_videos_to_csv(
+                                working_dir, selected_keywords, selected_video_urls, overwrite)
+                            st.success(t("trendwatcher_save_success").format(
+                                dir=video_file))
                         except Exception as e:
                             st.error(
                                 t("trendwatcher_error").format(error=str(e)))
                 else:
                     st.warning(
-                        "Please select at least one video or article to export.")
+                        "Please select at least one video to export.")
         else:
             st.info(t("trendwatcher_no_results"))
 
@@ -884,14 +779,22 @@ class TrendwatcherPlugin(Plugin):
         VideoListWidget("trendwatcher", "vlc",
                         plugin_manager=self.plugin_manager).display()
 
+    def process_videos(self, config):
+        from widgets.video_metadata import ProcessVideosWidget
+        ProcessVideosWidget("trendwatcher", "pvw",
+                            plugin_manager=self.plugin_manager).display()
+
     def run(self, config):
         """Main plugin logic"""
-        tab1, tab2, tab3 = st.tabs(["Surveiller", "Keyword cluster", "Video List"])
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["Surveiller", "Process Videos", "Keyword cluster", "Video List"])
         with tab1:
             self.trend_watcher(config)
         with tab2:
-            self.keyword_cluster(config)
+            self.process_videos(config)
         with tab3:
+            self.keyword_cluster(config)
+        with tab4:
             self.video_list(config)
 
 

@@ -6,8 +6,8 @@ import os
 from datetime import datetime
 
 translations["en"].update({
-    "video_list_title": "Video List",
-    "no_file_error": "No valid CSV file found. Please check the directory.",
+    "video_list_title": "Video List (video_list.csv -> filtered_video_list.csv)",
+    "no_file_error": "(No valid CSV file found. Please check the directory.",
     "language_filter": "Filter by Language",
     "days_old_filter": "Maximum Age (Days)",
     "subscribers_filter": "Minimum Subscribers",
@@ -17,7 +17,7 @@ translations["en"].update({
 })
 
 translations["fr"].update({
-    "video_list_title": "Liste des vidéos",
+    "video_list_title": "Liste des vidéos (video_list.csv -> filtered_video_list.csv)",
     "no_file_error": "Aucun fichier CSV valide trouvé. Vérifiez le répertoire.",
     "language_filter": "Filtrer par langue",
     "days_old_filter": "Âge maximum (jours)",
@@ -34,7 +34,7 @@ class VideoListWidget(Widget):
 
     def display(self):
         st.title(t("video_list_title"))
-        work_directory = self.work_dir()
+        work_directory = self.plugin_manager.config["common"]["work_directory"]
 
         # Recherche des fichiers CSV commençant par "video_list" dans le répertoire de travail
         csv_files = [f for f in os.listdir(work_directory) if f.startswith(
@@ -45,7 +45,7 @@ class VideoListWidget(Widget):
             return
 
         # Colonnes attendues pour un CSV valide
-        required_columns = {'keyword', 'url', 'title', 'view_count', 'language',
+        required_columns = {'keyword', 'url', 'video_id', 'title', 'view_count', 'language',
                             'published_at', 'channel_id', 'channel_title',
                             'subscriber_count', 'comment_count', 'relevance_score'}
 
@@ -66,6 +66,10 @@ class VideoListWidget(Widget):
             return
 
         combined_df = pd.concat(dfs, ignore_index=True)
+
+        # Gérer les doublons basés sur video_id, en gardant la ligne avec le plus de vues
+        combined_df = combined_df.sort_values(
+            by='view_count', ascending=False).drop_duplicates(subset='video_id', keep='first')
 
         # Calculer l'ancienneté en jours avec type nullable integer
         current_date = datetime.now()
@@ -139,7 +143,7 @@ class VideoListWidget(Widget):
         )
 
         # Checkbox pour écraser ou renommer
-        overwrite = st.checkbox(t("overwrite_checkbox"), value=True,
+        overwrite = st.checkbox(t("overwrite_checkbox"),
                                 key=f"{self.prefix}_overwrite_checkbox")
 
         # Bouton pour exporter la liste filtrée
