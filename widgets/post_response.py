@@ -4,7 +4,8 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
-from plugins.automarket import AutomarketPlugin
+from lib.youtube_api import YoutubeAPI
+from lib.youtube_db import check_existing_response, save_response
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 translations["en"].update({
@@ -33,6 +34,36 @@ translations["fr"].update({
 class PostResponseWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
+        self.youtube_api = YoutubeAPI(self.plugin_manager.config)
+
+    def post_responses(self, selected_responses, campaign_timestamp: str):
+        """Poste les réponses et les sauvegarde dans la base."""
+        moderated_count = 0
+        for response in selected_responses:
+            video_id = response['target_video_id']
+            comment_id = response['comment_id']
+            if not check_existing_response(video_id, comment_id):
+                try:
+                    api_response = self.youtube_api.post_comment_reply(
+                        comment_id, response['response'])
+                    if api_response:
+                        response_id = api_response.get('id')
+                        moderation_status = api_response.get(
+                            'moderation_status', 'unknown')
+                        if moderation_status != 'published':  # Si différent de published, on compte comme modéré
+                            moderated_count += 1
+                        save_response(
+                            campaign_timestamp=campaign_timestamp,
+                            video_id=video_id,
+                            comment_id=comment_id,
+                            response_id=response_id,
+                            channel_id=response['channel_id'],
+                            keyword=response['keyword'],
+                            response_text=response['response'],
+                            moderation_status=moderation_status
+                        )
+                except Exception as e:
+                    print(f"Error posting response to {comment_id}: {str(e)}")
 
     def display(self):
         st.title(t("post_response_title"))
@@ -167,8 +198,6 @@ class PostResponseWidget(Widget):
         # Bouton pour publier les réponses sélectionnées
         if st.button(t("post_responses"), key=f"{self.prefix}_post_responses") and selected_rows is not None and not selected_rows.empty:
             with st.spinner(t("posting")):
-                automarket = self.plugin_manager.get_plugin('automarket')
                 campaign_id = datetime.now().isoformat()
-                automarket.post_responses(
-                    self.plugin_manager.config, selected_responses, campaign_id)
+                self.post_responses(selected_responses, campaign_id)
                 st.success(t("success"))

@@ -149,6 +149,7 @@ translations["fr"].update({
     "marketyoutube_target_source_csv": "Liste de vidéos (CSV)",
 })
 
+
 def parse_date(date_str):
     formats = [
         "%Y-%m-%d %H:%M:%S",  # Format in your CSV
@@ -160,7 +161,8 @@ def parse_date(date_str):
     for fmt in formats:
         try:
             parsed_date = datetime.strptime(date_str, fmt)
-            return parsed_date.strftime("%Y-%m-%dT%H:%M:%SZ")  # Always return ISO format
+            # Always return ISO format
+            return parsed_date.strftime("%Y-%m-%dT%H:%M:%SZ")
         except ValueError:
             continue
 
@@ -170,13 +172,16 @@ def parse_date(date_str):
     except Exception as e:
         raise ValueError(f"Could not parse date: {date_str}, error: {str(e)}")
 
+
 class MarketyoutubePlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
         initialize_database()
         self.youtube_api = YoutubeAPI(self.plugin_manager.config)
-        self.video_db_widget = VideoDatabaseWidget("video_db_display", "marketyoutube", plugin_manager)
-        self.response_db_widget = ResponseDBDisplayWidget("response_db_display", "marketyoutube", plugin_manager)
+        self.video_db_widget = VideoDatabaseWidget(
+            "video_db_display", "marketyoutube", plugin_manager)
+        self.response_db_widget = ResponseDBDisplayWidget(
+            "response_db_display", "marketyoutube", plugin_manager)
         self._initialize_session_state()
 
     def _initialize_session_state(self):
@@ -239,7 +244,8 @@ class MarketyoutubePlugin(Plugin):
         """
         context = f"Title: {title}\nDescription: {description}\nTranscript: {transcript}"
         llm_response = self.process_with_llm(
-            prompt.format(title=title, description=description,transcript=transcript),
+            prompt.format(title=title, description=description,
+                          transcript=transcript),
             "",
             context
         )
@@ -629,7 +635,8 @@ class MarketyoutubePlugin(Plugin):
 
             target_source = st.radio(
                 "Target Source",
-                options=["Search by Keywords", "Target Channels", t("marketyoutube_target_source_csv")],
+                options=["Search by Keywords", "Target Channels",
+                         t("marketyoutube_target_source_csv")],
                 index=0,
                 key="campaign_target_source"
             )
@@ -692,7 +699,8 @@ class MarketyoutubePlugin(Plugin):
                 )
                 keywords = f"trends_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             elif target_source == t("marketyoutube_target_source_csv"):
-                csv_file_path = os.path.join(config['common']['work_directory'], 'video_list.csv')
+                csv_file_path = os.path.join(
+                    config['common']['work_directory'], 'video_list.csv')
                 if os.path.exists(csv_file_path):
                     try:
                         df = pd.read_csv(csv_file_path)
@@ -701,7 +709,8 @@ class MarketyoutubePlugin(Plugin):
                         csv_videos = []
                         for _, row in df.iterrows():
                             try:
-                                video_id = row['URL'].split('v=')[-1].split('&')[0]
+                                video_id = row['URL'].split(
+                                    'v=')[-1].split('&')[0]
                                 # Ensure date is parsed correctly to ISO format
                                 published_at = parse_date(row['Date'])
 
@@ -715,10 +724,12 @@ class MarketyoutubePlugin(Plugin):
                                     'published_at': published_at,  # Already in ISO format
                                     'keyword': row['Keyword']
                                 }
-                                video_complete = self.youtube_api.get_video_infos(video) | video
+                                video_complete = self.youtube_api.get_video_infos(
+                                    video) | video
                                 csv_videos.append(video_complete)
                             except Exception as e:
-                                st.warning(f"Error processing video {row['URL']}: {str(e)}")
+                                st.warning(
+                                    f"Error processing video {row['URL']}: {str(e)}")
                                 continue
 
                         # Filtrer par mot-clé si nécessaire
@@ -730,7 +741,8 @@ class MarketyoutubePlugin(Plugin):
                             key="csv_keyword_filter"
                         )
 
-                        filtered_csv_videos = [v for v in csv_videos if v['keyword'] in selected_csv_keywords]
+                        filtered_csv_videos = [
+                            v for v in csv_videos if v['keyword'] in selected_csv_keywords]
                         keywords = unique_keywords[0]
 
                         # Afficher les vidéos disponibles avec leurs mots-clés
@@ -819,66 +831,6 @@ class MarketyoutubePlugin(Plugin):
         # Tab 1: Videos
         with tab1:
             self.video_db_widget.display()
-            """
-            st.header(t("marketyoutube_header_videos"))
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                if st.button(t("marketyoutube_sync")):
-                    with st.spinner(t("marketyoutube_syncing")):
-                        sync_videos(
-                            config['common']['channel_id'], self.youtube_api)
-                        st.success(t("marketyoutube_sync_complete"))
-            with col2:
-                if st.button(t("marketyoutube_sync_transcripts")):  # Nouveau bouton
-                    self.sync_transcripts(
-                        config['common']['channel_id'], self.youtube_api, config)
-            with col3:
-                if st.button("Reset Database Structure"):
-                    with st.spinner("Resetting database..."):
-                        reset_database()
-                        st.success(
-                            "Database structure reset successfully!")
-            with col4:
-                if st.button("Upgrade Database Structure"):
-                    try:
-                        auto_upgrade_database()
-                        st.info("Database upgraded")
-                    except Exception as e:
-                        print(f"Database error: {str(e)}")
-
-            filter_type = st.selectbox(
-                t("marketyoutube_filter_label"),
-                options=list(filter_options.keys()),
-                key="filter_type_videos"
-            )
-            keyword = st.text_input(
-                t("marketyoutube_keyword"),
-                key="keyword_videos"
-            )
-
-            all_keywords = set()
-            for video in get_videos():
-                all_keywords.update(video['keywords'])
-            all_keywords = sorted(list(all_keywords))
-            selected_keyword_filter = st.multiselect(
-                t("marketyoutube_filter_keywords"),
-                options=all_keywords,
-                key="keyword_filter_videos"
-            )
-
-            page = st.number_input(
-                t("marketyoutube_page"),
-                min_value=1,
-                value=1,
-                key="page_videos"
-            )
-            self.display_video_database(config,
-                                        filter_options[filter_type],
-                                        keyword,
-                                        page,
-                                        keyword_filter=selected_keyword_filter if selected_keyword_filter else None
-                                        )
-            """
 
         # Tab 2: Stats
         with tab2:

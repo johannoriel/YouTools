@@ -233,9 +233,14 @@ class PromoteyoutubePlugin(Plugin):
         PostResponseWidget("promoteyoutube", "prw",
                            plugin_manager=self.plugin_manager).display()
 
+    def display_responses(self, config):
+        from widgets.yt_responses import ResponseDBDisplayWidget
+        ResponseDBDisplayWidget("response_db_display",
+                                "marketyoutube", plugin_manager=self.plugin_manager).display()
+
     def run(self, config):
-        tab1, tab2, tab3, tab4 = st.tabs(
-            [t("promoteyoutube_tab"), "Get Comments", "Generate Responses", "Post Responses"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
+            [t("promoteyoutube_tab"), "Get Comments", "Generate Responses", "Post Responses", "Responses (DB)"])
         with tab1:
             from widgets.recentvideos import RecentVideosWidget
             widget = RecentVideosWidget(
@@ -248,3 +253,5 @@ class PromoteyoutubePlugin(Plugin):
             self.generate_responses(config)
         with tab4:
             self.post_responses(config)
+        with tab5:
+            self.display_responses(config)

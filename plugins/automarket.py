@@ -8,6 +8,7 @@ from datetime import datetime
 import pytz
 from langdetect import detect
 from widgets.yt_responses import ResponseDBDisplayWidget
+from widgets.post_response import PostResponseWidget
 
 # Ajout des traductions spécifiques au plugin Automarket
 translations["en"].update({
@@ -423,32 +424,9 @@ class AutomarketPlugin(Plugin):
 
     def post_responses(self, config, selected_responses, campaign_timestamp: str):
         """Poste les réponses et les sauvegarde dans la base."""
-        moderated_count = 0
-        for response in selected_responses:
-            video_id = response['target_video_id']
-            comment_id = response['comment_id']
-            if not check_existing_response(video_id, comment_id):
-                try:
-                    api_response = self.youtube_api.post_comment_reply(
-                        comment_id, response['response'])
-                    if api_response:
-                        response_id = api_response.get('id')
-                        moderation_status = api_response.get(
-                            'moderation_status', 'unknown')
-                        if moderation_status != 'published':  # Si différent de published, on compte comme modéré
-                            moderated_count += 1
-                        save_response(
-                            campaign_timestamp=campaign_timestamp,
-                            video_id=video_id,
-                            comment_id=comment_id,
-                            response_id=response_id,
-                            channel_id=response['channel_id'],
-                            keyword=response['keyword'],
-                            response_text=response['response'],
-                            moderation_status=moderation_status
-                        )
-                except Exception as e:
-                    print(f"Error posting response to {comment_id}: {str(e)}")
+        post_response = PostResponseWidget("promoteyoutube", "prw",
+                           plugin_manager=self.plugin_manager)
+        post_response.post_responses(selected_responses, campaign_timestamp)
 
         # Calcul des statistiques
         total_videos = len(set(r['target_video_id']
