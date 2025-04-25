@@ -48,7 +48,7 @@ class GenerateResponseWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
 
-    def generate_responses(self, config, selected_comments, transcript, url, keywords):
+    def generate_responses(self, config, selected_comments, transcript, url, keyword):
         responses = []
         total_comments = len(selected_comments)
         progress_bar = st.progress(0)
@@ -77,7 +77,7 @@ class GenerateResponseWidget(Widget):
                 'response': clean_response,
                 'target_video_id': comment['video_id'],
                 'channel_id': comment['channel_id'],
-                'keyword': keywords,
+                'keyword': keyword,
                 'comment_text': comment['comment_text'],
                 'author': comment['author'],
                 'video_title': comment['video_title'],
@@ -113,7 +113,7 @@ class GenerateResponseWidget(Widget):
                     'author': resp['author'],
                     'video_title': resp['video_title'],
                     'channel_title': resp['channel_title'],
-                    'keywords': resp['keyword']
+                    'keyword': resp['keyword']
                 }
                 for resp in responses
             ]
@@ -205,9 +205,9 @@ class GenerateResponseWidget(Widget):
             with st.spinner(t("generating")):
                 selected_comments = [combined_df.iloc[i].to_dict(
                 ) for i in selected_comment_rows['selection']['rows']]
-                keywords = selected_comments[0].get('keywords', '')
+                keyword = selected_comments[0].get('keyword', '')
                 responses = self.generate_responses(
-                    self.plugin_manager.config, selected_comments, transcript, url, keywords)
+                    self.plugin_manager.config, selected_comments, transcript, url, keyword)
 
                 # Sauvegarde dans la base de données
                 campaign_id = datetime.now().isoformat()
@@ -239,14 +239,14 @@ class GenerateResponseWidget(Widget):
                     'comment_id': resp['comment_id'],
                     'video_id': resp['target_video_id'],
                     'channel_id': resp['channel_id'],
-                    'keywords': resp['keyword']
+                    'keyword': resp['keyword']
                 }
                 for resp in st.session_state['generated_responses']
             ])
 
             # Réorganiser les colonnes
             column_order = ['comment_text', 'response_text', 'author', 'video_title',
-                            'channel_title', 'comment_id', 'video_id', 'channel_id', 'keywords']
+                            'channel_title', 'comment_id', 'video_id', 'channel_id', 'keyword']
             responses_df = responses_df[column_order].reset_index(drop=True)
 
             # Configuration de la grille AgGrid
@@ -268,7 +268,7 @@ class GenerateResponseWidget(Widget):
             gb.configure_column("video_id", headerName="Video ID", hide=True)
             gb.configure_column(
                 "channel_id", headerName="Channel ID", hide=True)
-            gb.configure_column("keywords", headerName="Keywords", hide=True)
+            gb.configure_column("keyword", headerName="keyword", hide=True)
             gb.configure_selection(
                 selection_mode="multiple", use_checkbox=True, header_checkbox=True)
             gb.configure_default_column(editable=False, resizable=True)
@@ -294,7 +294,7 @@ class GenerateResponseWidget(Widget):
                     'response': row['response_text'],
                     'target_video_id': row['video_id'],
                     'channel_id': row['channel_id'],
-                    'keyword': row['keywords'],
+                    'keyword': row['keyword'],
                     'comment_text': row['comment_text'],
                     'author': row['author'],
                     'video_title': row['video_title'],
