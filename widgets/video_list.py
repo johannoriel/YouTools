@@ -7,7 +7,7 @@ from datetime import datetime
 
 translations["en"].update({
     "video_list_title": "Video List (video_list.csv -> filtered_video_list.csv)",
-    "no_file_error": "(No valid CSV file found. Please check the directory.",
+    "no_file_error": "No valid CSV file found. Please check the directory.",
     "language_filter": "Filter by Language",
     "days_old_filter": "Maximum Age (Days)",
     "subscribers_filter": "Minimum Subscribers",
@@ -84,13 +84,12 @@ class VideoListWidget(Widget):
                 x) else ''
         )
 
-        # Supprimer les colonnes inutiles
-        combined_df = combined_df.drop(
-            columns=['video_id', 'title_with_url', 'published_at', 'channel_id'], errors='ignore')
+        # Créer un DataFrame pour l'affichage avec toutes les colonnes nécessaires
+        display_df = combined_df.copy()
 
         # Filtres
         st.subheader("Filtres")
-        languages = combined_df['language'].unique()
+        languages = display_df['language'].unique()
         selected_languages = st.multiselect(
             t("language_filter"), options=languages, default=languages, key=f"{self.prefix}_language_filter")
         max_days_old = st.number_input(
@@ -99,10 +98,10 @@ class VideoListWidget(Widget):
             t("subscribers_filter"), min_value=0, value=1000, step=100, key=f"{self.prefix}_subscribers_filter")
 
         # Appliquer les filtres
-        filtered_df = combined_df[
-            (combined_df['language'].isin(selected_languages)) &
-            (combined_df['days_old'].apply(lambda x: x <= max_days_old if pd.notnull(x) else True)) &
-            (combined_df['subscriber_count'].apply(
+        filtered_df = display_df[
+            (display_df['language'].isin(selected_languages)) &
+            (display_df['days_old'].apply(lambda x: x <= max_days_old if pd.notnull(x) else True)) &
+            (display_df['subscriber_count'].apply(
                 lambda x: x >= min_subscribers if pd.notnull(x) else True))
         ]
 
@@ -115,10 +114,12 @@ class VideoListWidget(Widget):
                 display_text="Visit",
                 width="small"
             ),
+            "video_id": st.column_config.TextColumn("Video ID", width="medium"),
             "title": st.column_config.TextColumn("Title", width="large"),
             "view_count": st.column_config.NumberColumn("Views", width="small"),
             "language": st.column_config.TextColumn("Language", width="small"),
-            "days_old": st.column_config.NumberColumn("Days Old", width="small"),
+            "published_at": st.column_config.TextColumn("Published At", width="medium"),
+            "channel_id": st.column_config.TextColumn("Channel ID", width="medium"),
             "channel_title": st.column_config.TextColumn("Channel", width="medium"),
             "channel_url": st.column_config.LinkColumn(
                 "Channel URL",
@@ -128,7 +129,8 @@ class VideoListWidget(Widget):
             ),
             "subscriber_count": st.column_config.NumberColumn("Subscribers", width="small"),
             "comment_count": st.column_config.NumberColumn("Comments", width="small"),
-            "relevance_score": st.column_config.NumberColumn("Relevance", width="small")
+            "relevance_score": st.column_config.NumberColumn("Relevance", width="small"),
+            "days_old": st.column_config.NumberColumn("Days Old", width="small")
         }
 
         # Afficher le DataFrame avec sélection multi-lignes
