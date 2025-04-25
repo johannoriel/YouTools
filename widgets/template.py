@@ -28,4 +28,22 @@ class TemplateWidget(Widget):
     def display(self):
         st.title(t("template_string1"))
         work_directory = self.work_dir()
+        result = self.process_llm("My prompt : ask something to an llm")
         st.input(t("template_string2"), key=f"{self.prefix}_input")
+
+
+""" Widget integration in plugin example"""
+
+
+class ExamplePlugin(Plugin):
+    def templatewidget_process(self, config):
+        from widgets.template_widget import TemplateWidget
+        TemplateWidget("pluginname", "widgetprefix",
+                       plugin_manager=self.plugin_manager).display()
+
+    def run(self, config):
+        tab1, tab2 = st.tabs(["tab1", "idget tab"])
+        with tab1:
+            pass
+        with tab2:
+            self.templatewidget_process(config)
