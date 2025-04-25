@@ -45,6 +45,12 @@ translations["en"].update({
     "llm_timeout_label": "Timeout (seconds)",
     "llm_sys_prompt": "System prompt for LLM",
     "llm_default_sys_prompt": "You are an faithful AI assistant that execute instructions faithfully without adding comments or explanations.",
+    "llm_personas_tab": "Personas",
+    "llm_personas_header": "Manage Personas",
+    "llm_persona_name_label": "Persona Name",
+    "llm_persona_prompt_label": "Persona System Prompt",
+    "llm_add_persona": "Add Persona",
+    "llm_select_persona": "Select Persona",
 })
 
 translations["fr"].update({
@@ -82,6 +88,12 @@ translations["fr"].update({
     "llm_timeout_label": "Timeout (secondes)",
     "llm_sys_prompt": "Prompt système pour le LLM",
     "llm_default_sys_prompt": "Tu es un assistant IA qui exécute fidèlement les tâches demandées sans rajouter de commentaires ou explications.",
+    "llm_personas_tab": "Personas",
+    "llm_personas_header": "Gérer les Personas",
+    "llm_persona_name_label": "Nom du Persona",
+    "llm_persona_prompt_label": "Prompt Système du Persona",
+    "llm_add_persona": "Ajouter un Persona",
+    "llm_select_persona": "Sélectionner un Persona",
 })
 
 
@@ -96,6 +108,8 @@ class LlmPlugin(Plugin):
         if isinstance(models, str):
             models = ast.literal_eval(models)
         model_list = [(m["name"], m["name"]) for m in models]
+        personas = self.get_config("personas") or []
+        persona_options = [("None", "None")] + [(p["name"], p["name"]) for p in personas]
         return {
             "api_keys": {
                 "type": "json",
@@ -109,7 +123,8 @@ class LlmPlugin(Plugin):
                 "type": "json",
                 "label": t("llm_apis_header"),
                 "default": [
-                    {"name": "groq", "url": "https://api.groq.com", "api_key": "groq_key"},
+                    {"name": "groq", "url": "https://api.groq.com",
+                        "api_key": "groq_key"},
                     {"name": "xai", "url": "https://api.x.ai", "api_key": "xai_key"},
                     {"name": "together", "url": "https://api.together.ai", "api_key": ""},
                     {"name": "deepseek", "url": "https://api.deepseek.com", "api_key": ""},
@@ -133,6 +148,21 @@ class LlmPlugin(Plugin):
                 "label": t("llm_sys_prompt"),
                 "default": t("llm_default_sys_prompt")
             },
+            "personas": {
+                "type": "json",
+                "label": t("llm_personas_header"),
+                "default": [
+                    {"name": "Default", "prompt": t("llm_default_sys_prompt")},
+                    {"name": "Youtuber", "prompt": "You are a charismatic YouTuber with a channel focused on tech reviews. Your opinions are bold, you love engaging your audience with humor, and your channel is called 'TechBit'."},
+                    {"name": "Professional", "prompt": "You are a professional consultant providing clear, concise, and formal advice to corporate clients."}
+                ]
+            },
+            "current_persona": {
+                "type": "select",
+                "label": t("llm_select_persona"),
+                "options": persona_options,
+                "default": "Default"
+            }
         }
 
     def get_tabs(self):
@@ -141,13 +171,16 @@ class LlmPlugin(Plugin):
         return [
             {"name": t("llm_keys_tab"), "plugin": "llmplugin", "tab": "keys"},
             {"name": t("llm_apis_tab"), "plugin": "llmplugin", "tab": "apis"},
-            {"name": t("llm_models_tab"), "plugin": "llmplugin", "tab": "models"},
+            {"name": t("llm_models_tab"),
+             "plugin": "llmplugin", "tab": "models"},
+            {"name": t("llm_personas_tab"),
+             "plugin": "llmplugin", "tab": "personas"},
             {"name": t("llm_chat_tab"), "plugin": "llmplugin", "tab": "chat"}
         ]
 
     def run(self, config):
-        tab1, tab2, tab3, tab4 = st.tabs(
-            [t("llm_keys_tab"), t("llm_apis_tab"), t("llm_models_tab"), t("llm_chat_tab")])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
+            [t("llm_keys_tab"), t("llm_apis_tab"), t("llm_models_tab"), t("llm_personas_tab"), t("llm_chat_tab")])
         with tab1:
             self.keys_tab(config)
         with tab2:
@@ -155,6 +188,8 @@ class LlmPlugin(Plugin):
         with tab3:
             self.models_tab(config)
         with tab4:
+            self.personas_tab(config)
+        with tab5:
             self.chat_tab(config)
 
     def get_api_keys(self):
@@ -188,9 +223,11 @@ class LlmPlugin(Plugin):
             with st.expander(key.get("name", f"Key {i}")):
                 col1, col2 = st.columns(2)
                 with col1:
-                    name = st.text_input(t("llm_key_name_label"), value=key.get("name", ""), key=f"key_name_{i}")
+                    name = st.text_input(t("llm_key_name_label"), value=key.get(
+                        "name", ""), key=f"key_name_{i}")
                 with col2:
-                    value = st.text_input(t("llm_key_value_label"), value=key.get("value", ""), key=f"key_value_{i}")
+                    value = st.text_input(t("llm_key_value_label"), value=key.get(
+                        "value", ""), key=f"key_value_{i}")
                 if st.button("Remove", key=f"remove_key_{i}"):
                     del st.session_state.api_keys[i]
                     st.rerun()
@@ -216,25 +253,31 @@ class LlmPlugin(Plugin):
             with st.expander(api.get("name", f"API {i}")):
                 col1, col2 = st.columns(2)
                 with col1:
-                    name = st.text_input(t("llm_api_name_label"), value=api.get("name", ""), key=f"api_name_{i}")
-                    url = st.text_input(t("llm_url_label"), value=api.get("url", ""), key=f"api_url_{i}")
+                    name = st.text_input(t("llm_api_name_label"), value=api.get(
+                        "name", ""), key=f"api_name_{i}")
+                    url = st.text_input(t("llm_url_label"), value=api.get(
+                        "url", ""), key=f"api_url_{i}")
                 with col2:
                     api_key = st.selectbox(t("llm_api_key_label"), options=key_options,
-                                           index=key_options.index(api.get("api_key", "")) if api.get("api_key", "") in key_options else len(key_options)-1,
+                                           index=key_options.index(api.get("api_key", "")) if api.get(
+                                               "api_key", "") in key_options else len(key_options)-1,
                                            key=f"api_key_{i}")
                     if api_key == "":
-                        api_key = st.text_input("Manual API Key", value="", key=f"manual_key_{i}")
+                        api_key = st.text_input(
+                            "Manual API Key", value="", key=f"manual_key_{i}")
                     # Ajout du checkbox pour no_v1
                     no_v1 = st.checkbox(t("llm_no_v1_label"),
-                                       value=api.get("no_v1", False),
-                                       key=f"no_v1_{i}")
+                                        value=api.get("no_v1", False),
+                                        key=f"no_v1_{i}")
                 if st.button("Remove", key=f"remove_api_{i}"):
                     del st.session_state.apis[i]
                     st.rerun()
-                st.session_state.apis[i] = {"name": name, "url": url, "api_key": api_key, "no_v1": no_v1}
+                st.session_state.apis[i] = {
+                    "name": name, "url": url, "api_key": api_key, "no_v1": no_v1}
 
         if st.button(t("llm_add_api")):
-            st.session_state.apis.append({"name": "", "url": "", "api_key": "", "no_v1": False})
+            st.session_state.apis.append(
+                {"name": "", "url": "", "api_key": "", "no_v1": False})
             st.rerun()
 
         if st.button("Save APIs"):
@@ -249,7 +292,8 @@ class LlmPlugin(Plugin):
             if not url:
                 return models
             headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-            response = requests.get(f"{url}{endpoint}", headers=headers, timeout=5)
+            response = requests.get(
+                f"{url}{endpoint}", headers=headers, timeout=5)
             response.raise_for_status()
             if response.status_code == 200:
                 data = response.json()
@@ -259,26 +303,39 @@ class LlmPlugin(Plugin):
                     return [model["name"] for model in data["models"]]
                 elif endpoint == "/v1/models" and "data" in data and data["data"]:
                     return [model["id"] for model in data["data"] if model.get("object") == "model"]
-                elif endpoint == "/v1/models" :
+                elif endpoint == "/v1/models":
                     return [model["id"] for model in data if model.get("object") == "model"]
             return models
         except Exception as e:
-            st.warning(f"Could not fetch models from {url}{endpoint}: {str(e)}")
+            st.warning(
+                f"Could not fetch models from {url}{endpoint}: {str(e)}")
             return models
 
     def get_sidebar_config_ui(self, expander, config: Dict[str, Any]) -> Dict[str, Any]:
         self.get_models()
+        self.get_personas()
         available_models = [m["name"] for m in st.session_state.models]
-        default_model = config[self.name].get("current_llm_model", "Unfound" if available_models else "Unfound")
+        available_personas = ["None"] + [p["name"] for p in st.session_state.personas]
+        default_model = config[self.name].get("current_llm_model", available_models[0] if available_models else "Unfound")
+        default_persona = config[self.name].get("current_persona", "None")
+
         selected_model = expander.selectbox(
             t("llm_select_model"),
             options=available_models,
             index=available_models.index(default_model) if default_model in available_models else 0,
             key="llm_api_model"
         )
+        selected_persona = expander.selectbox(
+            t("llm_select_persona"),
+            options=available_personas,
+            index=available_personas.index(default_persona) if default_persona in available_personas else 0,
+            key="llm_persona"
+        )
+
         config[self.name]["current_llm_model"] = selected_model
+        config[self.name]["current_persona"] = selected_persona
         self.plugin_manager.save_config(config)
-        return {"current_llm_model": selected_model}
+        return {"current_llm_model": selected_model, "current_persona": selected_persona}
 
     def models_tab(self, config):
         st.header(t("llm_models_header"))
@@ -291,15 +348,18 @@ class LlmPlugin(Plugin):
         if 'available_models_cache' not in st.session_state:
             st.session_state.available_models_cache = {}
 
-        api_options = [f"{api['name']} ({api['url']})" for api in st.session_state.apis]
+        api_options = [
+            f"{api['name']} ({api['url']})" for api in st.session_state.apis]
         selected_api = st.selectbox(t("llm_select_api"), api_options)
-        api = next(a for a in st.session_state.apis if f"{a['name']} ({a['url']})" == selected_api)
+        api = next(
+            a for a in st.session_state.apis if f"{a['name']} ({a['url']})" == selected_api)
         url, api_key = api["url"], api["api_key"]
 
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             if st.button(t("llm_get_models") + "/api/tags"):
-                st.session_state.available_models_cache[url] = self.get_available_models(url, api_key, "/api/tags")
+                st.session_state.available_models_cache[url] = self.get_available_models(
+                    url, api_key, "/api/tags")
         with col2:
             if st.button(t("llm_get_models") + "/v1/models"):
                 st.session_state.available_models_cache[url] = self.get_available_models(url, api_key, "/v1/models")
@@ -314,7 +374,7 @@ class LlmPlugin(Plugin):
             st.session_state.llm_api_model = None
         available_models = st.session_state.available_models_cache.get(url, [""])
         selected_model = st.selectbox(t("llm_model_label"), available_models,
-            index=available_models.index(st.session_state.get("llm_api_model", available_models[0] if available_models else None)) if st.session_state.get("llm_api_model") in available_models else 0)
+                                      index=available_models.index(st.session_state.get("llm_api_model", available_models[0] if available_models else None)) if st.session_state.get("llm_api_model") in available_models else 0)
         default_name = f"{api['name']}-{selected_model}" if selected_model else ""
         model_name = st.text_input(t("llm_model_name_label"), value=default_name)
 
@@ -347,16 +407,25 @@ class LlmPlugin(Plugin):
 
         for i, model in enumerate(st.session_state.models):
             with st.expander(model.get("name", f"Model {i}")):
-                name = st.text_input(t("llm_model_name_label"), value=model.get("name", ""), key=f"model_name_{i}")
-                url = st.text_input(t("llm_url_label"), value=model.get("url", ""), key=f"model_url_{i}")
-                model_name = st.text_input(t("llm_model_label"), value=model.get("model", ""), key=f"model_{i}")
-                api_key = st.text_input(t("llm_api_key_label"), value=model.get("api_key", ""), key=f"model_key_{i}")
-                temp = st.number_input(t("llm_temp_label"), min_value=0.0, max_value=2.0, value=model.get("temperature", 0.7), step=0.1, key=f"temp_{i}")
-                max_tokens = st.number_input(t("llm_max_tokens_label"), min_value=1, value=model.get("max_tokens", 4096), step=100, key=f"max_tokens_{i}")
-                delay = st.number_input(t("llm_delay_label"), min_value=0.0, value=model.get("delay", 0.0), step=0.1, key=f"delay_{i}")
-                max_retries = st.number_input(t("llm_max_retries_label"), min_value=1, value=model.get("max_retries", 3), step=1, key=f"max_retries_{i}")
+                name = st.text_input(t("llm_model_name_label"), value=model.get(
+                    "name", ""), key=f"model_name_{i}")
+                url = st.text_input(t("llm_url_label"), value=model.get(
+                    "url", ""), key=f"model_url_{i}")
+                model_name = st.text_input(
+                    t("llm_model_label"), value=model.get("model", ""), key=f"model_{i}")
+                api_key = st.text_input(t("llm_api_key_label"), value=model.get(
+                    "api_key", ""), key=f"model_key_{i}")
+                temp = st.number_input(t("llm_temp_label"), min_value=0.0, max_value=2.0, value=model.get(
+                    "temperature", 0.7), step=0.1, key=f"temp_{i}")
+                max_tokens = st.number_input(t("llm_max_tokens_label"), min_value=1, value=model.get(
+                    "max_tokens", 4096), step=100, key=f"max_tokens_{i}")
+                delay = st.number_input(t("llm_delay_label"), min_value=0.0, value=model.get(
+                    "delay", 0.0), step=0.1, key=f"delay_{i}")
+                max_retries = st.number_input(t("llm_max_retries_label"), min_value=1, value=model.get(
+                    "max_retries", 3), step=1, key=f"max_retries_{i}")
                 # Ajout du champ timeout pour l'édition
-                timeout = st.number_input("Timeout (seconds)", min_value=1, value=model.get("timeout", 3), step=1, key=f"timeout_{i}")
+                timeout = st.number_input("Timeout (seconds)", min_value=1, value=model.get(
+                    "timeout", 3), step=1, key=f"timeout_{i}")
                 if st.button("Remove", key=f"remove_model_{i}"):
                     del st.session_state.models[i]
                     st.rerun()
@@ -371,35 +440,51 @@ class LlmPlugin(Plugin):
             self.plugin_manager.save_config(config)
             st.success("Models saved successfully!")
 
-    def call_llm(self, url, api_key, model, prompt, sysprompt=None, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False, timeout=3):
-        """Appelle l'API LLM avec gestion des retries et du délai."""
+    def call_llm(self, url, api_key, model, prompts, sysprompt=None, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False, timeout=3):
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         headers["Content-Type"] = "application/json"
-        if sysprompt is None:
-            sysprompt = sel.plugin_manager.config['llm']['llm_sys_prompt']
+
+        # Récupérer le sysprompt par défaut si aucun n'est fourni
+        sysprompt = sysprompt or self.plugin_manager.config['llm']['llm_sys_prompt']
+
+        # Créer la liste des messages
+        messages = [{"role": "system", "content": sysprompt}]
+
+        # Ajouter un message système pour le persona si sélectionné
+        current_persona_name = self.plugin_manager.config.get(self.name, {}).get("current_persona", "None")
+        if current_persona_name != "None":
+            personas = self.get_personas()
+            persona = next((p for p in personas if p["name"] == current_persona_name), None)
+            if persona:
+                messages.append({"role": "system", "content": persona["prompt"]})
+
+        # Gérer prompts comme chaîne ou liste
+        if isinstance(prompts, str):
+            messages.append({"role": "user", "content": prompts})
+        elif isinstance(prompts, list):
+            for prompt in prompts:
+                messages.append({"role": "user", "content": prompt})
+        else:
+            raise ValueError("Prompts must be a string or a list of strings")
+
         payload = {
             "model": model,
-            "messages": [{"role": "system", "content": sysprompt}, {"role": "user", "content": prompt}, ],
+            "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
 
-        # Construction de l'URL en fonction de no_v1
         endpoint = "/chat/completions" if no_v1 else "/v1/chat/completions"
         full_url = f"{url}{endpoint}"
 
         attempts = 0
         while attempts < max_retries:
             try:
-                #print(f"Calling LLM...{model} at {full_url} with {api_key} wait {delay}s")
                 response = requests.post(full_url, headers=headers, data=json.dumps(payload), timeout=timeout)
-                #print(response)
                 response.raise_for_status()
                 data = response.json()
-                #print(data)
                 time.sleep(delay)
                 result = data["choices"][0]["message"]["content"] if "choices" in data else "Error: Unexpected response format"
-                #print(result)
                 return result
             except Exception as e:
                 st.warning(f"Failed to call {model} at {full_url} with {api_key} wait {delay}s timeout {timeout}s : {str(e)}")
@@ -476,11 +561,13 @@ class LlmPlugin(Plugin):
         api_key = next((k["value"] for k in st.session_state.api_keys if k["name"] == model["api_key"]), "")
         while attempt <= number_repeat:
             try:
+                # Envoyer contexte et prompt comme une liste
+                prompts = [context, prompt] if context else [prompt]
                 return self.call_llm(
                     url=model["url"],
                     api_key=api_key,
                     model=model["model"],
-                    prompt=f"{context}\n\n{prompt}",
+                    prompts=prompts,
                     sysprompt=sysprompt,
                     temperature=model["temperature"],
                     max_tokens=model["max_tokens"],
@@ -512,21 +599,24 @@ class LlmPlugin(Plugin):
             st.write("No models configured yet or no current model selected.")
             return
 
-        model = next((m for m in st.session_state.models if m["name"] == current_model_name), None)
+        model = next(
+            (m for m in st.session_state.models if m["name"] == current_model_name), None)
         if not model:
             st.write("Selected model not found in the list.")
             return
 
         # Récupérer le paramètre no_v1 de l'API associée
-        api = next((a for a in st.session_state.apis if a["url"] == model["url"]), None)
-        api_key = next((k["value"] for k in st.session_state.api_keys if k["name"] == model["api_key"]), "")
+        api = next(
+            (a for a in st.session_state.apis if a["url"] == model["url"]), None)
+        api_key = next(
+            (k["value"] for k in st.session_state.api_keys if k["name"] == model["api_key"]), "")
         st.write(f"Api key : {api_key}")
         no_v1 = api.get("no_v1", False) if api else False
 
         st.write(f"Current Model: {model['name']}")
         prompt = st.text_area(t("llm_prompt_label"), height=100)
 
-        col1, col2 = st.columns([1,4])
+        col1, col2 = st.columns([1, 4])
         with col1:
             if st.button(t("llm_send_prompt")) and prompt:
                 with st.spinner("Generating response..."):
@@ -534,7 +624,7 @@ class LlmPlugin(Plugin):
                         url=model["url"],
                         api_key=api_key,
                         model=model["model"],
-                        prompt=prompt,
+                        prompts=prompt,
                         temperature=model["temperature"],
                         max_tokens=model["max_tokens"],
                         delay=model["delay"],
@@ -567,7 +657,7 @@ class LlmPlugin(Plugin):
 
     def free_ollama(self):
         try:
-            ollama_model = "qwen2:1.5b" #smallest
+            ollama_model = "qwen2:1.5b"  # smallest
             st.info("Freeing ollama memory "+ollama_model)
             response = requests.post(
                 "http://localhost:11434/api/generate",
@@ -579,6 +669,49 @@ class LlmPlugin(Plugin):
             )
         except Exception as e:
             raise e
+
+    def get_personas(self):
+        if 'personas' not in st.session_state:
+            if not 'personas' in self.plugin_manager.config[self.name] :
+                st.session_state.personas = []
+                return []
+            personas = self.get_config("personas")
+            if isinstance(personas, str):
+                personas = ast.literal_eval(personas)
+            st.session_state.personas = personas
+        return st.session_state.personas
+
+    def personas_tab(self, config):
+        st.header(t("llm_personas_header"))
+        if 'personas' not in st.session_state:
+            personas = self.get_config("personas")
+            if isinstance(personas, str):
+                personas = ast.literal_eval(personas)
+            st.session_state.personas = personas
+
+        for i, persona in enumerate(st.session_state.personas):
+            with st.expander(persona.get("name", f"Persona {i}")):
+                col1, col2 = st.columns(2)
+                with col1:
+                    name = st.text_input(t("llm_persona_name_label"), value=persona.get(
+                        "name", ""), key=f"persona_name_{i}")
+                with col2:
+                    prompt = st.text_area(t("llm_persona_prompt_label"), value=persona.get(
+                        "prompt", ""), key=f"persona_prompt_{i}")
+                if st.button("Remove", key=f"remove_persona_{i}"):
+                    del st.session_state.personas[i]
+                    st.rerun()
+                st.session_state.personas[i] = {"name": name, "prompt": prompt}
+
+        if st.button(t("llm_add_persona")):
+            st.session_state.personas.append({"name": "", "prompt": ""})
+            st.rerun()
+
+        if st.button("Save Personas"):
+            config[self.name]["personas"] = st.session_state.personas
+            self.plugin_manager.save_config(config)
+            st.success("Personas saved successfully!")
+
 
 if __name__ == "__main__":
     st.write("LLM Plugin standalone test")
