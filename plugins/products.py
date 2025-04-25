@@ -16,6 +16,7 @@ translations["en"].update({
     "products_title_label": "Product Title",
     "products_url_label": "Product URL",
     "products_keywords_label": "Keywords (comma-separated)",
+    "products_type_label": "Product Type",
     "products_description_label": "Description (Markdown)",
     "products_content_label": "Full Content",
     "products_add_button": "Add Product",
@@ -38,6 +39,7 @@ translations["fr"].update({
     "products_title_label": "Titre du produit",
     "products_url_label": "URL du produit",
     "products_keywords_label": "Mots-clés (séparés par des virgules)",
+    "products_type_label": "Type de produit",
     "products_description_label": "Description (Markdown)",
     "products_content_label": "Contenu complet",
     "products_add_button": "Ajouter le produit",
@@ -93,6 +95,7 @@ class ProductsPlugin(Plugin):
         gb.configure_column("title", width=200)
         gb.configure_column("url", width=200)
         gb.configure_column("keywords", width=200)
+        gb.configure_column("type", width=150)
         gb.configure_selection(selection_mode="multiple", use_checkbox=True)
         grid_options = gb.build()
 
@@ -184,6 +187,7 @@ class ProductsPlugin(Plugin):
                                 form["title"],
                                 form["url"],
                                 form["keywords"],
+                                form["type"],
                                 form["description"],
                                 form["content"]
                             )
@@ -206,6 +210,7 @@ class ProductsPlugin(Plugin):
                         form["title"],
                         form["url"],
                         form["keywords"],
+                        form["type"],
                         form["description"],
                         form["content"]
                     )

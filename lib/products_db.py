@@ -32,6 +32,7 @@ class ProductsDB:
                         title TEXT NOT NULL,
                         url TEXT,
                         keywords TEXT,
+                        type TEXT,
                         description TEXT,
                         content TEXT
                     )
@@ -39,40 +40,46 @@ class ProductsDB:
                 cursor.execute("INSERT INTO db_version (version) VALUES (1)")
                 conn.commit()
 
-    def add_product(self, title: str, url: str, keywords: str, description: str, content: str) -> int:
+            # Add type column if not exists
+            cursor.execute("PRAGMA table_info(products)")
+            columns = [info[1] for info in cursor.fetchall()]
+            if 'type' not in columns:
+                cursor.execute("ALTER TABLE products ADD COLUMN type TEXT")
+                conn.commit()
+
+    def add_product(self, title: str, url: str, keywords: str, type: str, description: str, content: str) -> int:
         """Add a new product to the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO products (title, url, keywords, description, content)
-                VALUES (?, ?, ?, ?, ?)
-            """, (title, url, keywords, description, content))
+                INSERT INTO products (title, url, keywords, type, description, content)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (title, url, keywords, type, description, content))
             conn.commit()
             return cursor.lastrowid
 
-    # lib/products_db.py
-
     def update_product(self, product_id: int, title: str, url: str, keywords: str,
-                        description: str, content: str):
+                      type: str, description: str, content: str):
         """Update an existing product."""
+        product_id = int(product_id)
         print(f"Debug - Updating product ID: {product_id}")
-        print(f"Debug - Values: title={title}, url={url}, keywords={keywords}, description={description}, content={content}")
+        print(f"Debug - Values: title={title}, url={url}, keywords={keywords}, type={type}, description={description}, content={content}")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM products")
             all_ids = [row[0] for row in cursor.fetchall()]
             print(f"Debug - All product IDs in database: {all_ids}")
             # Vérifier si l'ID existe
-            cursor.execute("SELECT id FROM products WHERE id = ?", (int(product_id),))
+            cursor.execute("SELECT id FROM products WHERE id = ?", (product_id,))
             if not cursor.fetchone():
                 print(f"Debug - Product ID {product_id} not found in database")
                 raise ValueError(f"Product with ID {product_id} does not exist")
             # Exécuter la mise à jour
             cursor.execute("""
                 UPDATE products
-                SET title = ?, url = ?, keywords = ?, description = ?, content = ?
+                SET title = ?, url = ?, keywords = ?, type = ?, description = ?, content = ?
                 WHERE id = ?
-            """, (title, url, keywords, description, content, int(product_id)))
+            """, (title, url, keywords, type, description, content, product_id))
             print(f"Debug - Rows affected: {cursor.rowcount}")
             conn.commit()
             if cursor.rowcount == 0:
@@ -82,14 +89,14 @@ class ProductsDB:
         """Delete a product from the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
+            cursor.execute("DELETE FROM products WHERE id = ?", (int(product_id),))
             conn.commit()
 
     def get_product(self, product_id: int) -> Dict[str, Any]:
         """Get a single product by ID."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
+            cursor.execute("SELECT * FROM products WHERE id = ?", (int(product_id),))
             row = cursor.fetchone()
             if row:
                 return {
@@ -97,8 +104,9 @@ class ProductsDB:
                     "title": row[1],
                     "url": row[2],
                     "keywords": row[3],
-                    "description": row[4],
-                    "content": row[5]
+                    "type": row[4],
+                    "description": row[5],
+                    "content": row[6]
                 }
             return None
 
@@ -113,8 +121,9 @@ class ProductsDB:
                 "title": row[1],
                 "url": row[2],
                 "keywords": row[3],
-                "description": row[4],
-                "content": row[5]
+                "type": row[4],
+                "description": row[5],
+                "content": row[6]
             } for row in rows]
 
     def update_product_field(self, product_id: int, field: str, value: str):
@@ -130,7 +139,7 @@ class ProductsDB:
                 print(f"Debug - Product ID {product_id} not found in database")
                 raise ValueError(f"Product with ID {product_id} does not exist")
             # Vérifier que le champ est valide
-            valid_fields = ['title', 'url', 'keywords', 'description', 'content']
+            valid_fields = ['title', 'url', 'keywords', 'type', 'description', 'content']
             if field not in valid_fields:
                 raise ValueError(f"Invalid field: {field}")
             # Exécuter la mise à jour

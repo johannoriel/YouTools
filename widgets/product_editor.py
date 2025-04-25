@@ -12,6 +12,7 @@ class ProductEditorWidget(Widget):
         title = st.text_input(t("products_title_label"), value=product['title'] if product is not None else "", key=f"{self.prefix}_title")
         url = st.text_input(t("products_url_label"), value=product['url'] or "" if product is not None else "", key=f"{self.prefix}_url")
         keywords = st.text_input(t("products_keywords_label"), value=product['keywords'] or "" if product is not None else "", key=f"{self.prefix}_keywords")
+        type_product = st.text_input(t("products_type_label"), value=product['type'] or "" if product is not None else "", key=f"{self.prefix}_type")
         description = streamlit_lexical(
             value=product['description'] or "" if product is not None else "",
             placeholder=t("products_description_label"),
@@ -24,6 +25,7 @@ class ProductEditorWidget(Widget):
             "title": title,
             "url": url,
             "keywords": keywords,
+            "type": type_product,
             "description": description,
             "content": content,
             "button": st.button(button_label, key=f"{self.prefix}_save")
