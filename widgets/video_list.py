@@ -8,11 +8,23 @@ from datetime import datetime
 translations["en"].update({
     "video_list_title": "Video List",
     "no_file_error": "No valid CSV file found. Please check the directory.",
+    "language_filter": "Filter by Language",
+    "days_old_filter": "Maximum Age (Days)",
+    "subscribers_filter": "Minimum Subscribers",
+    "export_button": "Export Filtered List",
+    "export_success": "Filtered list exported to {filename}",
+    "overwrite_checkbox": "Overwrite existing file",
 })
 
 translations["fr"].update({
     "video_list_title": "Liste des vidéos",
     "no_file_error": "Aucun fichier CSV valide trouvé. Vérifiez le répertoire.",
+    "language_filter": "Filtrer par langue",
+    "days_old_filter": "Âge maximum (jours)",
+    "subscribers_filter": "Abonnés minimum",
+    "export_button": "Exporter la liste filtrée",
+    "export_success": "Liste filtrée exportée vers {filename}",
+    "overwrite_checkbox": "Écraser le fichier existant",
 })
 
 
@@ -22,11 +34,11 @@ class VideoListWidget(Widget):
 
     def display(self):
         st.title(t("video_list_title"))
-        work_directory = self.plugin_manager.config["common"]["work_directory"]
+        work_directory = self.work_dir()
 
-        # Recherche des fichiers CSV dans le répertoire de travail
-        csv_files = [f for f in os.listdir(
-            work_directory) if f.endswith('.csv')]
+        # Recherche des fichiers CSV commençant par "video_list" dans le répertoire de travail
+        csv_files = [f for f in os.listdir(work_directory) if f.startswith(
+            'video_list') and f.endswith('.csv')]
 
         if not csv_files:
             st.error(t("no_file_error"))
@@ -55,12 +67,12 @@ class VideoListWidget(Widget):
 
         combined_df = pd.concat(dfs, ignore_index=True)
 
-        # Calculer l'ancienneté en jours
+        # Calculer l'ancienneté en jours avec type nullable integer
         current_date = datetime.now()
         combined_df['days_old'] = combined_df['published_at'].apply(
             lambda x: (current_date - pd.to_datetime(x,
-                       utc=True).tz_localize(None)).days if pd.notnull(x) else ''
-        )
+                       utc=True).tz_localize(None)).days if pd.notnull(x) else None
+        ).astype('Int64')
 
         # Créer une URL pour la chaîne
         combined_df['channel_url'] = combined_df['channel_id'].apply(
@@ -71,6 +83,24 @@ class VideoListWidget(Widget):
         # Supprimer les colonnes inutiles
         combined_df = combined_df.drop(
             columns=['video_id', 'title_with_url', 'published_at', 'channel_id'], errors='ignore')
+
+        # Filtres
+        st.subheader("Filtres")
+        languages = combined_df['language'].unique()
+        selected_languages = st.multiselect(
+            t("language_filter"), options=languages, default=languages, key=f"{self.prefix}_language_filter")
+        max_days_old = st.number_input(
+            t("days_old_filter"), min_value=0, value=30, step=1, key=f"{self.prefix}_days_old_filter")
+        min_subscribers = st.number_input(
+            t("subscribers_filter"), min_value=0, value=1000, step=100, key=f"{self.prefix}_subscribers_filter")
+
+        # Appliquer les filtres
+        filtered_df = combined_df[
+            (combined_df['language'].isin(selected_languages)) &
+            (combined_df['days_old'].apply(lambda x: x <= max_days_old if pd.notnull(x) else True)) &
+            (combined_df['subscriber_count'].apply(
+                lambda x: x >= min_subscribers if pd.notnull(x) else True))
+        ]
 
         # Configurer les colonnes pour l'affichage
         column_config = {
@@ -97,10 +127,38 @@ class VideoListWidget(Widget):
             "relevance_score": st.column_config.NumberColumn("Relevance", width="small")
         }
 
-        # Afficher le DataFrame
-        st.dataframe(
-            combined_df,
+        # Afficher le DataFrame avec sélection multi-lignes
+        selected_rows = st.dataframe(
+            filtered_df,
             column_config=column_config,
             use_container_width=True,
-            height=400
+            height=400,
+            selection_mode="multi-row",
+            on_select="rerun",
+            key=f"{self.prefix}_video_dataframe"
         )
+
+        # Checkbox pour écraser ou renommer
+        overwrite = st.checkbox(t("overwrite_checkbox"), value=True,
+                                key=f"{self.prefix}_overwrite_checkbox")
+
+        # Bouton pour exporter la liste filtrée
+        if st.button(t("export_button"), key=f"{self.prefix}_export_button"):
+            base_filename = "filtered_video_list.csv"
+            export_path = os.path.join(work_directory, base_filename)
+
+            if not overwrite and os.path.exists(export_path):
+                # Trouver un nom de fichier unique en ajoutant _xxx
+                i = 1
+                while True:
+                    new_filename = f"filtered_video_list_{i:03d}.csv"
+                    new_export_path = os.path.join(
+                        work_directory, new_filename)
+                    if not os.path.exists(new_export_path):
+                        export_path = new_export_path
+                        break
+                    i += 1
+
+            filtered_df.to_csv(export_path, index=False)
+            st.success(t("export_success").format(
+                filename=os.path.basename(export_path)))
