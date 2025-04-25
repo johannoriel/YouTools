@@ -8,8 +8,8 @@ from lib.youtube_db import cache_campaign_response
 from plugins.automarket import AutomarketPlugin
 
 translations["en"].update({
-    "generate_response_title": "Generate Responses to Comments",
-    "no_file_error": "No valid comment_list.csv found. Please fetch comments first.",
+    "generate_response_title": "Generate Responses to Comments (comment_list.csv -> response_list.csv)",
+    "no_file_error": "No valid comment_list CSV found. Please fetch comments first.",
     "generate_responses": "Generate Responses",
     "generating": "Generating responses...",
     "responses": "Suggested Responses",
@@ -18,16 +18,18 @@ translations["en"].update({
     "success": "Responses posted successfully!",
     "error": "Error posting responses: ",
     "char_limit_warning": "⚠️ This response exceeds 500 characters ({} characters). Please shorten it.",
-    "export_responses": "Export Responses to response_list.csv",
+    "export_responses": "Export Responses",
     "export_success": "Responses exported successfully to {filename}",
     "export_error": "Error during export: {error}",
     "response_to_comment": "Response to Comment {}",
     "edit_response": "Edit Response {}",
+    "select_comment_file": "Select Comment List Files",
+    "overwrite_responses_checkbox": "Overwrite existing response file",
 })
 
 translations["fr"].update({
-    "generate_response_title": "Générer des réponses aux commentaires",
-    "no_file_error": "Aucun fichier comment_list.csv valide trouvé. Veuillez d'abord récupérer des commentaires.",
+    "generate_response_title": "Générer des réponses aux commentaires (comment_list.csv -> response_list.csv)",
+    "no_file_error": "Aucun fichier comment_list CSV valide trouvé. Veuillez d'abord récupérer des commentaires.",
     "generate_responses": "Générer des réponses",
     "generating": "Génération des réponses...",
     "responses": "Réponses suggérées",
@@ -36,11 +38,13 @@ translations["fr"].update({
     "success": "Réponses publiées avec succès !",
     "error": "Erreur lors de la publication : ",
     "char_limit_warning": "⚠️ Cette réponse dépasse 500 caractères ({} caractères). Veuillez la raccourcir.",
-    "export_responses": "Exporter les réponses vers response_list.csv",
+    "export_responses": "Exporter les réponses",
     "export_success": "Réponses exportées avec succès vers {filename}",
     "export_error": "Erreur lors de l'export : {error}",
     "response_to_comment": "Réponse au commentaire {}",
     "edit_response": "Modifier la réponse {}",
+    "select_comment_file": "Sélectionner les fichiers de liste de commentaires",
+    "overwrite_responses_checkbox": "Écraser le fichier de réponses existant",
 })
 
 
@@ -96,9 +100,21 @@ class GenerateResponseWidget(Widget):
         progress_text.empty()
         return responses
 
-    def export_responses(self, responses, work_dir):
+    def export_responses(self, responses, work_dir, overwrite):
         try:
-            output_path = os.path.join(work_dir, "response_list.csv")
+            base_filename = "response_list.csv"
+            output_path = os.path.join(work_dir, base_filename)
+
+            if not overwrite and os.path.exists(output_path):
+                i = 1
+                while True:
+                    new_filename = f"response_list_{i:03d}.csv"
+                    new_output_path = os.path.join(work_dir, new_filename)
+                    if not os.path.exists(new_output_path):
+                        output_path = new_output_path
+                        break
+                    i += 1
+
             responses_data = [
                 {
                     'comment_id': resp['comment_id'],
@@ -122,19 +138,46 @@ class GenerateResponseWidget(Widget):
     def display(self):
         st.title(t("generate_response_title"))
         work_dir = self.plugin_manager.config["common"]["work_directory"]
-        comment_file = os.path.join(work_dir, "comment_list.csv")
 
-        if not os.path.exists(comment_file):
+        # Recherche des fichiers CSV commençant par "comment_list"
+        comment_files = [f for f in os.listdir(work_dir) if f.startswith(
+            'comment_list') and f.endswith('.csv')]
+        if not comment_files:
             st.error(t("no_file_error"))
             return
 
-        # Charger le fichier comment_list.csv
-        df = pd.read_csv(comment_file)
+        # Sélection multiple des fichiers de commentaires
+        selected_comment_files = st.multiselect(
+            t("select_comment_file"),
+            options=comment_files,
+            default=[comment_files[0]] if comment_files else [],
+            key=f"{self.prefix}_select_comment_file"
+        )
+
+        if not selected_comment_files:
+            st.warning("Please select at least one comment list file.")
+            return
+
+        # Charger et concaténer les fichiers sélectionnés
+        dfs = []
         required_columns = {'comment_id', 'comment_text',
                             'video_id', 'video_title', 'channel_title', 'author'}
-        if not required_columns.issubset(df.columns):
+        for comment_file in selected_comment_files:
+            file_path = os.path.join(work_dir, comment_file)
+            try:
+                df = pd.read_csv(file_path)
+                if required_columns.issubset(df.columns):
+                    dfs.append(df)
+            except Exception:
+                continue
+
+        if not dfs:
             st.error(t("no_file_error"))
             return
+
+        combined_df = pd.concat(dfs, ignore_index=True)
+        combined_df = combined_df.drop_duplicates(
+            subset='comment_id', keep='first')
 
         # Charger la transcription et l'URL
         transcript_path = os.path.join(work_dir, "transcript.txt")
@@ -144,8 +187,8 @@ class GenerateResponseWidget(Widget):
         url = open(url_path, 'r').read().strip(
         ) if os.path.exists(url_path) else ""
 
-        # Configurer les colonnes pour l'affichage
-        column_config = {
+        # Configurer les colonnes pour l'affichage des commentaires
+        comment_column_config = {
             "comment_text": st.column_config.TextColumn("Comment", width="large"),
             "author": st.column_config.TextColumn("Author", width="medium"),
             "video_title": st.column_config.TextColumn("Video Title", width="large"),
@@ -158,10 +201,10 @@ class GenerateResponseWidget(Widget):
             ),
         }
 
-        # Afficher le DataFrame avec sélection multi-lignes
-        selected_rows = st.dataframe(
-            df,
-            column_config=column_config,
+        # Afficher le DataFrame avec sélection multi-lignes pour les commentaires
+        selected_comment_rows = st.dataframe(
+            combined_df,
+            column_config=comment_column_config,
             use_container_width=True,
             height=400,
             selection_mode="multi-row",
@@ -170,10 +213,10 @@ class GenerateResponseWidget(Widget):
         )
 
         # Bouton pour générer les réponses
-        if st.button(t("generate_responses"), key=f"{self.prefix}_generate_responses") and selected_rows['selection']['rows']:
+        if st.button(t("generate_responses"), key=f"{self.prefix}_generate_responses") and selected_comment_rows['selection']['rows']:
             with st.spinner(t("generating")):
-                selected_comments = [df.iloc[i].to_dict()
-                                     for i in selected_rows['selection']['rows']]
+                selected_comments = [combined_df.iloc[i].to_dict(
+                ) for i in selected_comment_rows['selection']['rows']]
                 keywords = selected_comments[0].get('keywords', '')
                 responses = self.generate_responses(
                     self.plugin_manager.config, selected_comments, transcript, url, keywords)
@@ -192,24 +235,48 @@ class GenerateResponseWidget(Widget):
                         status="pending"
                     )
 
-                # Exportation des réponses
-                self.export_responses(responses, work_dir)
+                # Stocker les réponses dans st.session_state
+                st.session_state['generated_responses'] = responses
 
-        # Affichage des réponses si response_list.csv existe
-        response_file = os.path.join(work_dir, "response_list.csv")
-        if os.path.exists(response_file):
+        # Affichage des réponses stockées dans st.session_state
+        if 'generated_responses' in st.session_state and st.session_state['generated_responses']:
             st.subheader(t("responses"))
-            response_df = pd.read_csv(response_file)
-            for i, row in response_df.iterrows():
-                st.markdown(
-                    f"""
-                    <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
-                        <p><strong>{row['author']}</strong> on <strong>{row['channel_title']}</strong> (video: <em>{row['video_title']}</em>):</p>
-                        <p>{row['comment_text']}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+            responses_df = pd.DataFrame([
+                {
+                    'comment_text': resp['comment_text'],
+                    'response_text': resp['response'],
+                    'author': resp['author'],
+                    'video_title': resp['video_title'],
+                    'channel_title': resp['channel_title'],
+                    'comment_id': resp['comment_id'],
+                    'video_id': resp['target_video_id'],
+                    'channel_id': resp['channel_id'],
+                    'keywords': resp['keyword']
+                }
+                for resp in st.session_state['generated_responses']
+            ])
+
+            response_column_config = {
+                "comment_text": st.column_config.TextColumn("Comment", width="large"),
+                "response_text": st.column_config.TextColumn("Response", width="large"),
+                "author": st.column_config.TextColumn("Author", width="medium"),
+                "video_title": st.column_config.TextColumn("Video Title", width="large"),
+                "channel_title": st.column_config.TextColumn("Channel", width="medium"),
+            }
+
+            # Afficher le DataFrame avec sélection multi-lignes pour les réponses
+            selected_response_rows = st.dataframe(
+                responses_df,
+                column_config=response_column_config,
+                use_container_width=True,
+                height=400,
+                selection_mode="multi-row",
+                on_select="rerun",
+                key=f"{self.prefix}_response_dataframe"
+            )
+
+            # Permettre l'édition des réponses
+            for i, row in responses_df.iterrows():
                 st.write(t("response_to_comment").format(i + 1))
                 edited_response = st.text_area(
                     t("edit_response").format(i + 1),
@@ -217,36 +284,48 @@ class GenerateResponseWidget(Widget):
                     key=f"{self.prefix}_response_{i}",
                     height=100
                 )
-                response_df.at[i, 'response_text'] = edited_response
+                responses_df.at[i, 'response_text'] = edited_response
 
                 if len(edited_response) > 500:
                     st.warning(t("char_limit_warning").format(
                         len(edited_response)))
 
-            # Bouton pour exporter les réponses modifiées
-            if st.button(t("export_responses"), key=f"{self.prefix}_export_responses"):
-                response_df.to_csv(response_file, index=False)
-                st.success(t("export_success").format(filename=response_file))
+            # Mettre à jour st.session_state avec les réponses éditées
+            st.session_state['generated_responses'] = [
+                {
+                    'comment_id': row['comment_id'],
+                    'response': row['response_text'],
+                    'target_video_id': row['video_id'],
+                    'channel_id': row['channel_id'],
+                    'keyword': row['keywords'],
+                    'comment_text': row['comment_text'],
+                    'author': row['author'],
+                    'video_title': row['video_title'],
+                    'channel_title': row['channel_title']
+                }
+                for _, row in responses_df.iterrows()
+            ]
 
-            # Bouton pour publier les réponses
-            if st.button(t("post_responses"), key=f"{self.prefix}_post_responses"):
+            # Case à cocher pour écraser le fichier
+            overwrite_responses = st.checkbox(
+                t("overwrite_responses_checkbox"), key=f"{self.prefix}_overwrite_responses")
+
+            # Bouton pour exporter les réponses sélectionnées
+            if st.button(t("export_responses"), key=f"{self.prefix}_export_responses") and selected_response_rows['selection']['rows']:
+                selected_indices = selected_response_rows['selection']['rows']
+                selected_responses = [
+                    st.session_state['generated_responses'][i] for i in selected_indices]
+                self.export_responses(selected_responses,
+                                      work_dir, overwrite_responses)
+
+            # Bouton pour publier les réponses sélectionnées
+            if st.button(t("post_responses"), key=f"{self.prefix}_post_responses") and selected_response_rows['selection']['rows']:
                 with st.spinner(t("posting")):
                     automarket = self.plugin_manager.get_plugin('automarket')
                     campaign_id = datetime.now().isoformat()
-                    responses = [
-                        {
-                            'comment_id': row['comment_id'],
-                            'response': row['response_text'],
-                            'target_video_id': row['video_id'],
-                            'channel_id': row['channel_id'],
-                            'comment_text': row['comment_text'],
-                            'author': row['author'],
-                            'video_title': row['video_title'],
-                            'channel_title': row['channel_title'],
-                            'keyword': row['keywords']
-                        }
-                        for _, row in response_df.iterrows()
-                    ]
+                    selected_indices = selected_response_rows['selection']['rows']
+                    selected_responses = [
+                        st.session_state['generated_responses'][i] for i in selected_indices]
                     automarket.post_responses(
-                        self.plugin_manager.config, responses, campaign_id)
+                        self.plugin_manager.config, selected_responses, campaign_id)
                     st.success(t("success"))
