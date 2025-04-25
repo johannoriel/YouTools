@@ -46,6 +46,9 @@ class Widget:
             prompt, sysprompt, context, repeat_on_failure, number_repeat)
         return response
 
+    def work_dir(self):
+        return os.path.expanduser(self.plugin_manager.config['common']['work_directory'])
+
 
 class Plugin:
     def __init__(self, name, plugin_manager):
