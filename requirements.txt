@@ -44,3 +44,4 @@ streamlit-aggrid
 sentence_transformers
 fuzzywuzzy
 python-Levenshtein
+streamlit-lexical

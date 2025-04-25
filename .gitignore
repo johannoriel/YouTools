@@ -22,3 +22,4 @@ installed_packages.txt
 widgets/.ropeproject
 lib/.ropeproject
 plugins/.ropeproject
+products.db
