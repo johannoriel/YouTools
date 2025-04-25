@@ -109,6 +109,8 @@ class LlmPlugin(Plugin):
             models = ast.literal_eval(models)
         model_list = [(m["name"], m["name"]) for m in models]
         personas = self.get_config("personas") or []
+        if isinstance(personas, str):
+            personas = ast.literal_eval(personas)
         persona_options = [("None", "None")] + [(p["name"], p["name"]) for p in personas]
         return {
             "api_keys": {
