@@ -135,9 +135,10 @@ class ProductsPlugin(Plugin):
                                 config['llm']['llm_sys_prompt'],
                                 row['title']
                             )
-                            self.db.update_product(
-                                row['id'], row['title'], row['url'],
-                                llm_response, row['description'], row['content']
+                            self.db.update_product_field(
+                                int(row['id']),  # Forcer la conversion en entier
+                                'keywords',
+                                llm_response
                             )
                         st.success(t("products_success"))
                         st.rerun()
@@ -158,9 +159,10 @@ class ProductsPlugin(Plugin):
                                 config['llm']['llm_sys_prompt'],
                                 row['title']
                             )
-                            self.db.update_product(
-                                row['id'], row['title'], row['url'],
-                                row['keywords'], llm_response, row['content']
+                            self.db.update_product_field(
+                                int(row['id']),  # Forcer la conversion en entier
+                                'description',
+                                llm_response
                             )
                         st.success(t("products_success"))
                         st.rerun()

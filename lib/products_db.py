@@ -116,3 +116,30 @@ class ProductsDB:
                 "description": row[4],
                 "content": row[5]
             } for row in rows]
+
+    def update_product_field(self, product_id: int, field: str, value: str):
+        """Update a single field for an existing product."""
+        product_id = int(product_id)  # Forcer la conversion en entier
+        print(f"Debug - Updating field {field} for product ID: {product_id}")
+        print(f"Debug - New value: {value}")
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            # Vérifier si l'ID existe
+            cursor.execute("SELECT id FROM products WHERE id = ?", (product_id,))
+            if not cursor.fetchone():
+                print(f"Debug - Product ID {product_id} not found in database")
+                raise ValueError(f"Product with ID {product_id} does not exist")
+            # Vérifier que le champ est valide
+            valid_fields = ['title', 'url', 'keywords', 'description', 'content']
+            if field not in valid_fields:
+                raise ValueError(f"Invalid field: {field}")
+            # Exécuter la mise à jour
+            cursor.execute(f"""
+                UPDATE products
+                SET {field} = ?
+                WHERE id = ?
+            """, (value, product_id))
+            print(f"Debug - Rows affected: {cursor.rowcount}")
+            conn.commit()
+            if cursor.rowcount == 0:
+                print(f"Debug - No rows updated for ID: {product_id}")
