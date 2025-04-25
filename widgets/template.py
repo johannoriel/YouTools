@@ -11,6 +11,15 @@ translations["fr"].update({
     "template_string1": "En français",
 })
 
+"""
+A widget is a reusable component that can be used to display information or interact with the user.
+It can be used to create a user interface for a specific task or feature.
+BUT to be compatible with streamlit, all interactive elements like checkbox, radio button, selectbox, etc. must have a unique key, to avoid conflicts.
+so the key must use the widget self.prefix for that.
+A widget can use internally st.session_state, but it cannot use st.session_state of other widgets or plugins.
+To exchange data it must use files stored in the work directory : self.work_dir()
+"""
+
 
 class TemplateWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
@@ -18,5 +27,5 @@ class TemplateWidget(Widget):
 
     def display(self):
         st.title(t("template_string1"))
-        work_directory = self.plugin_manager.config["common"]["work_directory"]
+        work_directory = self.work_dir()
         st.input(t("template_string2"), key=f"{self.prefix}_input")
