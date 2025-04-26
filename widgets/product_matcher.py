@@ -12,6 +12,8 @@ from datetime import datetime
 from fuzzywuzzy import fuzz
 from sentence_transformers import SentenceTransformer, util
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+import unicodedata
+import re
 
 translations["en"].update({
     "extract_keywords": "Extract key topics and keywords as a comma-separated list (max 10)",
@@ -62,6 +64,18 @@ class VideoProductMatchWidget(Widget):
         self.work_directory = self.plugin_manager.config["common"]["work_directory"]
         self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
 
+    def normalize_keyword(self, keyword):
+        # Convert to lowercase
+        keyword = keyword.lower()
+        # Remove accents
+        keyword = ''.join(c for c in unicodedata.normalize('NFD', keyword)
+                         if unicodedata.category(c) != 'Mn')
+        # Replace underscores, hyphens, and other special characters with space
+        keyword = re.sub(r'[_-]+|[^\w\s]', ' ', keyword)
+        # Remove extra spaces
+        keyword = ' '.join(keyword.split())
+        return keyword
+
     def load_videos(self):
         csv_files = [f for f in os.listdir(self.work_directory) if f.startswith('video_list') and f.endswith('.csv')]
         if not csv_files:
@@ -96,12 +110,14 @@ class VideoProductMatchWidget(Widget):
         llm_keywords = llm_response.split(',') if llm_response else []
 
         all_keywords = list(set(keywords + llm_keywords))
-        return [kw.strip().lower() for kw in all_keywords if kw.strip()], ' '.join(all_keywords)
+        normalized_keywords = [self.normalize_keyword(kw) for kw in all_keywords if kw.strip()]
+        return normalized_keywords, ' '.join(normalized_keywords)
 
     def get_comparison_text(self, video_row, product, comparison_type):
         if comparison_type == "keywords_only":
             _, video_text = self.extract_video_keywords(video_row)
-            product_text = str(product['keywords']).lower() if product['keywords'] else ''
+            product_keywords = str(product['keywords']).split(',') if product['keywords'] else []
+            product_text = ' '.join([self.normalize_keyword(kw) for kw in product_keywords])
         else:  # full_text
             video_text = f"{video_row['title']} {video_row['description'] if pd.notnull(video_row['description']) else ''}".lower()
             product_text = f"{product['title']} {product['description'] if product['description'] else ''}".lower()
@@ -282,4 +298,5 @@ class VideoProductMatchWidget(Widget):
                         st.write(f"**Title**: {product['title']}")
                         st.write(f"**URL**: [{product['url']}]({product['url']})")
                         product_keywords = str(product['keywords']).split(',') if product['keywords'] else []
-                        st.write(f"**{t('product_keywords')}**: {', '.join([kw.strip() for kw in product_keywords])}")
+                        product_keywords = [self.normalize_keyword(kw.strip()) for kw in product_keywords]
+                        st.write(f"**{t('product_keywords')}**: {', '.join(product_keywords)}")
