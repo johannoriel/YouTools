@@ -248,8 +248,8 @@ class AutomarketPlugin(Plugin):
         })
 
     def run(self, config):
-        tab1, tab2, tab3 = st.tabs(
-            ["Campagne auto", t("monitor_trends_tab"), "Campagne manuelle"])
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["Campagne auto", t("monitor_trends_tab"), "Campagne manuelle", "Product matcher"])
 
         config_params = {
             'comments_per_video': config['automarket']['comments_per_video'],
@@ -295,3 +295,12 @@ class AutomarketPlugin(Plugin):
                 response_prompt=config['marketyoutube']['response_prompt']
             )
             campaign_widget.display()
+
+        with tab4:
+            from widgets.product_matcher import VideoProductMatchWidget
+            product_matcher_widget = VideoProductMatchWidget(
+                name="product_matcher",
+                prefix="product_matcher",
+                plugin_manager=self.plugin_manager,
+            )
+            product_matcher_widget.display()
