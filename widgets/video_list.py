@@ -143,12 +143,12 @@ class VideoListWidget(Widget):
             key=f"{self.prefix}_video_dataframe"
         )
 
-        return selected_rows.get('selection', {}).get('rows', [])
+        return selected_rows.get('selection', {}).get('rows', []), filtered_df
 
     def display(self):
         st.title(t("video_list_title"))
 
-        selected_rows = self.select_video_list()
+        selected_rows, filtered_df = self.select_video_list()
 
         if selected_rows is None:
             return

@@ -46,7 +46,7 @@ class ProcessVideosWidget(Widget):
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
-                "extract GRAVEflat": True,
+                "extract_flat": True,
                 "force_generic_extractor": False,
             }
 
@@ -59,6 +59,7 @@ class ProcessVideosWidget(Widget):
                 view_count = info.get("view_count", "N/A")
                 comment_count = info.get("comment_count", "N/A")
                 published_at = info.get("upload_date", "N/A")
+                description = info.get("description", "N/A")
 
                 if isinstance(subscriber_count, int):
                     subscriber_count = str(subscriber_count)
@@ -84,7 +85,8 @@ class ProcessVideosWidget(Widget):
                 if debug:
                     st.write(f"Extracted from {video_url}: channel_id={channel_id}, channel_title={channel_title}, "
                              f"subscriber_count={subscriber_count}, view_count={view_count}, "
-                             f"comment_count={comment_count}, published_at={published_at}")
+                             f"comment_count={comment_count}, published_at={published_at}, "
+                             f"description={description}")
 
                 return {
                     "channel_id": channel_id,
@@ -92,7 +94,8 @@ class ProcessVideosWidget(Widget):
                     "subscriber_count": subscriber_count,
                     "view_count": view_count,
                     "comment_count": comment_count,
-                    "published_at": published_at
+                    "published_at": published_at,
+                    "description": description
                 }
 
         except Exception as e:
@@ -105,7 +108,8 @@ class ProcessVideosWidget(Widget):
                 "subscriber_count": "",
                 "view_count": "",
                 "comment_count": "",
-                "published_at": ""
+                "published_at": "",
+                "description": "N/A"
             }
 
     def display(self):
@@ -224,8 +228,9 @@ class ProcessVideosWidget(Widget):
                     "published_at": metadata['published_at'],
                     "channel_id": metadata['channel_id'],
                     "channel_title": metadata['channel_title'],
-                    "subscriber_count": metadata['subscription_count'],
+                    "subscriber_count": metadata['subscriber_count'],  # Corrigé de 'subscription_count' à 'subscriber_count'
                     "comment_count": metadata['comment_count'],
+                    "description": metadata['description'],
                     "relevance_score": relevance_score
                 })
 
