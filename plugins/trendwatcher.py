@@ -566,7 +566,7 @@ class TrendwatcherPlugin(Plugin):
             t("trendwatcher_keywords_label"),
             value=keywords_config,
             height=150,
-            help="Format: main_keyword:synonym1,synonym2,... (one per line)"
+            help="Format: theme:main_keyword:synonym1,synonym2,... (one per line)"
         )
 
         if st.button(t("trendwatcher_save_keywords_button"), key="save_keywords"):
@@ -576,6 +576,54 @@ class TrendwatcherPlugin(Plugin):
                 st.success("Keywords saved to configuration!")
             else:
                 st.warning("Plugin manager not available, cannot save config.")
+
+        # Extract themes from keywords_input
+        themes = []
+        keyword_configs = []
+        for line in keywords_input.split("\n"):
+            line = line.strip()
+            if line:
+                parts = line.split(":", 2)
+                if len(parts) >= 2:
+                    theme = parts[0].strip()
+                    main_keyword = parts[1].strip()
+                    synonyms = [s.strip() for s in parts[2].split(",") if s.strip()] if len(parts) > 2 else []
+                    if theme not in themes:
+                        themes.append(theme)
+                    keyword_configs.append({
+                        "theme": theme,
+                        "main": main_keyword,
+                        "synonyms": synonyms
+                    })
+                else:
+                    main_keyword = parts[0].strip()
+                    keyword_configs.append({
+                        "theme": "Default",
+                        "main": main_keyword,
+                        "synonyms": []
+                    })
+                    if "Default" not in themes:
+                        themes.append("Default")
+
+        # Theme selection
+        if "selected_themes" not in st.session_state:
+            st.session_state.selected_themes = themes
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            selected_themes = st.multiselect(
+                "Select Themes to Search",
+                themes,
+                default=st.session_state.selected_themes,
+                key="theme_filter"
+            )
+        with col2:
+            if st.button("Select All Themes", key="select_all_themes"):
+                selected_themes = themes
+                st.session_state.selected_themes = themes
+                st.rerun()
+
+        st.session_state.selected_themes = selected_themes
 
         debug_mode = st.checkbox(t("trendwatcher_debug"), value=False)
 
@@ -621,29 +669,19 @@ class TrendwatcherPlugin(Plugin):
 
         if st.button(t("trendwatcher_search_button"), key="search_trends"):
             with st.spinner(t("trendwatcher_processing")):
-                keyword_configs = []
-                for line in keywords_input.split("\n"):
-                    line = line.strip()
-                    if line:
-                        if ":" in line:
-                            main_keyword, synonyms = line.split(":", 1)
-                            main_keyword = main_keyword.strip()
-                            synonyms = [s.strip()
-                                        for s in synonyms.split(",") if s.strip()]
-                        else:
-                            main_keyword = line
-                            synonyms = []
-                        keyword_configs.append(
-                            {"main": main_keyword, "synonyms": synonyms})
+                # Filter keyword_configs by selected themes
+                filtered_keyword_configs = [
+                    kc for kc in keyword_configs if kc["theme"] in selected_themes
+                ]
 
-                if debug_mode and len(keyword_configs) > max_keywords_debug:
+                if debug_mode and len(filtered_keyword_configs) > max_keywords_debug:
                     st.warning(
-                        f"Debug mode: Limiting to first {max_keywords_debug} keywords: {', '.join(k['main'] for k in keyword_configs[:max_keywords_debug])}"
+                        f"Debug mode: Limiting to first {max_keywords_debug} keywords: {', '.join(k['main'] for k in filtered_keyword_configs[:max_keywords_debug])}"
                     )
-                    keyword_configs = keyword_configs[:max_keywords_debug]
+                    filtered_keyword_configs = filtered_keyword_configs[:max_keywords_debug]
 
                 all_results = []
-                for config in keyword_configs:
+                for config in filtered_keyword_configs:
                     results = self.search_trends(
                         config["main"],
                         config["synonyms"],
