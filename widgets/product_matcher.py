@@ -9,17 +9,44 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 from datetime import datetime
+from fuzzywuzzy import fuzz
+from sentence_transformers import SentenceTransformer, util
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 translations["en"].update({
+    "extract_keywords": "Extract key topics and keywords as a comma-separated list (max 10)",
     "match_title": "Video-Product Relevance Scores",
     "no_videos_error": "No valid video data found",
     "no_products_error": "No products found in database",
+    "progress_text": "Calculating relevance scores...",
+    "video_details": "Video Details",
+    "product_details": "Product Details",
+    "calculate_button": "Calculate Relevance Scores",
+    "similarity_method": "Select Similarity Method",
+    "tfidf_cosine": "TF-IDF Cosine Similarity",
+    "sentence_transformer": "Sentence Transformer",
+    "fuzzywuzzy": "FuzzyWuzzy",
+    "comparison_type": "Select Comparison Type",
+    "keywords_only": "Keywords Only",
+    "full_text": "Full Text",
 })
 
 translations["fr"].update({
+    "extract_keywords": "Extraire des mots-clés et des sujets clés sous forme de liste séparée par des virgules (max 10)",
     "match_title": "Scores de pertinence vidéo-produit",
     "no_videos_error": "Aucune donnée vidéo valide trouvée",
     "no_products_error": "Aucun produit trouvé dans la base de données",
+    "progress_text": "Calcul des scores de pertinence...",
+    "video_details": "Détails de la vidéo",
+    "product_details": "Détails du produit",
+    "calculate_button": "Calculer les scores de pertinence",
+    "similarity_method": "Sélectionner la méthode de similarité",
+    "tfidf_cosine": "Similarité Cosinus TF-IDF",
+    "sentence_transformer": "Transformeur de Phrases",
+    "fuzzywuzzy": "FuzzyWuzzy",
+    "comparison_type": "Sélectionner le type de comparaison",
+    "keywords_only": "Mots-clés uniquement",
+    "full_text": "Texte complet",
 })
 
 class VideoProductMatchWidget(Widget):
@@ -27,6 +54,7 @@ class VideoProductMatchWidget(Widget):
         super().__init__(name, prefix, plugin_manager)
         self.db = ProductsDB()
         self.work_directory = self.plugin_manager.config["common"]["work_directory"]
+        self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
 
     def load_videos(self):
         csv_files = [f for f in os.listdir(self.work_directory) if f.startswith('video_list') and f.endswith('.csv')]
@@ -51,94 +79,162 @@ class VideoProductMatchWidget(Widget):
         return combined_df.drop_duplicates(subset='video_id', keep='first')
 
     def extract_video_keywords(self, video_row):
-        # Keywords from CSV
         keywords = str(video_row['keyword']).split(',') if pd.notnull(video_row['keyword']) else []
 
-        # LLM-based keyword extraction from title and description
-        prompt = f"""
-        Extract key topics and keywords from the following video title and description.
-        Return a comma-separated list of keywords (max 10).
-
-        Title: {video_row['title']}
-        Description: {video_row['description'] if pd.notnull(video_row['description']) else ''}
-        """
-        llm_response = self.process_with_llm(prompt)
+        prompts = [
+            f"Title: {video_row['title']}",
+            f"Description: {video_row['description'] if pd.notnull(video_row['description']) else ''}",
+            t("extract_keywords")
+        ]
+        llm_response = self.process_with_llm(prompts)
         llm_keywords = llm_response.split(',') if llm_response else []
 
-        # Combine and clean keywords
         all_keywords = list(set(keywords + llm_keywords))
         return ' '.join([kw.strip().lower() for kw in all_keywords if kw.strip()])
 
-    def calculate_relevance_scores(self, videos_df, products):
-        # Prepare text data
+    def get_comparison_text(self, video_row, product, comparison_type):
+        if comparison_type == "keywords_only":
+            video_text = self.extract_video_keywords(video_row)
+            product_text = str(product['keywords']).lower() if product['keywords'] else ''
+        else:  # full_text
+            video_text = f"{video_row['title']} {video_row['description'] if pd.notnull(video_row['description']) else ''}".lower()
+            product_text = f"{product['title']} {product['description'] if product['description'] else ''}".lower()
+        return video_text, product_text
+
+    def calculate_tfidf_cosine(self, video_texts, product_texts):
+        vectorizer = TfidfVectorizer()
+        all_texts = video_texts + product_texts
+        tfidf_matrix = vectorizer.fit_transform(all_texts)
+        video_vectors = tfidf_matrix[:len(video_texts)]
+        product_vectors = tfidf_matrix[len(video_texts):]
+        return cosine_similarity(video_vectors, product_vectors)
+
+    def calculate_sentence_transformer(self, video_texts, product_texts):
+        video_embeddings = self.sentence_model.encode(video_texts, convert_to_tensor=True)
+        product_embeddings = self.sentence_model.encode(product_texts, convert_to_tensor=True)
+        return util.cos_sim(video_embeddings, product_embeddings).cpu().numpy()
+
+    def calculate_fuzzywuzzy(self, video_texts, product_texts):
+        scores = np.zeros((len(video_texts), len(product_texts)))
+        for i, v_text in enumerate(video_texts):
+            for j, p_text in enumerate(product_texts):
+                scores[i, j] = fuzz.token_sort_ratio(v_text, p_text) / 100.0
+        return scores
+
+    def calculate_relevance_scores(self, videos_df, products, similarity_method, comparison_type):
         video_texts = []
         video_ids = []
-        for _, row in videos_df.iterrows():
+        progress_bar = st.progress(0)
+        total_steps = len(videos_df)
+
+        for idx, row in videos_df.iterrows():
             keywords = self.extract_video_keywords(row)
             if keywords:
-                video_texts.append(keywords)
+                video_texts.append(keywords if comparison_type == "keywords_only" else f"{row['title']} {row['description'] if pd.notnull(row['description']) else ''}".lower())
                 video_ids.append(row['video_id'])
+            progress_bar.progress((idx + 1) / total_steps)
 
         product_texts = []
         product_ids = []
         for product in products:
-            keywords = str(product['keywords']).lower() if product['keywords'] else ''
-            product_texts.append(keywords)
-            product_ids.append(product['id'])
+            text = str(product['keywords']).lower() if comparison_type == "keywords_only" and product['keywords'] else f"{product['title']} {product['description'] if product['description'] else ''}".lower()
+            product_texts.append(text)
+            product_ids.append(str(product['id']))
 
         if not video_texts or not product_texts:
-            return None
+            return None, None, None
 
-        # Calculate TF-IDF vectors and cosine similarity
-        vectorizer = TfidfVectorizer()
-        all_texts = video_texts + product_texts
-        tfidf_matrix = vectorizer.fit_transform(all_texts)
+        if similarity_method == "tfidf_cosine":
+            similarity_matrix = self.calculate_tfidf_cosine(video_texts, product_texts)
+        elif similarity_method == "sentence_transformer":
+            similarity_matrix = self.calculate_sentence_transformer(video_texts, product_texts)
+        else:  # fuzzywuzzy
+            similarity_matrix = self.calculate_fuzzywuzzy(video_texts, product_texts)
 
-        video_vectors = tfidf_matrix[:len(video_texts)]
-        product_vectors = tfidf_matrix[len(video_texts):]
-
-        similarity_matrix = cosine_similarity(video_vectors, product_vectors)
-
-        # Create score DataFrame
         scores_df = pd.DataFrame(
             similarity_matrix,
             index=video_ids,
-            columns=[f"Product_{pid}" for pid in product_ids]
+            columns=product_ids
         )
-        return scores_df
+        progress_bar.empty()
+        return scores_df, videos_df, products
 
     def display(self):
         st.title(t("match_title"))
 
-        # Load videos
         videos_df = self.load_videos()
         if videos_df is None:
             st.error(t("no_videos_error"))
             return
 
-        # Load products
         products = self.db.get_all_products()
         if not products:
             st.error(t("no_products_error"))
             return
 
-        # Calculate scores
-        scores_df = self.calculate_relevance_scores(videos_df, products)
-        if scores_df is None:
-            st.error(t("no_videos_error"))
-            return
-
-        # Display scores table
-        st.dataframe(
-            scores_df,
-            use_container_width=True,
-            height=400,
-            column_config={
-                col: st.column_config.NumberColumn(
-                    col,
-                    format="%.3f",
-                    min_value=0.0,
-                    max_value=1.0
-                ) for col in scores_df.columns
-            }
+        # Similarity method selection
+        similarity_method = st.selectbox(
+            t("similarity_method"),
+            ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy"],
+            format_func=lambda x: t(x),
+            key=f"{self.prefix}_similarity_method"
         )
+
+        # Comparison type selection
+        comparison_type = st.selectbox(
+            t("comparison_type"),
+            ["keywords_only", "full_text"],
+            format_func=lambda x: t(x),
+            key=f"{self.prefix}_comparison_type"
+        )
+
+        if st.button(t("calculate_button"), key=f"{self.prefix}_calculate_button"):
+            st.write(t("progress_text"))
+            scores_df, videos_df, products = self.calculate_relevance_scores(videos_df, products, similarity_method, comparison_type)
+            if scores_df is None:
+                st.error(t("no_videos_error"))
+                return
+            st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products)
+
+        # Check if scores data exists in session state
+        if f"{self.prefix}_scores_data" in st.session_state:
+            scores_df, videos_df, products = st.session_state[f"{self.prefix}_scores_data"]
+
+            # Configure AgGrid
+            gb = GridOptionsBuilder.from_dataframe(scores_df)
+            gb.configure_default_column(editable=False, type=["numericColumn"], cellRenderer="agAnimateShowChangeCellRenderer")
+            for col in scores_df.columns:
+                gb.configure_column(col, headerName=col, width=100, valueFormatter="Number(x).toFixed(3)")
+            gb.configure_selection(selection_mode="single")
+            grid_options = gb.build()
+
+            # Display AgGrid
+            grid_response = AgGrid(
+                scores_df,
+                gridOptions=grid_options,
+                height=400,
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                fit_columns_on_grid_load=True,
+                key=f"{self.prefix}_scores_grid"
+            )
+
+            if "grid_response" in grid_response and "gridState" in grid_response["grid_response"]:
+                focused_cell = grid_response["grid_response"]["gridState"].get("focusedCell", {})
+                if focused_cell:
+                    row_index = focused_cell.get("rowIndex")
+                    col_id = focused_cell.get("colId")
+
+                    if row_index is not None and col_id is not None:
+                        video_id = scores_df.index[row_index]
+                        product_id = col_id
+
+                        video_row = videos_df[videos_df['video_id'] == video_id].iloc[0]
+                        product = next(p for p in products if str(p['id']) == product_id)
+
+                        st.subheader(t("video_details"))
+                        st.write(f"**Title**: {video_row['title']}")
+                        st.write(f"**URL**: [{video_row['url']}]({video_row['url']})")
+
+                        st.subheader(t("product_details"))
+                        st.write(f"**Title**: {product['title']}")
+                        st.write(f"**URL**: [{product['url']}]({product['url']})")
