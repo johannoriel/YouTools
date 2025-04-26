@@ -1,7 +1,6 @@
 from lib.global_vars import translations, t
 from app import Widget
 import streamlit as st
-from lib.global_vars import translations, t
 from lib.youtube_api import YoutubeAPI
 from lib.youtube_db import get_videos, sync_videos, get_video_transcript, save_transcript, reset_database, auto_upgrade_database, update_video_keywords, delete_video
 from datetime import datetime
@@ -159,16 +158,84 @@ class VideoDatabaseWidget(Widget):
                 except Exception as e:
                     st.error(f"Error deleting temporary video file: {str(e)}")
 
-    def display_video_database(self, config, filter_type: str, search_keyword: str, keyword_filter: List[str] = None):
-        videos = get_videos(filter_type, search_keyword, 0,
-                            keyword_filter=keyword_filter)
+    def global_operations(self, config):
+        """Display global operation buttons for video database management."""
+        st.header(t("marketyoutube_header_videos"))
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            if st.button(t("marketyoutube_sync"), key=f"{self.prefix}_sync_videos"):
+                with st.spinner(t("marketyoutube_syncing")):
+                    sync_videos(config['common']['channel_id'], self.youtube_api)
+                    st.success(t("marketyoutube_sync_complete"))
+        with col2:
+            if st.button(t("marketyoutube_export_keywords"), key=f"{self.prefix}_export_keywords"):
+                self.export_keywords_to_json(config)
+        with col3:
+            if st.button("Reset Database Structure", key=f"{self.prefix}_reset_database"):
+                with st.spinner("Resetting database..."):
+                    reset_database()
+                    st.success("Database structure reset successfully!")
+        with col4:
+            if st.button("Upgrade Database Structure", key=f"{self.prefix}_upgrade_database"):
+                try:
+                    auto_upgrade_database()
+                    st.info("Database upgraded")
+                except Exception as e:
+                    print(f"Database error: {str(e)}")
+
+    def display_video_database(self):
+        """Display the video database with filters and return selected rows."""
+        col1, col2, col3 = st.columns(3)
+        filter_options = {
+            t("marketyoutube_filter_title"): "title",
+            t("marketyoutube_filter_title_desc"): "title_description",
+            t("marketyoutube_filter_all"): "all"
+        }
+
+        filter_type = col1.selectbox(
+            t("marketyoutube_filter_label"),
+            options=list(filter_options.keys()),
+            key=f"{self.prefix}_filter_type_videos"
+        )
+        search_keyword = col2.text_input(
+            t("marketyoutube_keyword"),
+            key=f"{self.prefix}_keyword_videos"
+        )
+
+        # Compter les occurrences de chaque mot-clé
+        keyword_counts = {}
+        for video in get_videos():
+            for keyword in video['keywords']:
+                keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
+
+        # Trier d'abord par occurrence décroissante, puis par ordre alphabétique
+        sorted_keywords = sorted(
+            keyword_counts.items(),
+            key=lambda item: (-item[1], item[0])  # -item[1] pour ordre décroissant
+        )
+
+        # Créer les options avec le format "mot-clé (occurrences)"
+        keyword_options = [f"{keyword} ({count})" for keyword, count in sorted_keywords]
+        raw_keywords = [keyword for keyword, count in sorted_keywords]
+
+        selected_keyword_filter = col3.multiselect(
+            t("marketyoutube_filter_keywords"),
+            options=keyword_options,
+            key=f"{self.prefix}_keyword_filter_videos"
+        )
+
+        # Pour récupérer les mots-clés sans les occurrences dans le filtre
+        selected_keywords = [kw.split(" (")[0] for kw in selected_keyword_filter] if selected_keyword_filter else None
+
+        videos = get_videos(filter_options[filter_type], search_keyword, 0,
+                            keyword_filter=selected_keywords)
 
         col1, col2, col3 = st.columns(3)
         total_videos = len(videos)
         col1.write(t("marketyoutube_video_count").format(total_videos))
         if total_videos == 0:
             st.warning("No videos to display.")
-            return
+            return None
 
         # Slider pour la taille des vignettes et la hauteur des lignes
         thumbnail_size = col2.slider(
@@ -293,243 +360,184 @@ class VideoDatabaseWidget(Widget):
             key=f"{self.prefix}_video_grid"
         )
 
-        # Handle selected rows
-        selected_rows = response['selected_rows']
-        st.subheader("Actions on Selected Videos")
+        return response['selected_rows']
 
-        # Initialize session state for keyword input
+    def video_db_edit(self, selected_rows):
+        """Handle editing operations for selected videos."""
+        if selected_rows is None or selected_rows.empty:
+            st.write("No videos selected.")
+            return
+
+        st.subheader("Actions on Selected Videos")
+        st.write(f"Selected videos: {len(selected_rows)}")
+
+        # Initialize session state for keyword input and selected video IDs if not present
         if f"{self.prefix}_edit_keywords_selected" not in st.session_state:
             st.session_state[f"{self.prefix}_edit_keywords_selected"] = ""
+        if f"{self.prefix}_selected_video_ids" not in st.session_state:
+            st.session_state[f"{self.prefix}_selected_video_ids"] = []
 
-        # Update keyword input with first selected row's keywords
-        if selected_rows is not None and not selected_rows.empty:
+        # Get current selected video IDs
+        current_video_ids = selected_rows['video_id'].tolist()
+
+        # Check if the selection has changed
+        selection_changed = current_video_ids != st.session_state[f"{self.prefix}_selected_video_ids"]
+
+        # Update selected video IDs in session state
+        st.session_state[f"{self.prefix}_selected_video_ids"] = current_video_ids
+
+        # If selection has changed, update the keyword input with the first selected video's keywords
+        if selection_changed and len(selected_rows) > 0:
             first_row_keywords = selected_rows.iloc[0]['keywords']
-            if first_row_keywords != "--":
-                st.session_state[f"{self.prefix}_edit_keywords_selected"] = first_row_keywords
+            st.session_state[f"{self.prefix}_edit_keywords_selected"] = first_row_keywords if first_row_keywords != "--" else ""
 
-        if selected_rows is not None and not selected_rows.empty:
-            st.write(f"Selected videos: {len(selected_rows)}")
+        # Boutons pour les actions
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
 
-            # Boutons pour les actions
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
+        with col1:
+            if st.button(t("marketyoutube_copy_transcripts"), key=f"{self.prefix}_copy_transcripts"):
+                transcripts = []
+                for _, row in selected_rows.iterrows():
+                    transcript = get_video_transcript(row['video_id'])
+                    if transcript:
+                        transcripts.append(
+                            f"Transcript for {row['title']}:\n{transcript}\n")
+                if transcripts:
+                    st.code("\n".join(transcripts))
+                else:
+                    st.warning("No transcripts available for selected videos.")
 
-            with col1:
-                if st.button(t("marketyoutube_copy_transcripts"), key=f"{self.prefix}_copy_transcripts"):
-                    transcripts = []
+        with col2:
+            if st.button(t("marketyoutube_download_transcripts"), key=f"{self.prefix}_download_transcripts"):
+                transcripts = []
+                for _, row in selected_rows.iterrows():
+                    transcript = get_video_transcript(row['video_id'])
+                    if transcript:
+                        transcripts.append(
+                            f"Transcript for {row['title']}:\n{transcript}\n")
+                if transcripts:
+                    st.download_button(
+                        label="Download All Transcripts",
+                        data="\n".join(transcripts),
+                        file_name="selected_transcripts.txt",
+                        mime="text/plain",
+                        key=f"{self.prefix}_download_all_transcripts"
+                    )
+                else:
+                    st.warning("No transcripts available for selected videos.")
+
+        with col3:
+            if st.button(t("marketyoutube_get_transcripts"), key=f"{self.prefix}_get_transcripts"):
+                total = len(selected_rows)
+                processed = 0
+                successes = 0
+                errors = []
+                with st.spinner("Generating transcripts..."):
+                    progress_bar = st.progress(0)
                     for _, row in selected_rows.iterrows():
-                        transcript = get_video_transcript(row['video_id'])
-                        if transcript:
-                            transcripts.append(
-                                f"Transcript for {row['title']}:\n{transcript}\n")
-                    if transcripts:
-                        st.code("\n".join(transcripts))
-                    else:
-                        st.warning(
-                            "No transcripts available for selected videos.")
-
-            with col2:
-                if st.button(t("marketyoutube_download_transcripts"), key=f"{self.prefix}_download_transcripts"):
-                    transcripts = []
-                    for _, row in selected_rows.iterrows():
-                        transcript = get_video_transcript(row['video_id'])
-                        if transcript:
-                            transcripts.append(
-                                f"Transcript for {row['title']}:\n{transcript}\n")
-                    if transcripts:
-                        st.download_button(
-                            label="Download All Transcripts",
-                            data="\n".join(transcripts),
-                            file_name="selected_transcripts.txt",
-                            mime="text/plain",
-                            key=f"{self.prefix}_download_all_transcripts"
-                        )
-                    else:
-                        st.warning(
-                            "No transcripts available for selected videos.")
-
-            with col3:
-                if st.button(t("marketyoutube_get_transcripts"), key=f"{self.prefix}_get_transcripts"):
-                    total = len(selected_rows)
-                    processed = 0
-                    successes = 0
-                    errors = []
-                    with st.spinner("Generating transcripts..."):
-                        progress_bar = st.progress(0)
-                        for _, row in selected_rows.iterrows():
-                            if not get_video_transcript(row['video_id']):
-                                try:
-                                    transcript, lang = self.youtube_api.get_transcript(
-                                        row['video_id'], config['common']['language']
-                                    )
-                                    if transcript:
-                                        save_transcript(
-                                            row['video_id'], transcript)
-                                        successes += 1
-                                    else:
-                                        errors.append(
-                                            f"{row['title']} ({row['video_id']}): No transcript available")
-                                except Exception as e:
+                        if not get_video_transcript(row['video_id']):
+                            try:
+                                transcript, lang = self.youtube_api.get_transcript(
+                                    row['video_id'], self.plugin_manager.config['common']['language']
+                                )
+                                if transcript:
+                                    save_transcript(row['video_id'], transcript)
+                                    successes += 1
+                                else:
                                     errors.append(
-                                        f"{row['title']} ({row['video_id']}): {str(e)}")
-                            processed += 1
-                            progress_bar.progress(processed / total)
-                        progress_bar.empty()
-                    st.success(f"Transcripts generated: {successes}/{total}")
-                    if errors:
-                        with st.expander("Errors"):
-                            for error in errors:
-                                st.write(error)
+                                        f"{row['title']} ({row['video_id']}): No transcript available")
+                            except Exception as e:
+                                errors.append(
+                                    f"{row['title']} ({row['video_id']}): {str(e)}")
+                        processed += 1
+                        progress_bar.progress(processed / total)
+                    progress_bar.empty()
+                st.success(f"Transcripts generated: {successes}/{total}")
+                if errors:
+                    with st.expander("Errors"):
+                        for error in errors:
+                            st.write(error)
+                st.rerun()
+
+        with col4:
+            if st.button(t("marketyoutube_generate_transcript"), key=f"{self.prefix}_generate_transcript"):
+                total = len(selected_rows)
+                processed = 0
+                successes = 0
+                errors = []
+                with st.spinner("Generating transcripts from video..."):
+                    progress_bar = st.progress(0)
+                    for _, row in selected_rows.iterrows():
+                        if not get_video_transcript(row['video_id']):
+                            try:
+                                if self.generate_transcript(row['video_id'], row['title']):
+                                    successes += 1
+                                else:
+                                    errors.append(f"{row['title']} ({row['video_id']}): Generation failed")
+                            except Exception as e:
+                                errors.append(f"{row['title']} ({row['video_id']}): {str(e)}")
+                        processed += 1
+                        progress_bar.progress(processed / total)
+                    progress_bar.empty()
+                st.success(f"Transcripts generated: {successes}/{total}")
+                if errors:
+                    with st.expander("Errors"):
+                        for error in errors:
+                            st.write(error)
+
+        with col5:
+            if st.button(t("marketyoutube_suggest_keywords"), key=f"{self.prefix}_suggest_keywords"):
+                total = len(selected_rows)
+                processed = 0
+                with st.spinner("Suggesting keywords..."):
+                    progress_bar = st.progress(0)
+                    for _, row in selected_rows.iterrows():
+                        transcript = get_video_transcript(
+                            row['video_id']) or ""
+                        suggested_keywords = self.suggest_keywords(
+                            row['title'], row['description'], transcript
+                        )
+                        update_video_keywords(
+                            row['video_id'], suggested_keywords)
+                        processed += 1
+                        progress_bar.progress(processed / total)
+                    progress_bar.empty()
+                st.success(f"Keywords suggested for {total} videos.")
+                st.rerun()
+
+        with col6:
+            if st.button(t("marketyoutube_delete_videos"), key=f"{self.prefix}_delete_videos"):
+                total = len(selected_rows)
+                with st.spinner("Deleting videos..."):
+                    for _, row in selected_rows.iterrows():
+                        delete_video(row['video_id'])
+                    st.success(f"Deleted {total} videos.")
                     st.rerun()
 
-            with col4:
-                if st.button(t("marketyoutube_generate_transcript"), key=f"{self.prefix}_generate_transcript"):
-                    total = len(selected_rows)
-                    processed = 0
-                    successes = 0
-                    errors = []
-                    with st.spinner("Generating transcripts from video..."):
-                        progress_bar = st.progress(0)
-                        for _, row in selected_rows.iterrows():
-                            if not get_video_transcript(row['video_id']):
-                                try:
-                                    if self.generate_transcript(row['video_id'], row['title']):
-                                        successes += 1
-                                    else:
-                                        errors.append(f"{row['title']} ({row['video_id']}): Generation failed")
-                                except Exception as e:
-                                    errors.append(f"{row['title']} ({row['video_id']}): {str(e)}")
-                            processed += 1
-                            progress_bar.progress(processed / total)
-                        progress_bar.empty()
-                    st.success(f"Transcripts generated: {successes}/{total}")
-                    if errors:
-                        with st.expander("Errors"):
-                            for error in errors:
-                                st.write(error)
-
-            with col5:
-                if st.button(t("marketyoutube_suggest_keywords"), key=f"{self.prefix}_suggest_keywords"):
-                    total = len(selected_rows)
-                    processed = 0
-                    with st.spinner("Suggesting keywords..."):
-                        progress_bar = st.progress(0)
-                        for _, row in selected_rows.iterrows():
-                            transcript = get_video_transcript(
-                                row['video_id']) or ""
-                            suggested_keywords = self.suggest_keywords(
-                                row['title'], row['description'], transcript
-                            )
-                            update_video_keywords(
-                                row['video_id'], suggested_keywords)
-                            processed += 1
-                            progress_bar.progress(processed / total)
-                        progress_bar.empty()
-                    st.success(f"Keywords suggested for {total} videos.")
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            new_keywords = st.text_input(
+                t("marketyoutube_edit_keywords"),
+                key=f"{self.prefix}_edit_keywords_selected",
+                placeholder="Enter keywords (comma-separated)"
+            )
+        with col2:
+            if st.button(t("marketyoutube_save_keywords"), key=f"{self.prefix}_save_keywords_selected"):
+                if new_keywords:
+                    updated_keywords = [
+                        kw.strip() for kw in new_keywords.split(",") if kw.strip()]
+                    for _, row in selected_rows.iterrows():
+                        update_video_keywords(
+                            row['video_id'], updated_keywords)
+                    st.success(
+                        f"Keywords updated for {len(selected_rows)} videos.")
                     st.rerun()
-
-            with col6:
-                if st.button(t("marketyoutube_delete_videos"), key=f"{self.prefix}_delete_videos"):
-                    total = len(selected_rows)
-                    with st.spinner("Deleting videos..."):
-                        for _, row in selected_rows.iterrows():
-                            delete_video(row['video_id'])
-                        st.success(f"Deleted {total} videos.")
-                        st.rerun()
-
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                new_keywords = st.text_input(
-                    t("marketyoutube_edit_keywords"),
-                    key=f"{self.prefix}_edit_keywords_selected",
-                    placeholder="Enter keywords (comma-separated)"
-                )
-            with col2:
-                if st.button(t("marketyoutube_save_keywords"), key=f"{self.prefix}_save_keywords_selected"):
-                    if new_keywords:
-                        updated_keywords = [
-                            kw.strip() for kw in new_keywords.split(",") if kw.strip()]
-                        for _, row in selected_rows.iterrows():
-                            update_video_keywords(
-                                row['video_id'], updated_keywords)
-                        st.success(
-                            f"Keywords updated for {len(selected_rows)} videos.")
-                        st.rerun()
-                    else:
-                        st.warning("Please enter keywords to update.")
-
-        else:
-            st.write("No videos selected.")
+                else:
+                    st.warning("Please enter keywords to update.")
 
     def display(self):
+        """Main display method coordinating global operations, database display, and editing."""
         config = self.plugin_manager.config
-        st.header(t("marketyoutube_header_videos"))
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            if st.button(t("marketyoutube_sync"), key=f"{self.prefix}_sync_videos"):
-                with st.spinner(t("marketyoutube_syncing")):
-                    sync_videos(config['common']
-                                ['channel_id'], self.youtube_api)
-                    st.success(t("marketyoutube_sync_complete"))
-        with col2:
-            if st.button(t("marketyoutube_export_keywords"), key=f"{self.prefix}_export_keywords"):
-                    self.export_keywords_to_json(self.plugin_manager.config)
-        with col3:
-            if st.button("Reset Database Structure", key=f"{self.prefix}_reset_database"):
-                with st.spinner("Resetting database..."):
-                    reset_database()
-                    st.success("Database structure reset successfully!")
-        with col4:
-            if st.button("Upgrade Database Structure", key=f"{self.prefix}_upgrade_database"):
-                try:
-                    auto_upgrade_database()
-                    st.info("Database upgraded")
-                except Exception as e:
-                    print(f"Database error: {str(e)}")
-
-        col1, col2, col3 = st.columns(3)
-        filter_options = {
-            t("marketyoutube_filter_title"): "title",
-            t("marketyoutube_filter_title_desc"): "title_description",
-            t("marketyoutube_filter_all"): "all"
-        }
-
-        filter_type = col1.selectbox(
-            t("marketyoutube_filter_label"),
-            options=list(filter_options.keys()),
-            key=f"{self.prefix}_filter_type_videos"
-        )
-        search_keyword = col2.text_input(
-            t("marketyoutube_keyword"),
-            key=f"{self.prefix}_keyword_videos"
-        )
-
-        # Compter les occurrences de chaque mot-clé
-        keyword_counts = {}
-        for video in get_videos():
-            for keyword in video['keywords']:
-                keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
-
-        # Trier d'abord par occurrence décroissante, puis par ordre alphabétique
-        sorted_keywords = sorted(
-            keyword_counts.items(),
-            key=lambda item: (-item[1], item[0])  # -item[1] pour ordre décroissant
-        )
-
-        # Créer les options avec le format "mot-clé (occurrences)"
-        keyword_options = [f"{keyword} ({count})" for keyword, count in sorted_keywords]
-        raw_keywords = [keyword for keyword, count in sorted_keywords]
-
-        selected_keyword_filter = col3.multiselect(
-            t("marketyoutube_filter_keywords"),
-            options=keyword_options,
-            key=f"{self.prefix}_keyword_filter_videos"
-        )
-
-        # Pour récupérer les mots-clés sans les occurrences dans le filtre
-        selected_keywords = [kw.split(" (")[0] for kw in selected_keyword_filter] if selected_keyword_filter else None
-        self.display_video_database(
-            config,
-            filter_options[filter_type],
-            search_keyword,
-            keyword_filter=selected_keywords
-        )
+        self.global_operations(config)
+        selected_rows = self.display_video_database()
+        self.video_db_edit(selected_rows)
