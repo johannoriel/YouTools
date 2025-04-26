@@ -8,6 +8,30 @@ import pandas as pd
 import os
 from datetime import datetime
 
+translations["en"].update({
+    "marketyoutube_header_campaigns": "Automated YouTube Marketing",
+    "marketyoutube_select_video": "Select Video to Promote",
+    "marketyoutube_keywords": "Keywords for Campaign",
+    "marketyoutube_max_videos": "Max Videos to Search",
+    "marketyoutube_max_comments": "Max Comments per Video",
+    "marketyoutube_start_campaign": "Start Campaign",
+    "marketyoutube_searching": "Searching for relevant videos...",
+    "marketyoutube_target_source_csv": "Video list (CSV)",
+    "marketyoutube_filter_keywords": "Filter by Keywords",
+})
+
+translations["fr"].update({
+    "marketyoutube_header_campaigns": "Marketing Automatisé sur YouTube",
+    "marketyoutube_select_video": "Sélectionner la vidéo à promouvoir",
+    "marketyoutube_keywords": "Mots-clés pour la campagne",
+    "marketyoutube_max_videos": "Nombre max de vidéos à rechercher",
+    "marketyoutube_max_comments": "Nombre max de commentaires par vidéo",
+    "marketyoutube_start_campaign": "Lancer la campagne",
+    "marketyoutube_searching": "Recherche de vidéos pertinentes...",
+    "marketyoutube_target_source_csv": "Liste de vidéos (CSV)",
+    "marketyoutube_filter_keywords": "Filtrer par mots-clés",
+})
+
 class MarketOneVideoWidget(Widget):
     def __init__(self, name, prefix, plugin_manager, campaign_keywords, max_campaign_videos, max_campaign_comments, response_prompt):
         super().__init__(name, prefix, plugin_manager)

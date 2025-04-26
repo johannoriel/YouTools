@@ -9,7 +9,6 @@ import re
 import pandas as pd
 from widgets.yt_responses import ResponseDBDisplayWidget
 from widgets.yt_videos import VideoDatabaseWidget
-from widgets.market_one_video import MarketOneVideoWidget
 
 translations["en"].update({
     "marketyoutube_tab_videos": "Videos Database",
@@ -149,7 +148,7 @@ translations["fr"].update({
     "marketyoutube_target_source_csv": "Liste de vidéos (CSV)",
 })
 
-class MarketyoutubePlugin(Plugin):
+class YoutubedbPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
         initialize_database()
@@ -168,26 +167,7 @@ class MarketyoutubePlugin(Plugin):
 
     def get_config_fields(self):
         return {
-            "campaign_keywords": {
-                "type": "text",
-                "label": "Default Campaign Keywords",
-                "default": ""
-            },
-            "max_campaign_videos": {
-                "type": "number",
-                "label": "Default Max Videos for Campaign",
-                "default": 10
-            },
-            "max_campaign_comments": {
-                "type": "number",
-                "label": "Default Max Comments per Video",
-                "default": 2
-            },
-            "response_prompt": {
-                "type": "textarea",
-                "label": "LLM Prompt for Campaign Responses",
-                "default": """Suggest a concise response (<500 chars) to this comment, promoting the video at {url} (mention it). Use a direct tone, as if you're the commenter, inspired by this transcript: {transcript}"""
-            }
+
         }
 
     def get_tabs(self):
@@ -400,10 +380,9 @@ class MarketyoutubePlugin(Plugin):
                         st.rerun()
 
     def run(self, config):
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             t("marketyoutube_tab_videos"),
             t("marketyoutube_tab_stats"),
-            t("marketyoutube_tab_campaigns"),
             "Channel Manager",
             "Debug Stats API",
             "Responses"
@@ -468,25 +447,12 @@ class MarketyoutubePlugin(Plugin):
                 keyword_filter=selected_keyword_filter if selected_keyword_filter else None
             )
 
-        # Tab 3: Campaigns (utiliser le widget)
-        with tab3:
-            campaign_widget = MarketOneVideoWidget(
-                name="market_one_video",
-                prefix="market_one_video",
-                plugin_manager=self.plugin_manager,
-                campaign_keywords=config['marketyoutube']['campaign_keywords'],
-                max_campaign_videos=int(config['marketyoutube']['max_campaign_videos']),
-                max_campaign_comments=int(config['marketyoutube']['max_campaign_comments']),
-                response_prompt=config['marketyoutube']['response_prompt']
-            )
-            campaign_widget.display()
-
         # Tab 4: Channel Manager
-        with tab4:
+        with tab3:
             self.display_channel_manager(config)
 
         # Tab 5: Debug Stats API
-        with tab5:
+        with tab4:
             st.header("Debug YouTube Analytics API")
             st.subheader("Gestion du Quota YouTube")
             st.write(
@@ -538,5 +504,5 @@ class MarketyoutubePlugin(Plugin):
                                     st.write(
                                         f"**Calculated Retention Rate:** {result['calculated_retention_rate']:.1f}%")
 
-        with tab6:
+        with tab5:
             self.response_db_widget.display()

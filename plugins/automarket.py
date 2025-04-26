@@ -188,6 +188,26 @@ class AutomarketPlugin(Plugin):
                 "label": "Keyword to Exclude Comments",
                 "default": "Stop"
             },
+            "campaign_keywords": {
+                "type": "text",
+                "label": "Default Campaign Keywords",
+                "default": ""
+            },
+            "max_campaign_videos": {
+                "type": "number",
+                "label": "Default Max Videos for Campaign",
+                "default": 10
+            },
+            "max_campaign_comments": {
+                "type": "number",
+                "label": "Default Max Comments per Video",
+                "default": 2
+            },
+            "response_prompt": {
+                "type": "textarea",
+                "label": "LLM Prompt for Campaign Responses",
+                "default": """Suggest a concise response (<500 chars) to this comment, promoting the video at {url} (mention it). Use a direct tone, as if you're the commenter, inspired by this transcript: {transcript}"""
+            }
         }
 
     def get_tabs(self):
@@ -229,7 +249,7 @@ class AutomarketPlugin(Plugin):
 
     def run(self, config):
         tab1, tab2, tab3 = st.tabs(
-            ["Lancer une campagne", t("monitor_trends_tab"), t("Réponses existantes")])
+            ["Campagne auto", t("monitor_trends_tab"), "Campagne manuelle"])
 
         config_params = {
             'comments_per_video': config['automarket']['comments_per_video'],
@@ -264,7 +284,14 @@ class AutomarketPlugin(Plugin):
             ).display()
 
         with tab3:
-            from widgets.yt_responses import ResponseDBDisplayWidget
-            response_db_widget = ResponseDBDisplayWidget(
-                "response_db_display", "automarket", self.plugin_manager)
-            response_db_widget.display()
+            from widgets.market_one_video import MarketOneVideoWidget
+            campaign_widget = MarketOneVideoWidget(
+                name="market_one_video",
+                prefix="market_one_video",
+                plugin_manager=self.plugin_manager,
+                campaign_keywords=config['marketyoutube']['campaign_keywords'],
+                max_campaign_videos=int(config['marketyoutube']['max_campaign_videos']),
+                max_campaign_comments=int(config['marketyoutube']['max_campaign_comments']),
+                response_prompt=config['marketyoutube']['response_prompt']
+            )
+            campaign_widget.display()
