@@ -2,7 +2,6 @@ from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-from streamlit_lexical import streamlit_lexical
 import pandas as pd
 from lib.products_db import ProductsDB
 import os
@@ -17,6 +16,9 @@ translations["en"].update({
     "products_url_label": "Product URL",
     "products_keywords_label": "Keywords (comma-separated)",
     "products_type_label": "Product Type",
+    "products_source_label": "Product Source",
+    "products_goal_label": "Product Goal",
+    "products_related_label": "Related Products",
     "products_description_label": "Description (Markdown)",
     "products_content_label": "Full Content",
     "products_add_button": "Add Product",
@@ -40,6 +42,9 @@ translations["fr"].update({
     "products_url_label": "URL du produit",
     "products_keywords_label": "Mots-clés (séparés par des virgules)",
     "products_type_label": "Type de produit",
+    "products_source_label": "Source du produit",
+    "products_goal_label": "Objectif du produit",
+    "products_related_label": "Produits liés",
     "products_description_label": "Description (Markdown)",
     "products_content_label": "Contenu complet",
     "products_add_button": "Ajouter le produit",
@@ -96,6 +101,9 @@ class ProductsPlugin(Plugin):
         gb.configure_column("url", width=200)
         gb.configure_column("keywords", width=200)
         gb.configure_column("type", width=150)
+        gb.configure_column("source", width=150)
+        gb.configure_column("goal", width=150)
+        gb.configure_column("related", width=150)
         gb.configure_selection(selection_mode="multiple", use_checkbox=True)
         grid_options = gb.build()
 
@@ -118,7 +126,7 @@ class ProductsPlugin(Plugin):
                 with st.spinner(t("products_processing")):
                     try:
                         for _, row in selected_rows.iterrows():
-                            self.db.delete_product(row['id'])
+                            self.db.delete_product(int(row['id']))
                         st.success(t("products_success"))
                         st.rerun()
                     except Exception as e:
@@ -139,7 +147,7 @@ class ProductsPlugin(Plugin):
                                 row['title']
                             )
                             self.db.update_product_field(
-                                int(row['id']),  # Forcer la conversion en entier
+                                int(row['id']),
                                 'keywords',
                                 llm_response
                             )
@@ -163,7 +171,7 @@ class ProductsPlugin(Plugin):
                                 row['title']
                             )
                             self.db.update_product_field(
-                                int(row['id']),  # Forcer la conversion en entier
+                                int(row['id']),
                                 'description',
                                 llm_response
                             )
@@ -178,23 +186,7 @@ class ProductsPlugin(Plugin):
                 product = selected_rows.iloc[0]
                 editor = ProductEditorWidget("producteditor", f"edit_{product['id']}", self.plugin_manager)
                 form = editor.display(product, t("products_update_button"))
-
-                if form["button"]:
-                    with st.spinner(t("products_processing")):
-                        try:
-                            self.db.update_product(
-                                product['id'],
-                                form["title"],
-                                form["url"],
-                                form["keywords"],
-                                form["type"],
-                                form["description"],
-                                form["content"]
-                            )
-                            st.success(t("products_success"))
-                            st.rerun()
-                        except Exception as e:
-                            st.error(t("products_error").format(error=str(e)))
+                self._handle_form_submission(form, product['id'])
 
     def _run_add_tab(self, config):
         from widgets.product_editor import ProductEditorWidget
@@ -202,15 +194,21 @@ class ProductsPlugin(Plugin):
 
         editor = ProductEditorWidget("producteditor", "add", self.plugin_manager)
         form = editor.display(button_label=t("products_add_button"))
+        self._handle_form_submission(form)
 
+    def _handle_form_submission(self, form, product_id=None):
         if form["button"]:
             with st.spinner(t("products_processing")):
                 try:
-                    self.db.add_product(
+                    self.db.update_or_add_product(
+                        product_id,
                         form["title"],
                         form["url"],
                         form["keywords"],
                         form["type"],
+                        form["source"],
+                        form["goal"],
+                        form["related"],
                         form["description"],
                         form["content"]
                     )
