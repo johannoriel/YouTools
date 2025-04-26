@@ -7,9 +7,9 @@ from typing import List, Dict, Any
 import os
 import re
 import pandas as pd
-from plugins.promoteyoutube import PromoteyoutubePlugin
 from widgets.yt_responses import ResponseDBDisplayWidget
 from widgets.yt_videos import VideoDatabaseWidget
+from widgets.market_one_video import MarketOneVideoWidget
 
 translations["en"].update({
     "marketyoutube_tab_videos": "Videos Database",
@@ -149,30 +149,6 @@ translations["fr"].update({
     "marketyoutube_target_source_csv": "Liste de vidéos (CSV)",
 })
 
-
-def parse_date(date_str):
-    formats = [
-        "%Y-%m-%d %H:%M:%S",  # Format in your CSV
-        "%Y-%m-%dT%H:%M:%SZ",  # ISO format expected by the app
-        "%Y-%m-%d",           # Just date
-        "%d/%m/%Y %H:%M:%S",  # European format
-    ]
-
-    for fmt in formats:
-        try:
-            parsed_date = datetime.strptime(date_str, fmt)
-            # Always return ISO format
-            return parsed_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-        except ValueError:
-            continue
-
-    # Fallback: Use the first part of the string as a date and assume midnight
-    try:
-        return f"{date_str.split(' ')[0]}T00:00:00Z"
-    except Exception as e:
-        raise ValueError(f"Could not parse date: {date_str}, error: {str(e)}")
-
-
 class MarketyoutubePlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
@@ -251,71 +227,6 @@ class MarketyoutubePlugin(Plugin):
         )
         return [kw.strip() for kw in llm_response.split(",")]
 
-    def display_video_database(self, config, filter_type: str, keyword: str, page: int, keyword_filter: List[str] = None):
-        videos = get_videos(filter_type, keyword, page,
-                            keyword_filter=keyword_filter)
-        total_videos = len(videos)
-
-        st.write(t("marketyoutube_video_count").format(total_videos))
-
-        for video in videos:
-            keywords_str = ", ".join(
-                video['keywords']) if video['keywords'] else "--"
-            with st.expander(f"{video['title']} ({keywords_str})"):
-                col1, col2 = st.columns([1, 3])
-                col1.image(video['thumbnail_url'], width=120)
-                col2.markdown(f"[{video['title']}]({video['url']})")
-                col2.write(f"Published: {video['published_at']}")
-                col2.write(f"Status: {video['status']}")
-                transcript = get_video_transcript(video['video_id'])
-                if transcript:
-                    st.text_area("Transcription de la vidéo sélectionnée",
-                                 value=transcript, key=f"video_transcript_{video['video_id']}", height=150, disabled=True)
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button(t("Copy"), key=f"video_transcript_copy_{video['video_id']}"):
-                            st.code(transcript)
-                    with col2:
-                        st.download_button(
-                            label=t("Download"),
-                            key=f"video_transcript_download_{video['video_id']}",
-                            data=transcript,
-                            file_name=f"transcript_{video['video_id']}.txt",
-                            mime="text/plain"
-                        )
-                else:
-                    if st.button("Transcript>>>", key=f"get_transcript_{video['video_id']}"):
-                        transcript, lang = self.youtube_api.get_transcript(
-                            video['video_id'], config['common']['language'])
-                        save_transcript(video['video_id'], transcript)
-                        st.success("Transcript saved.")
-
-                current_keywords = ", ".join(
-                    video['keywords']) if video['keywords'] else "No keywords"
-                col2.write(
-                    f"{t('marketyoutube_keywords')}: {current_keywords}")
-
-                new_keywords = st.text_input(
-                    t("marketyoutube_edit_keywords"),
-                    value=current_keywords,
-                    key=f"edit_keywords_{video['video_id']}"
-                )
-                if st.button(t("marketyoutube_edit_keywords"), key=f"save_keywords_{video['video_id']}"):
-                    updated_keywords = [
-                        kw.strip() for kw in new_keywords.split(",") if kw.strip()]
-                    update_video_keywords(video['video_id'], updated_keywords)
-                    st.success(f"Keywords updated for {video['title']}")
-                    st.rerun()
-
-                if st.button(t("marketyoutube_suggest_keywords"), key=f"suggest_keywords_{video['video_id']}"):
-                    suggested_keywords = self.suggest_keywords(
-                        video['title'], video['description'], video['transcript'])
-                    update_video_keywords(
-                        video['video_id'], suggested_keywords)
-                    st.success(
-                        f"Suggested keywords applied for {video['title']}")
-                    st.rerun()
-
     def display_video_stats(self, filter_type: str, keyword: str, keyword_filter: List[str] = None):
         from datetime import datetime  # Importer datetime pour formater la date
 
@@ -385,51 +296,6 @@ class MarketyoutubePlugin(Plugin):
         st.dataframe(stats_data, column_config=column_config,
                      use_container_width=True)
 
-    def generate_campaign_responses(self, config, campaign_video: Dict[str, Any], comments: List[Dict[str, Any]]):
-        responses = []
-        total_comments = len(comments)
-        progress_bar = st.progress(0)
-        progress_text = st.empty()
-
-        prompt = config['marketyoutube']['response_prompt'].format(
-            url=campaign_video['url'],
-            transcript=campaign_video['transcript']
-        )
-
-        for idx, comment in enumerate(comments):
-            progress = (idx + 1) / total_comments
-            progress_bar.progress(progress)
-            progress_text.text(
-                t("marketyoutube_progress").format(idx + 1, total_comments))
-
-            comment_context = f"Comment by {comment['author']} on {comment['video_title']} from {comment['channel_title']}:\n{comment['text']}"
-            try:
-                llm_response = self.process_with_llm(
-                    prompt,
-                    config.get('llm', {}).get('llm_sys_prompt', ''),
-                    comment_context
-                )
-                clean_response = llm_response.strip()
-                if clean_response.startswith('"') and clean_response.endswith('"'):
-                    clean_response = clean_response[1:-1]
-                responses.append({
-                    'comment_id': comment['id'],
-                    'response': clean_response,
-                    'target_video_id': comment['video_id'],
-                    'comment_text': comment['text']
-                })
-            except Exception as e:
-                responses.append({
-                    'comment_id': comment['id'],
-                    'response': f"Error: {str(e)}",
-                    'target_video_id': comment['video_id'],
-                    'comment_text': comment['text']
-                })
-
-        progress_bar.empty()
-        progress_text.empty()
-        return responses
-
     def sync_stats(self, channel_id: str, progress_callback=None):
         """Sync stats for all videos with progress callback."""
         videos = self.youtube_api.get_channel_videos(channel_id)
@@ -443,58 +309,6 @@ class MarketyoutubePlugin(Plugin):
                 insert_stats_snapshot(video['video_id'], timestamp, stats)
             if progress_callback:
                 progress_callback((i + 1) / total_videos)
-
-    def sync_transcripts(self, channel_id: str, youtube_api, config):
-        """Synchronise les transcripts pour toutes les vidéos du canal qui n'en ont pas encore."""
-        videos = get_videos()  # Récupère toutes les vidéos de la base
-        total_videos = len(videos)
-        processed = 0
-        successes = 0
-        errors = []
-
-        with st.spinner(t("marketyoutube_syncing")):
-            # Créer la barre de progression une seule fois avant la boucle
-            progress_bar = st.progress(0)
-
-            for video in videos:
-                # Vérifie si le transcript est vide ou inexistant
-                current_transcript = get_video_transcript(video['video_id'])
-                if not current_transcript:
-                    try:
-                        transcript, lang = youtube_api.get_transcript(
-                            video['video_id'],
-                            config['common']['language']
-                        )
-                        if transcript:
-                            save_transcript(video['video_id'], transcript)
-                            successes += 1
-                        else:
-                            errors.append(
-                                f"{video['title']} ({video['video_id']}): No transcript available")
-                    except Exception as e:
-                        error_msg = f"{video['title']} ({video['video_id']}): {str(e)}"
-                        errors.append(error_msg)
-                        # Optionnel : pour debug, tu peux afficher chaque erreur immédiatement
-                        # st.warning(error_msg)
-
-                processed += 1
-                # Mettre à jour la barre existante
-                progress_bar.progress(processed / total_videos)
-
-            # Nettoyer la barre de progression
-            progress_bar.empty()
-
-            # Afficher un résumé des résultats
-            if total_videos > 0:
-                st.success(t("marketyoutube_sync_complete"))
-                st.write(
-                    f"Transcripts synchronisés avec succès : {successes}/{total_videos}")
-                if errors:
-                    with st.expander("Détails des erreurs"):
-                        for error in errors:
-                            st.write(error)
-            else:
-                st.info("Aucune vidéo à synchroniser.")
 
     def display_channel_manager(self, config):
         youtube_api = YoutubeAPI(self.plugin_manager.config)
@@ -585,242 +399,15 @@ class MarketyoutubePlugin(Plugin):
                             f"Channel '{channel['channel_title']}' deleted!")
                         st.rerun()
 
-    def display_campaign_tab(self, config, tab):
-        with tab:
-            st.header(t("marketyoutube_header_campaigns"))
-
-            # Récupérer toutes les vidéos
-            videos = get_videos()
-
-            # Ajouter un champ de recherche pour filtrer les vidéos à promouvoir
-            search_keyword = st.text_input(
-                "Search video by keyword",
-                value="",
-                key="campaign_video_search_keyword",
-                help="Enter a keyword to filter videos by title or keywords"
-            )
-
-            # Filtrer les vidéos en fonction du mot-clé saisi
-            if search_keyword:
-                search_keyword = search_keyword.lower()
-                filtered_videos = [
-                    v for v in videos
-                    if search_keyword in v['title'].lower() or
-                    any(search_keyword in kw.lower() for kw in v['keywords'])
-                ]
-            else:
-                filtered_videos = videos
-
-            # Créer les options pour le selectbox avec titre, date et mots-clés
-            video_options = {
-                f"{v['title']} ({v['published_at']}) ({', '.join(v['keywords']) if v['keywords'] else '--'})": v
-                for v in filtered_videos
-            }
-
-            # Si aucune vidéo ne correspond au filtre, afficher un message
-            if not video_options:
-                st.warning("No videos match your search keyword.")
-                selected_video_title = None
-                campaign_video = None
-            else:
-                selected_video_title = st.selectbox(
-                    t("marketyoutube_select_video"),
-                    options=list(video_options.keys()),
-                    key="campaign_select_video"
-                )
-                campaign_video = video_options.get(selected_video_title)
-
-            if "campaign_target_videos" not in st.session_state:
-                st.session_state["campaign_target_videos"] = []
-
-            target_source = st.radio(
-                "Target Source",
-                options=["Search by Keywords", "Target Channels",
-                         t("marketyoutube_target_source_csv")],
-                index=0,
-                key="campaign_target_source"
-            )
-
-            if target_source == "Search by Keywords":
-                keywords = st.text_input(
-                    t("marketyoutube_keywords"),
-                    value=config['marketyoutube']['campaign_keywords'],
-                    key="campaign_keywords_search"
-                )
-                max_videos = st.number_input(
-                    t("marketyoutube_max_videos"),
-                    min_value=1,
-                    max_value=50,
-                    value=int(config['marketyoutube']['max_campaign_videos']),
-                    key="campaign_max_videos_search"
-                )
-            elif target_source == "Target Channels":
-                target_channels = get_target_channels()
-                if not target_channels:
-                    st.warning(
-                        "No target channels available. Please add some in the Channel Manager tab.")
-                    return
-
-                all_keywords = set()
-                for channel in target_channels:
-                    all_keywords.update(channel['keywords'])
-                all_keywords = sorted(list(all_keywords))
-
-                selected_keywords = st.multiselect(
-                    "Select Keywords to Filter Channels",
-                    options=all_keywords,
-                    key="campaign_keywords_filter"
-                )
-
-                filtered_channels = [
-                    ch for ch in target_channels
-                    if not selected_keywords or any(kw in ch['keywords'] for kw in selected_keywords)
-                ]
-
-                selected_channels = st.multiselect(
-                    "Select Target Channels",
-                    options=[
-                        f"{ch['channel_title']} ({', '.join(ch['keywords']) if ch['keywords'] else '--'}) ({ch['subscriber_count']} subscribers)"
-                        for ch in filtered_channels
-                    ],
-                    default=[
-                        f"{ch['channel_title']} ({', '.join(ch['keywords']) if ch['keywords'] else '--'}) ({ch['subscriber_count']} subscribers)"
-                        for ch in filtered_channels
-                    ],
-                    key="campaign_select_channels"
-                )
-
-                max_videos_per_channel = st.number_input(
-                    "Max Videos per Channel",
-                    min_value=1,
-                    max_value=50,
-                    value=5,
-                    key="campaign_max_videos_per_channel"
-                )
-                keywords = f"trends_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            elif target_source == t("marketyoutube_target_source_csv"):
-                csv_file_path = os.path.join(
-                    config['common']['work_directory'], 'video_list.csv')
-                if os.path.exists(csv_file_path):
-                    try:
-                        df = pd.read_csv(csv_file_path)
-                        st.write(f"Found {len(df)} videos in CSV file")
-
-                        csv_videos = []
-                        for _, row in df.iterrows():
-                            try:
-                                video_id = row['URL'].split(
-                                    'v=')[-1].split('&')[0]
-                                # Ensure date is parsed correctly to ISO format
-                                published_at = parse_date(row['Date'])
-
-                                video = {
-                                    'video_id': video_id,
-                                    'id': video_id,
-                                    'title': row['Title'],
-                                    'url': row['URL'],
-                                    'views': int(row['Views']) if pd.notna(row['Views']) and str(row['Views']).isdigit() else 0,
-                                    'language': row['Language'],
-                                    'published_at': published_at,  # Already in ISO format
-                                    'keyword': row['Keyword']
-                                }
-                                video_complete = self.youtube_api.get_video_infos(
-                                    video) | video
-                                csv_videos.append(video_complete)
-                            except Exception as e:
-                                st.warning(
-                                    f"Error processing video {row['URL']}: {str(e)}")
-                                continue
-
-                        # Filtrer par mot-clé si nécessaire
-                        unique_keywords = df['Keyword'].unique().tolist()
-                        selected_csv_keywords = st.multiselect(
-                            "Filter by Keyword",
-                            options=unique_keywords,
-                            default=unique_keywords,
-                            key="csv_keyword_filter"
-                        )
-
-                        filtered_csv_videos = [
-                            v for v in csv_videos if v['keyword'] in selected_csv_keywords]
-                        keywords = unique_keywords[0]
-
-                        # Afficher les vidéos disponibles avec leurs mots-clés
-                        st.subheader("Videos from CSV")
-                        st.dataframe(df)
-
-                    except Exception as e:
-                        raise e
-                        st.error(f"Error reading CSV file: {str(e)}")
-                        filtered_csv_videos = []
-                else:
-                    st.warning(f"CSV file not found at: {csv_file_path}")
-                    filtered_csv_videos = []
-
-            max_comments = st.number_input(
-                t("marketyoutube_max_comments"),
-                min_value=1,
-                max_value=10,
-                value=int(config['marketyoutube']['max_campaign_comments']),
-                key="campaign_max_comments"
-            )
-
-            if st.button(t("marketyoutube_start_campaign"), key="campaign_start_button"):
-                if not campaign_video:
-                    st.error("Please select a video to promote.")
-                else:
-                    with st.spinner(t("marketyoutube_searching")):
-                        if target_source == "Search by Keywords":
-                            target_videos = self.youtube_api.search_videos(
-                                keywords, max_videos)
-                        elif target_source == "Target Channels":
-                            target_videos = []
-                            for channel in filtered_channels:
-                                if f"{channel['channel_title']} ({', '.join(channel['keywords']) if channel['keywords'] else '--'}) ({channel['subscriber_count']} subscribers)" in selected_channels:
-                                    channel_videos = self.youtube_api.get_channel_recent_videos(
-                                        channel['channel_id'],
-                                        max_results=max_videos_per_channel
-                                    )
-                                    target_videos.extend(channel_videos)
-                        else:  # Video list (CSV)
-                            target_videos = filtered_csv_videos
-
-                        st.session_state["campaign_target_videos"] = target_videos
-                        prefix = "campaign_"
-                        if f"{prefix}videos" in st.session_state:
-                            del st.session_state[f"{prefix}videos"]
-                        if f"{prefix}original_order" in st.session_state:
-                            del st.session_state[f"{prefix}original_order"]
-                        if f"{prefix}selected_videos" in st.session_state:
-                            del st.session_state[f"{prefix}selected_videos"]
-                        if f"{prefix}selected_video_indices" in st.session_state:
-                            del st.session_state[f"{prefix}selected_video_indices"]
-                        if f"{prefix}comments" in st.session_state:
-                            del st.session_state[f"{prefix}comments"]
-                        if f"{prefix}selected_comments" in st.session_state:
-                            del st.session_state[f"{prefix}selected_comments"]
-                        if f"{prefix}generated_responses" in st.session_state:
-                            del st.session_state[f"{prefix}generated_responses"]
-                        if f"{prefix}selected_responses" in st.session_state:
-                            del st.session_state[f"{prefix}selected_responses"]
-                        if f"{prefix}campaign_id" in st.session_state:
-                            del st.session_state[f"{prefix}campaign_id"]
-
-            if st.session_state["campaign_target_videos"] and campaign_video:
-                promoteyoutube = PromoteyoutubePlugin(
-                    "promoteyoutube", self.plugin_manager)
-                promoteyoutube.run_campaign(
-                    config=config,
-                    target_videos=st.session_state["campaign_target_videos"],
-                    campaign_video=campaign_video,
-                    max_comments=max_comments,
-                    prefix="campaign_",
-                    keywords=keywords
-                )
-
     def run(self, config):
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([t("marketyoutube_tab_videos"), t(
-            "marketyoutube_tab_stats"), t("marketyoutube_tab_campaigns"), "Channel Manager", "Debug Stats API", "Responses"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            t("marketyoutube_tab_videos"),
+            t("marketyoutube_tab_stats"),
+            t("marketyoutube_tab_campaigns"),
+            "Channel Manager",
+            "Debug Stats API",
+            "Responses"
+        ])
 
         filter_options = {
             t("marketyoutube_filter_title"): "title",
@@ -866,7 +453,6 @@ class MarketyoutubePlugin(Plugin):
             )
             keyword = st.text_input(
                 t("marketyoutube_keyword"), key="keyword_stats")
-            # Plus de pagination dans les stats
             all_keywords = set()
             for video in get_videos():
                 all_keywords.update(video['keywords'])
@@ -882,21 +468,29 @@ class MarketyoutubePlugin(Plugin):
                 keyword_filter=selected_keyword_filter if selected_keyword_filter else None
             )
 
-        # Tab 3: Campaigns
-        self.display_campaign_tab(config, tab3)
+        # Tab 3: Campaigns (utiliser le widget)
+        with tab3:
+            campaign_widget = MarketOneVideoWidget(
+                name="market_one_video",
+                prefix="market_one_video",
+                plugin_manager=self.plugin_manager,
+                campaign_keywords=config['marketyoutube']['campaign_keywords'],
+                max_campaign_videos=int(config['marketyoutube']['max_campaign_videos']),
+                max_campaign_comments=int(config['marketyoutube']['max_campaign_comments']),
+                response_prompt=config['marketyoutube']['response_prompt']
+            )
+            campaign_widget.display()
 
         # Tab 4: Channel Manager
         with tab4:
             self.display_channel_manager(config)
 
-            # Tab 5: Debug Stats API (inchangé)
+        # Tab 5: Debug Stats API
         with tab5:
             st.header("Debug YouTube Analytics API")
-
             st.subheader("Gestion du Quota YouTube")
             st.write(
                 "Vous pouvez vérifier l'usage réel du quota ici : [Google Cloud Console Quotas](https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas?hl=fr&inv=1&invt=AbrCIQ&pageState=(%22allQuotasTable%22%253A(%22c%22%253A%5B%22displayDimensions%22%5D)))")
-            # Création d'une instance pour accéder à set_global_quota_usage
             youtube_api = YoutubeAPI(config)
             current_quota = youtube_api.get_quota_usage()['quota_usage']
             st.write(f"Quota estimé actuel : {current_quota} unités")
