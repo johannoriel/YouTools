@@ -8,6 +8,8 @@ import time
 import random
 from typing import List, Dict, Any
 import ast
+from streamlit_lexical import streamlit_lexical
+
 
 # Translations
 translations["en"].update({
@@ -539,7 +541,7 @@ class LlmPlugin(Plugin):
 
         return results
 
-    def process_with_llm(self, prompt: str, sysprompt: str, context: str, repeat_on_failure: bool = True, number_repeat: int = 1) -> str:
+    def process_with_llm(self, prompt, sysprompt: str = None, context = None, repeat_on_failure: bool = True, number_repeat: int = 1) -> str:
         self.get_api_keys()
         self.get_models()
         self.get_apis()
@@ -564,7 +566,12 @@ class LlmPlugin(Plugin):
         while attempt <= number_repeat:
             try:
                 # Envoyer contexte et prompt comme une liste
-                prompts = [context, prompt] if context else [prompt]
+                if isinstance(prompt, str):
+                    prompts = [prompt]
+                else:
+                    prompts = prompt
+
+                prompts.append(context)
                 return self.call_llm(
                     url=model["url"],
                     api_key=api_key,
@@ -693,13 +700,18 @@ class LlmPlugin(Plugin):
 
         for i, persona in enumerate(st.session_state.personas):
             with st.expander(persona.get("name", f"Persona {i}")):
-                col1, col2 = st.columns(2)
+                col1, col2 = st.columns([1, 4])
                 with col1:
                     name = st.text_input(t("llm_persona_name_label"), value=persona.get(
                         "name", ""), key=f"persona_name_{i}")
                 with col2:
-                    prompt = st.text_area(t("llm_persona_prompt_label"), value=persona.get(
-                        "prompt", ""), key=f"persona_prompt_{i}")
+                    #prompt = st.text_area(t("llm_persona_prompt_label"), value=persona.get(
+                    #    "prompt", ""), key=f"persona_prompt_{i}")
+                    prompt = streamlit_lexical(
+                        value=persona.get("prompt", ""),
+                        height=400,
+                        key=f"persona_prompt_{i}"
+                    )
                 if st.button("Remove", key=f"remove_persona_{i}"):
                     del st.session_state.personas[i]
                     st.rerun()
