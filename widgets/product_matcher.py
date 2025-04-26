@@ -11,7 +11,7 @@ import numpy as np
 from datetime import datetime
 from fuzzywuzzy import fuzz
 from sentence_transformers import SentenceTransformer, util
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 translations["en"].update({
     "extract_keywords": "Extract key topics and keywords as a comma-separated list (max 10)",
@@ -29,6 +29,7 @@ translations["en"].update({
     "comparison_type": "Select Comparison Type",
     "keywords_only": "Keywords Only",
     "full_text": "Full Text",
+    "video_title_column": "Video Title",
 })
 
 translations["fr"].update({
@@ -47,6 +48,7 @@ translations["fr"].update({
     "comparison_type": "Sélectionner le type de comparaison",
     "keywords_only": "Mots-clés uniquement",
     "full_text": "Texte complet",
+    "video_title_column": "Titre de la vidéo",
 })
 
 class VideoProductMatchWidget(Widget):
@@ -194,6 +196,9 @@ class VideoProductMatchWidget(Widget):
             if scores_df is None:
                 st.error(t("no_videos_error"))
                 return
+            # Add video titles to scores_df
+            video_titles = videos_df.set_index('video_id')['title'].to_dict()
+            scores_df.insert(0, 'video_title', [video_titles.get(vid, '') for vid in scores_df.index])
             st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products)
 
         # Check if scores data exists in session state
@@ -202,9 +207,19 @@ class VideoProductMatchWidget(Widget):
 
             # Configure AgGrid
             gb = GridOptionsBuilder.from_dataframe(scores_df)
-            gb.configure_default_column(editable=False, type=["numericColumn"], cellRenderer="agAnimateShowChangeCellRenderer")
-            for col in scores_df.columns:
-                gb.configure_column(col, headerName=col, width=100, valueFormatter="Number(x).toFixed(3)")
+            gb.configure_default_column(editable=False)
+            gb.configure_column('video_title', headerName=t("video_title_column"), width=300, pinned='left')
+            for product in products:
+                col_id = str(product['id'])
+                gb.configure_column(
+                    col_id,
+                    headerName=col_id,
+                    width=100,
+                    type=["numericColumn"],
+                    cellRenderer="agAnimateShowChangeCellRenderer",
+                    valueFormatter="Number(x).toFixed(3)",
+                    headerTooltip=product['title']
+                )
             gb.configure_selection(selection_mode="single")
             grid_options = gb.build()
 
@@ -213,18 +228,18 @@ class VideoProductMatchWidget(Widget):
                 scores_df,
                 gridOptions=grid_options,
                 height=400,
-                update_mode=GridUpdateMode.SELECTION_CHANGED,
                 fit_columns_on_grid_load=True,
                 key=f"{self.prefix}_scores_grid"
             )
 
+            # Check for focused cell
             if "grid_response" in grid_response and "gridState" in grid_response["grid_response"]:
                 focused_cell = grid_response["grid_response"]["gridState"].get("focusedCell", {})
                 if focused_cell:
                     row_index = focused_cell.get("rowIndex")
                     col_id = focused_cell.get("colId")
 
-                    if row_index is not None and col_id is not None:
+                    if row_index is not None and col_id is not None and col_id != 'video_title':
                         video_id = scores_df.index[row_index]
                         product_id = col_id
 
