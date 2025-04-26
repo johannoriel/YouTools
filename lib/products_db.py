@@ -4,7 +4,7 @@ import os
 
 DB_FILE = "products.db"
 class ProductsDB:
-    def __init__(self, db_path: str):
+    def __init__(self):
         #self.db_path = db_path
         self.db_path = DB_FILE
         self._initialize_db()

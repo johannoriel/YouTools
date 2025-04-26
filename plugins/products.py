@@ -10,8 +10,10 @@ import os
 translations["en"].update({
     "products_tab_list": "Products List",
     "products_tab_add": "Add Product",
+    "products_tab_import": "Import Products",  # Nouvel onglet
     "products_header_list": "Product Management",
     "products_header_add": "Add New Product",
+    "products_header_import": "Import Products from Videos",  # Nouveau titre
     "products_title_label": "Product Title",
     "products_url_label": "Product URL",
     "products_keywords_label": "Keywords (comma-separated)",
@@ -36,8 +38,10 @@ translations["en"].update({
 translations["fr"].update({
     "products_tab_list": "Liste des produits",
     "products_tab_add": "Ajouter un produit",
+    "products_tab_import": "Importer des produits",  # Nouvel onglet
     "products_header_list": "Gestion des produits",
     "products_header_add": "Ajouter un nouveau produit",
+    "products_header_import": "Importer des produits depuis des vidéos",  # Nouveau titre
     "products_title_label": "Titre du produit",
     "products_url_label": "URL du produit",
     "products_keywords_label": "Mots-clés (séparés par des virgules)",
@@ -62,7 +66,7 @@ translations["fr"].update({
 class ProductsPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
-        self.db = ProductsDB(os.path.expanduser("~/products.db"))
+        self.db = ProductsDB()
 
     def get_config_fields(self):
         return {
@@ -76,15 +80,18 @@ class ProductsPlugin(Plugin):
     def get_tabs(self):
         return [
             {"name": t("products_tab_list"), "plugin": "productsplugin"},
-            {"name": t("products_tab_add"), "plugin": "productsplugin"}
+            {"name": t("products_tab_add"), "plugin": "productsplugin"},
+            {"name": t("products_tab_import"), "plugin": "productsplugin"}  # Nouvel onglet
         ]
 
     def run(self, config):
-        tab1, tab2 = st.tabs([t("products_tab_list"), t("products_tab_add")])
+        tab1, tab2, tab3 = st.tabs([t("products_tab_list"), t("products_tab_add"), t("products_tab_import")])
         with tab1:
             self._run_list_tab(config)
         with tab2:
             self._run_add_tab(config)
+        with tab3:
+            self._run_import_tab(config)
 
     def _run_list_tab(self, config):
         from widgets.product_editor import ProductEditorWidget
@@ -195,6 +202,13 @@ class ProductsPlugin(Plugin):
         editor = ProductEditorWidget("producteditor", "add", self.plugin_manager)
         form = editor.display(button_label=t("products_add_button"))
         self._handle_form_submission(form)
+
+    def _run_import_tab(self, config):
+        from widgets.product_importer import ProductImporterWidget
+        st.header(t("products_header_import"))
+
+        importer = ProductImporterWidget("productimporter", "import", self.plugin_manager)
+        importer.display()
 
     def _handle_form_submission(self, form, product_id=None):
         if form["button"]:

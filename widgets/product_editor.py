@@ -9,7 +9,7 @@ import os
 class ProductEditorWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
-        self.db = ProductsDB(os.path.expanduser("~/products.db"))
+        self.db = ProductsDB()
 
     def display(self, product=None, button_label="Save"):
         title = st.text_input(t("products_title_label"), value=product['title'] if product is not None else "", key=f"{self.prefix}_title")
@@ -27,8 +27,8 @@ class ProductEditorWidget(Widget):
         all_products = self.db.get_all_products()
         product_options = {p['id']: f"{p['id']} - {p['title']}" for p in all_products if product is None or p['id'] != product.get('id')}
         selected_related = []
-        if isinstance(product, dict) and product.get('related') and isinstance(product['related'], str):
-            selected_related = [int(id) for id in product['related'].split(',') if id]
+        if product is not None and isinstance(product['related'], str) and product['related'].strip():
+            selected_related = [int(id) for id in product['related'].split(',') if id and id.isdigit()]
         related = st.multiselect(
             t("products_related_label"),
             options=list(product_options.keys()),
