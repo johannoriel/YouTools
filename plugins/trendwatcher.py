@@ -825,13 +825,13 @@ class TrendwatcherPlugin(Plugin):
     def run(self, config):
         """Main plugin logic"""
         tab1, tab2, tab3, tab4 = st.tabs(
-            ["Surveiller", "Process Videos", "Keyword cluster", "Video List"])
+            ["Surveiller", "Keyword cluster", "Get Videos metadata", "Video List"])
         with tab1:
             self.trend_watcher(config)
         with tab2:
-            self.process_videos(config)
-        with tab3:
             self.keyword_cluster(config)
+        with tab3:
+            self.process_videos(config)
         with tab4:
             self.video_list(config)
 
