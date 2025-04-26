@@ -30,6 +30,8 @@ translations["en"].update({
     "keywords_only": "Keywords Only",
     "full_text": "Full Text",
     "video_title_column": "Video Title",
+    "video_keywords": "Video Keywords",
+    "product_keywords": "Product Keywords",
 })
 
 translations["fr"].update({
@@ -49,6 +51,8 @@ translations["fr"].update({
     "keywords_only": "Mots-clés uniquement",
     "full_text": "Texte complet",
     "video_title_column": "Titre de la vidéo",
+    "video_keywords": "Mots-clés de la vidéo",
+    "product_keywords": "Mots-clés du produit",
 })
 
 class VideoProductMatchWidget(Widget):
@@ -92,11 +96,11 @@ class VideoProductMatchWidget(Widget):
         llm_keywords = llm_response.split(',') if llm_response else []
 
         all_keywords = list(set(keywords + llm_keywords))
-        return ' '.join([kw.strip().lower() for kw in all_keywords if kw.strip()])
+        return [kw.strip().lower() for kw in all_keywords if kw.strip()], ' '.join(all_keywords)
 
     def get_comparison_text(self, video_row, product, comparison_type):
         if comparison_type == "keywords_only":
-            video_text = self.extract_video_keywords(video_row)
+            _, video_text = self.extract_video_keywords(video_row)
             product_text = str(product['keywords']).lower() if product['keywords'] else ''
         else:  # full_text
             video_text = f"{video_row['title']} {video_row['description'] if pd.notnull(video_row['description']) else ''}".lower()
@@ -126,14 +130,16 @@ class VideoProductMatchWidget(Widget):
     def calculate_relevance_scores(self, videos_df, products, similarity_method, comparison_type):
         video_texts = []
         video_ids = []
+        video_keywords_list = []
         progress_bar = st.progress(0)
         total_steps = len(videos_df)
 
         for idx, row in videos_df.iterrows():
-            keywords = self.extract_video_keywords(row)
-            if keywords:
-                video_texts.append(keywords if comparison_type == "keywords_only" else f"{row['title']} {row['description'] if pd.notnull(row['description']) else ''}".lower())
+            keywords_list, keywords_text = self.extract_video_keywords(row)
+            if keywords_text:
+                video_texts.append(keywords_text if comparison_type == "keywords_only" else f"{row['title']} {row['description'] if pd.notnull(row['description']) else ''}".lower())
                 video_ids.append(row['video_id'])
+                video_keywords_list.append(keywords_list)
             progress_bar.progress((idx + 1) / total_steps)
 
         product_texts = []
@@ -144,7 +150,7 @@ class VideoProductMatchWidget(Widget):
             product_ids.append(str(product['id']))
 
         if not video_texts or not product_texts:
-            return None, None, None
+            return None, None, None, None
 
         if similarity_method == "tfidf_cosine":
             similarity_matrix = self.calculate_tfidf_cosine(video_texts, product_texts)
@@ -159,7 +165,7 @@ class VideoProductMatchWidget(Widget):
             columns=product_ids
         )
         progress_bar.empty()
-        return scores_df, videos_df, products
+        return scores_df, videos_df, products, video_keywords_list
 
     def display(self):
         st.title(t("match_title"))
@@ -192,48 +198,53 @@ class VideoProductMatchWidget(Widget):
 
         if st.button(t("calculate_button"), key=f"{self.prefix}_calculate_button"):
             st.write(t("progress_text"))
-            scores_df, videos_df, products = self.calculate_relevance_scores(videos_df, products, similarity_method, comparison_type)
+            scores_df, videos_df, products, video_keywords_list = self.calculate_relevance_scores(videos_df, products, similarity_method, comparison_type)
             if scores_df is None:
                 st.error(t("no_videos_error"))
                 return
             # Add video titles to scores_df
             video_titles = videos_df.set_index('video_id')['title'].to_dict()
             scores_df.insert(0, 'video_title', [video_titles.get(vid, '') for vid in scores_df.index])
-            st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products)
+            st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products, video_keywords_list)
 
         # Check if scores data exists in session state
         if f"{self.prefix}_scores_data" in st.session_state:
-            scores_df, videos_df, products = st.session_state[f"{self.prefix}_scores_data"]
+            scores_df, videos_df, products, video_keywords_list = st.session_state[f"{self.prefix}_scores_data"]
+
+            # Configure cell style for gradient background (black to red)
+            cellsytle_jscode = JsCode("""
+            function(params) {
+                if (params.value != null) {
+                    var value = parseFloat(params.value);
+                    var red = Math.round(255 * value);
+                    var green = 0;
+                    var blue = 0;
+                    return {
+                        'color': 'white',
+                        'backgroundColor': 'rgb(' + red + ',' + green + ',' + blue + ')'
+                    }
+                }
+                return {
+                    'color': 'white',
+                    'backgroundColor': 'black'
+                }
+            }
+            """)
 
             # Configure AgGrid
             gb = GridOptionsBuilder.from_dataframe(scores_df)
             gb.configure_default_column(editable=False)
             gb.configure_column('video_title', headerName=t("video_title_column"), width=300, pinned='left')
-            cellsytle_jscode = JsCode("""
-            function(params){
-                if (parseFloat(params.value) > 0.1) {
-                    return {
-                        'color': 'red',
-                        'backgroundColor': 'white',
-                    }
-                } else {
-                    return {
-                        'color': 'black',
-                        'backgroundColor': 'white',
-                    }
-                }
-            }
-            """)
             for product in products:
                 col_id = str(product['id'])
                 gb.configure_column(
                     col_id,
                     headerName=col_id,
                     width=100,
-                    cellStyle=cellsytle_jscode,
                     type=["numericColumn"],
                     valueFormatter="Number(x).toFixed(3)",
                     headerTooltip=product['title'],
+                    cellStyle=cellsytle_jscode
                 )
             gb.configure_selection(selection_mode="single")
             grid_options = gb.build()
@@ -244,8 +255,8 @@ class VideoProductMatchWidget(Widget):
                 gridOptions=grid_options,
                 height=400,
                 fit_columns_on_grid_load=True,
-                allow_unsafe_jscode=True,
-                key=f"{self.prefix}_scores_grid"
+                key=f"{self.prefix}_scores_grid",
+                allow_unsafe_jscode=True
             )
 
             # Check for focused cell
@@ -265,7 +276,10 @@ class VideoProductMatchWidget(Widget):
                         st.subheader(t("video_details"))
                         st.write(f"**Title**: {video_row['title']}")
                         st.write(f"**URL**: [{video_row['url']}]({video_row['url']})")
+                        st.write(f"**{t('video_keywords')}**: {', '.join(video_keywords_list[row_index])}")
 
                         st.subheader(t("product_details"))
                         st.write(f"**Title**: {product['title']}")
                         st.write(f"**URL**: [{product['url']}]({product['url']})")
+                        product_keywords = str(product['keywords']).split(',') if product['keywords'] else []
+                        st.write(f"**{t('product_keywords')}**: {', '.join([kw.strip() for kw in product_keywords])}")
