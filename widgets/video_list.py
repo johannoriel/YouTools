@@ -32,8 +32,7 @@ class VideoListWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
 
-    def display(self):
-        st.title(t("video_list_title"))
+    def select_video_list(self):
         work_directory = self.plugin_manager.config["common"]["work_directory"]
 
         # Recherche des fichiers CSV commençant par "video_list" dans le répertoire de travail
@@ -42,7 +41,7 @@ class VideoListWidget(Widget):
 
         if not csv_files:
             st.error(t("no_file_error"))
-            return
+            return None
 
         # Colonnes attendues pour un CSV valide
         required_columns = {'keyword', 'url', 'video_id', 'title', 'view_count', 'language',
@@ -63,7 +62,7 @@ class VideoListWidget(Widget):
 
         if not dfs:
             st.error(t("no_file_error"))
-            return
+            return None
 
         combined_df = pd.concat(dfs, ignore_index=True)
 
@@ -144,12 +143,23 @@ class VideoListWidget(Widget):
             key=f"{self.prefix}_video_dataframe"
         )
 
+        return selected_rows.get('selection', {}).get('rows', [])
+
+    def display(self):
+        st.title(t("video_list_title"))
+
+        selected_rows = self.select_video_list()
+
+        if selected_rows is None:
+            return
+
         # Checkbox pour écraser ou renommer
         overwrite = st.checkbox(t("overwrite_checkbox"),
                                 key=f"{self.prefix}_overwrite_checkbox")
 
         # Bouton pour exporter la liste filtrée
         if st.button(t("export_button"), key=f"{self.prefix}_export_button"):
+            work_directory = self.plugin_manager.config["common"]["work_directory"]
             base_filename = "filtered_video_list.csv"
             export_path = os.path.join(work_directory, base_filename)
 
@@ -165,6 +175,6 @@ class VideoListWidget(Widget):
                         break
                     i += 1
 
-            filtered_df.to_csv(export_path, index=False)
+            filtered_df.iloc[selected_rows].to_csv(export_path, index=False)
             st.success(t("export_success").format(
                 filename=os.path.basename(export_path)))
