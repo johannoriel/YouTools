@@ -1,10 +1,9 @@
 from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-import pandas as pd
 from lib.products_db import ProductsDB
 import os
+from widgets.product_db import ProductGridWidget
 
 # Translations
 translations["en"].update({
@@ -12,10 +11,12 @@ translations["en"].update({
     "products_tab_add": "Add Product",
     "products_tab_import": "Import from Videos",
     "products_tab_import_markdown": "Import from Markdown",
+    "products_tab_prompts": "Prompt Configuration",
     "products_header_list": "Product Management",
     "products_header_add": "Add New Product",
     "products_header_import": "Import Products from Videos",
     "products_header_import_markdown": "Import Products from Markdown Files",
+    "products_header_prompts": "Configure Prompts",
     "products_title_label": "Product Title",
     "products_url_label": "Product URL",
     "products_keywords_label": "Keywords (comma-separated)",
@@ -33,6 +34,9 @@ translations["en"].update({
     "products_processing": "Processing...",
     "products_success": "Operation completed successfully!",
     "products_error": "An error occurred: {error}",
+    "products_keywords_prompt_label": "Keywords Generation Prompt",
+    "products_description_prompt_label": "Description Generation Prompt",
+    "products_save_prompts_button": "Save Prompts",
     "products_keywords_prompt": "Generate a comma-separated list of relevant keywords for a product titled '{title}' with description: {description}",
     "products_description_prompt": "Generate a markdown-formatted description for a product titled '{title}' with keywords: {keywords}",
     "products_db_path_label": "Products Database Path",
@@ -45,10 +49,12 @@ translations["fr"].update({
     "products_tab_add": "Ajouter un produit",
     "products_tab_import": "Importer depuis des vidéos",
     "products_tab_import_markdown": "Importer depuis Markdown",
+    "products_tab_prompts": "Configuration des prompts",
     "products_header_list": "Gestion des produits",
     "products_header_add": "Ajouter un nouveau produit",
     "products_header_import": "Importer des produits depuis des vidéos",
     "products_header_import_markdown": "Importer des produits depuis des fichiers Markdown",
+    "products_header_prompts": "Configurer les prompts",
     "products_title_label": "Titre du produit",
     "products_url_label": "URL du produit",
     "products_keywords_label": "Mots-clés (séparés par des virgules)",
@@ -66,6 +72,9 @@ translations["fr"].update({
     "products_processing": "Traitement en cours...",
     "products_success": "Opération terminée avec succès !",
     "products_error": "Une erreur s'est produite : {error}",
+    "products_keywords_prompt_label": "Prompt de génération des mots-clés",
+    "products_description_prompt_label": "Prompt de génération de la description",
+    "products_save_prompts_button": "Enregistrer les prompts",
     "products_keywords_prompt": "Générer une liste de mots-clés pertinents séparés par des virgules pour un produit intitulé '{title}' avec la description : {description}",
     "products_description_prompt": "Générer une description au format markdown pour un produit intitulé '{title}' avec les mots-clés : {keywords}",
     "products_db_path_label": "Chemin de la base de données des produits",
@@ -94,6 +103,16 @@ class ProductsPlugin(Plugin):
                 "type": "text",
                 "label": t("excluded_directorys_label"),
                 "default": ".git, node_modules, venv"
+            },
+            "keywords_prompt": {
+                "type": "textarea",
+                "label": t("products_keywords_prompt_label"),
+                "default": t("products_keywords_prompt")
+            },
+            "description_prompt": {
+                "type": "textarea",
+                "label": t("products_description_prompt_label"),
+                "default": t("products_description_prompt")
             }
         }
 
@@ -102,15 +121,17 @@ class ProductsPlugin(Plugin):
             {"name": t("products_tab_list"), "plugin": "productsplugin"},
             {"name": t("products_tab_add"), "plugin": "productsplugin"},
             {"name": t("products_tab_import"), "plugin": "productsplugin"},
-            {"name": t("products_tab_import_markdown"), "plugin": "productsplugin"}
+            {"name": t("products_tab_import_markdown"), "plugin": "productsplugin"},
+            {"name": t("products_tab_prompts"), "plugin": "productsplugin"}
         ]
 
     def run(self, config):
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             t("products_tab_list"),
             t("products_tab_add"),
             t("products_tab_import"),
-            t("products_tab_import_markdown")
+            t("products_tab_import_markdown"),
+            t("products_tab_prompts")
         ])
         with tab1:
             self._run_list_tab(config)
@@ -120,41 +141,16 @@ class ProductsPlugin(Plugin):
             self._run_import_tab(config)
         with tab4:
             self._run_import_markdown_tab(config)
+        with tab5:
+            self._run_prompts_tab(config)
 
     def _run_list_tab(self, config):
         from widgets.product_editor import ProductEditorWidget
         st.header(t("products_header_list"))
-        # Load products
-        products = self.db.get_all_products()
-        df = pd.DataFrame(products)
 
-        # Configure AgGrid
-        gb = GridOptionsBuilder.from_dataframe(df)
-        gb.configure_default_column(editable=False, flex=1)
-        gb.configure_column("id", width=80)
-        gb.configure_column("title", width=200)
-        gb.configure_column("url", width=200)
-        gb.configure_column("keywords", width=200)
-        gb.configure_column("type", width=150)
-        gb.configure_column("source", width=150)
-        gb.configure_column("goal", width=150)
-        gb.configure_column("related", width=150)
-        gb.configure_selection(selection_mode="multiple", use_checkbox=True)
-        grid_options = gb.build()
+        grid_widget = ProductGridWidget("productgrid", "grid", self.plugin_manager)
+        selected_rows = grid_widget.display()
 
-        # Display grid
-        response = AgGrid(
-            df,
-            gridOptions=grid_options,
-            height=400,
-            fit_columns_on_grid_load=True,
-            update_mode=GridUpdateMode.SELECTION_CHANGED,
-            key="products_grid"
-        )
-
-        selected_rows = response['selected_rows']
-
-        # Action buttons
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button(t("products_delete_button")) and selected_rows is not None and not selected_rows.empty:
@@ -172,15 +168,16 @@ class ProductsPlugin(Plugin):
                 with st.spinner(t("products_processing")):
                     try:
                         for _, row in selected_rows.iterrows():
-                            prompt = t("products_keywords_prompt").format(
+                            prompt = config.get("products", {}).get("keywords_prompt", t("products_keywords_prompt")).format(
                                 title=row['title'],
-                                description=row['description'] or ""
                             )
+                            content_context = f"content: {row['content'] or ''}"
+                            description_context = f"description: {row['description'] or ''}"
                             llm_response = self.process_with_llm(
-                                prompt,
-                                config['llm']['llm_sys_prompt'],
-                                row['title']
+                                [content_context, description_context, prompt],
                             )
+                            if llm_response.startswith("```markdown\n"):
+                                llm_response = llm_response[len("```markdown\n"):-len("\n```")]
                             self.db.update_product_field(
                                 int(row['id']),
                                 'keywords',
@@ -196,15 +193,16 @@ class ProductsPlugin(Plugin):
                 with st.spinner(t("products_processing")):
                     try:
                         for _, row in selected_rows.iterrows():
-                            prompt = t("products_description_prompt").format(
-                                title=row['title'],
-                                keywords=row['keywords'] or ""
+                            prompt = config.get("products", {}).get("description_prompt", t("products_description_prompt")).format(
+                                title=row['title']
                             )
+                            keywords_context = f"keywords: {row['keywords'] or ''}"
+                            content_context = f"content: {row['content'] or ''}"
                             llm_response = self.process_with_llm(
-                                prompt,
-                                config['llm']['llm_sys_prompt'],
-                                row['title']
+                                [keywords_context, content_context, prompt],
                             )
+                            if llm_response.startswith("```markdown\n"):
+                                llm_response = llm_response[len("```markdown\n"):-len("\n```")]
                             self.db.update_product_field(
                                 int(row['id']),
                                 'description',
@@ -215,7 +213,6 @@ class ProductsPlugin(Plugin):
                     except Exception as e:
                         st.error(t("products_error").format(error=str(e)))
 
-        # Edit selected product
         if selected_rows is not None and not selected_rows.empty and len(selected_rows) == 1:
             with st.expander("Edit Product"):
                 product = selected_rows.iloc[0]
@@ -246,6 +243,33 @@ class ProductsPlugin(Plugin):
         markdown_root = os.path.expanduser(config.get("products", {}).get("markdown_root", "~/markdown"))
         excluded_dirs = self.plugin_manager.config.get("products", {}).get("excluded_directorys", "").split(",")
         importer.import_markdown_display(markdown_root, excluded_dirs)
+
+    def _run_prompts_tab(self, config):
+        st.header(t("products_header_prompts"))
+
+        keywords_prompt = st.text_area(
+            t("products_keywords_prompt_label"),
+            value=config.get("products", {}).get("keywords_prompt", t("products_keywords_prompt")),
+            key=f"{self.name}_keywords_prompt"
+        )
+
+        description_prompt = st.text_area(
+            t("products_description_prompt_label"),
+            value=config.get("products", {}).get("description_prompt", t("products_description_prompt")),
+            key=f"{self.name}_description_prompt"
+        )
+
+        if st.button(t("products_save_prompts_button")):
+            with st.spinner(t("products_processing")):
+                try:
+                    config.setdefault("products", {})
+                    config["products"]["keywords_prompt"] = keywords_prompt
+                    config["products"]["description_prompt"] = description_prompt
+                    self.plugin_manager.save_config(config)
+                    st.success(t("products_success"))
+                    st.rerun()
+                except Exception as e:
+                    st.error(t("products_error").format(error=str(e)))
 
     def _handle_form_submission(self, form, product_id=None):
         if form["button"]:
