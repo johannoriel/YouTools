@@ -11,7 +11,7 @@ import numpy as np
 from datetime import datetime
 from fuzzywuzzy import fuzz
 from sentence_transformers import SentenceTransformer, util
-from st_aggrid import AgGrid, GridOptionsBuilder
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
 translations["en"].update({
     "extract_keywords": "Extract key topics and keywords as a comma-separated list (max 10)",
@@ -209,16 +209,31 @@ class VideoProductMatchWidget(Widget):
             gb = GridOptionsBuilder.from_dataframe(scores_df)
             gb.configure_default_column(editable=False)
             gb.configure_column('video_title', headerName=t("video_title_column"), width=300, pinned='left')
+            cellsytle_jscode = JsCode("""
+            function(params){
+                if (parseFloat(params.value) > 0.1) {
+                    return {
+                        'color': 'red',
+                        'backgroundColor': 'white',
+                    }
+                } else {
+                    return {
+                        'color': 'black',
+                        'backgroundColor': 'white',
+                    }
+                }
+            }
+            """)
             for product in products:
                 col_id = str(product['id'])
                 gb.configure_column(
                     col_id,
                     headerName=col_id,
                     width=100,
+                    cellStyle=cellsytle_jscode,
                     type=["numericColumn"],
-                    cellRenderer="agAnimateShowChangeCellRenderer",
                     valueFormatter="Number(x).toFixed(3)",
-                    headerTooltip=product['title']
+                    headerTooltip=product['title'],
                 )
             gb.configure_selection(selection_mode="single")
             grid_options = gb.build()
@@ -229,6 +244,7 @@ class VideoProductMatchWidget(Widget):
                 gridOptions=grid_options,
                 height=400,
                 fit_columns_on_grid_load=True,
+                allow_unsafe_jscode=True,
                 key=f"{self.prefix}_scores_grid"
             )
 
