@@ -10,10 +10,12 @@ import os
 translations["en"].update({
     "products_tab_list": "Products List",
     "products_tab_add": "Add Product",
-    "products_tab_import": "Import Products",  # Nouvel onglet
+    "products_tab_import": "Import from Videos",
+    "products_tab_import_markdown": "Import from Markdown",
     "products_header_list": "Product Management",
     "products_header_add": "Add New Product",
-    "products_header_import": "Import Products from Videos",  # Nouveau titre
+    "products_header_import": "Import Products from Videos",
+    "products_header_import_markdown": "Import Products from Markdown Files",
     "products_title_label": "Product Title",
     "products_url_label": "Product URL",
     "products_keywords_label": "Keywords (comma-separated)",
@@ -33,15 +35,20 @@ translations["en"].update({
     "products_error": "An error occurred: {error}",
     "products_keywords_prompt": "Generate a comma-separated list of relevant keywords for a product titled '{title}' with description: {description}",
     "products_description_prompt": "Generate a markdown-formatted description for a product titled '{title}' with keywords: {keywords}",
+    "products_db_path_label": "Products Database Path",
+    "markdown_root_label": "Markdown Root Directory",
+    "excluded_directorys_label": "Excluded Directories (comma-separated)",
 })
 
 translations["fr"].update({
     "products_tab_list": "Liste des produits",
     "products_tab_add": "Ajouter un produit",
-    "products_tab_import": "Importer des produits",  # Nouvel onglet
+    "products_tab_import": "Importer depuis des vidéos",
+    "products_tab_import_markdown": "Importer depuis Markdown",
     "products_header_list": "Gestion des produits",
     "products_header_add": "Ajouter un nouveau produit",
-    "products_header_import": "Importer des produits depuis des vidéos",  # Nouveau titre
+    "products_header_import": "Importer des produits depuis des vidéos",
+    "products_header_import_markdown": "Importer des produits depuis des fichiers Markdown",
     "products_title_label": "Titre du produit",
     "products_url_label": "URL du produit",
     "products_keywords_label": "Mots-clés (séparés par des virgules)",
@@ -61,6 +68,9 @@ translations["fr"].update({
     "products_error": "Une erreur s'est produite : {error}",
     "products_keywords_prompt": "Générer une liste de mots-clés pertinents séparés par des virgules pour un produit intitulé '{title}' avec la description : {description}",
     "products_description_prompt": "Générer une description au format markdown pour un produit intitulé '{title}' avec les mots-clés : {keywords}",
+    "products_db_path_label": "Chemin de la base de données des produits",
+    "markdown_root_label": "Répertoire racine Markdown",
+    "excluded_directorys_label": "Répertoires exclus (séparés par des virgules)",
 })
 
 class ProductsPlugin(Plugin):
@@ -72,8 +82,18 @@ class ProductsPlugin(Plugin):
         return {
             "products_db_path": {
                 "type": "text",
-                "label": t("products_db_path"),
+                "label": t("products_db_path_label"),
                 "default": "products.db"
+            },
+            "markdown_root": {
+                "type": "text",
+                "label": t("markdown_root_label"),
+                "default": "~/markdown"
+            },
+            "excluded_directorys": {
+                "type": "text",
+                "label": t("excluded_directorys_label"),
+                "default": ".git, node_modules, venv"
             }
         }
 
@@ -81,17 +101,25 @@ class ProductsPlugin(Plugin):
         return [
             {"name": t("products_tab_list"), "plugin": "productsplugin"},
             {"name": t("products_tab_add"), "plugin": "productsplugin"},
-            {"name": t("products_tab_import"), "plugin": "productsplugin"}  # Nouvel onglet
+            {"name": t("products_tab_import"), "plugin": "productsplugin"},
+            {"name": t("products_tab_import_markdown"), "plugin": "productsplugin"}
         ]
 
     def run(self, config):
-        tab1, tab2, tab3 = st.tabs([t("products_tab_list"), t("products_tab_add"), t("products_tab_import")])
+        tab1, tab2, tab3, tab4 = st.tabs([
+            t("products_tab_list"),
+            t("products_tab_add"),
+            t("products_tab_import"),
+            t("products_tab_import_markdown")
+        ])
         with tab1:
             self._run_list_tab(config)
         with tab2:
             self._run_add_tab(config)
         with tab3:
             self._run_import_tab(config)
+        with tab4:
+            self._run_import_markdown_tab(config)
 
     def _run_list_tab(self, config):
         from widgets.product_editor import ProductEditorWidget
@@ -208,7 +236,16 @@ class ProductsPlugin(Plugin):
         st.header(t("products_header_import"))
 
         importer = ProductImporterWidget("productimporter", "import", self.plugin_manager)
-        importer.display()
+        importer.import_videodb_display()
+
+    def _run_import_markdown_tab(self, config):
+        from widgets.product_importer import ProductImporterWidget
+        st.header(t("products_header_import_markdown"))
+
+        importer = ProductImporterWidget("productimporter", "import_markdown", self.plugin_manager)
+        markdown_root = os.path.expanduser(config.get("products", {}).get("markdown_root", "~/markdown"))
+        excluded_dirs = self.plugin_manager.config.get("products", {}).get("excluded_directorys", "").split(",")
+        importer.import_markdown_display(markdown_root, excluded_dirs)
 
     def _handle_form_submission(self, form, product_id=None):
         if form["button"]:
