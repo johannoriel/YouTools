@@ -8,7 +8,6 @@ from lib.products_db import ProductsDB
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-from datetime import datetime
 from fuzzywuzzy import fuzz
 from sentence_transformers import SentenceTransformer, util
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
@@ -41,6 +40,9 @@ translations["en"].update({
     "select_videos": "Select Video Files",
     "thresholds": "Score Thresholds",
     "method_comparison": "Comparison of Scoring Methods",
+    "method_column": "Method",
+    "single_method_tab": "Single Method",
+    "compare_methods_tab": "Compare Methods",
 })
 
 translations["fr"].update({
@@ -69,6 +71,9 @@ translations["fr"].update({
     "select_videos": "Sélectionner les fichiers vidéo",
     "thresholds": "Seuils de score",
     "method_comparison": "Comparaison des méthodes de scoring",
+    "method_column": "Méthode",
+    "single_method_tab": "Méthode unique",
+    "compare_methods_tab": "Comparaison des méthodes",
 })
 
 @st.cache_data
@@ -81,14 +86,13 @@ class VideoProductMatchWidget(Widget):
         self.db = ProductsDB()
         self.work_directory = self.plugin_manager.config["common"]["work_directory"]
         self.sentence_model = get_sentence_model()
+        self.methods = ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy", "manual_count", "llm_score"]
 
     def normalize_keyword(self, keyword):
         keyword = keyword.lower()
-        keyword = ''.join(c for c in unicodedata.normalize('NFD', keyword)
-                         if unicodedata.category(c) != 'Mn')
+        keyword = ''.join(c for c in unicodedata.normalize('NFD', keyword) if unicodedata.category(c) != 'Mn')
         keyword = re.sub(r'[_-]+|[^\w\s]', ' ', keyword)
-        keyword = ' '.join(keyword.split())
-        return keyword
+        return ' '.join(keyword.split())
 
     def load_videos(self, selected_files):
         if not selected_files:
@@ -113,7 +117,6 @@ class VideoProductMatchWidget(Widget):
 
     def extract_video_keywords(self, video_row):
         keywords = str(video_row['keyword']).split(',') if pd.notnull(video_row['keyword']) else []
-
         prompts = [
             f"Title: {video_row['title']}",
             f"Description: {video_row['description'] if pd.notnull(video_row['description']) else ''}",
@@ -131,7 +134,7 @@ class VideoProductMatchWidget(Widget):
             _, video_text = self.extract_video_keywords(video_row)
             product_keywords = str(product['keywords']).split(',') if product['keywords'] else []
             product_text = ' '.join([self.normalize_keyword(kw) for kw in product_keywords])
-        else:  # full_text
+        else:
             video_text = f"{video_row['title']} {video_row['description'] if pd.notnull(video_row['description']) else ''}".lower()
             product_text = f"{product['title']} {product['description'] if product['description'] else ''}".lower()
         return video_text, product_text
@@ -160,11 +163,9 @@ class VideoProductMatchWidget(Widget):
         scores = np.zeros((len(video_keywords_list), len(product_keywords_list)))
         for i, video_keywords in enumerate(video_keywords_list):
             for j, product_keywords in enumerate(product_keywords_list):
-                common_keywords = len(set(video_keywords) & set(product_keywords))
-                scores[i, j] = common_keywords
+                scores[i, j] = len(set(video_keywords) & set(product_keywords))
         max_score = scores.max() if scores.max() > 0 else 1
-        scores = scores / max_score
-        return scores
+        return scores / max_score
 
     def calculate_llm_score(self, video_texts, product_texts):
         scores = np.zeros((len(video_texts), len(product_texts)))
@@ -176,17 +177,15 @@ class VideoProductMatchWidget(Widget):
                 ]
                 response = self.process_with_llm(prompt)
                 try:
-                    score = float(response)
-                    scores[i, j] = max(0.0, min(1.0, score))
+                    scores[i, j] = max(0.0, min(1.0, float(response)))
                 except (ValueError, TypeError):
                     scores[i, j] = 0.0
         return scores
 
-    def calculate_relevance_scores(self, videos_df, products, similarity_method, comparison_type):
+    def calculate_relevance_scores(self, videos_df, products, similarity_method, comparison_type, progress_bar=None, progress_step=1.0):
         video_texts = []
         video_ids = []
         video_keywords_list = []
-        progress_bar = st.progress(0)
         total_steps = len(videos_df)
 
         for idx, row in videos_df.iterrows():
@@ -195,7 +194,8 @@ class VideoProductMatchWidget(Widget):
                 video_texts.append(keywords_text if comparison_type == "keywords_only" else f"{row['title']} {row['description'] if pd.notnull(row['description']) else ''}".lower())
                 video_ids.append(row['video_id'])
                 video_keywords_list.append(keywords_list)
-            progress_bar.progress((idx + 1) / total_steps)
+            if progress_bar:
+                progress_bar.progress(min((idx + 1) / total_steps * progress_step, 1.0))
 
         product_texts = []
         product_ids = []
@@ -221,33 +221,42 @@ class VideoProductMatchWidget(Widget):
         else:  # llm_score
             similarity_matrix = self.calculate_llm_score(video_texts, product_texts)
 
-        scores_df = pd.DataFrame(
-            similarity_matrix,
-            index=video_ids,
-            columns=product_ids
-        )
-        progress_bar.empty()
+        scores_df = pd.DataFrame(similarity_matrix, index=video_ids, columns=product_ids)
         return scores_df, videos_df, products, video_keywords_list
 
     def compare_scoring_methods(self, videos_df, products, comparison_type, thresholds):
-        methods = ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy", "manual_count", "llm_score"]
         results = {}
+        all_scores_dfs = []
+        global_progress = st.progress(0)
+        total_methods = len(self.methods)
+        progress_per_method = 1.0 / total_methods
 
-        for method in methods:
-            scores_df, _, products, _ = self.calculate_relevance_scores(videos_df, products, method, comparison_type)
+        for idx, method in enumerate(self.methods):
+            method_progress = st.progress(0)
+            scores_df, _, products, _ = self.calculate_relevance_scores(
+                videos_df, products, method, comparison_type, method_progress, progress_per_method
+            )
+            method_progress.empty()
+            global_progress.progress((idx + 1) / total_methods)
             if scores_df is None:
                 continue
+
+            video_titles = videos_df.set_index('video_id')['title'].to_dict()
+            scores_df.insert(0, 'video_title', [video_titles.get(vid, '') for vid in scores_df.index])
+            scores_df.insert(0, 'method', t(method))
+
+            all_scores_dfs.append(scores_df)
 
             method_results = []
             threshold = thresholds.get(method, 0.0)
 
             for video_id in scores_df.index:
-                scores = scores_df.loc[video_id]
+                scores = scores_df.loc[video_id, [str(p['id']) for p in products]]
                 max_score = scores.max()
 
                 if max_score > threshold:
                     top_products = scores[scores == max_score].index.tolist()
-                    product_id = top_products[0]  # Take first product if multiple have same score
+                    product_id = top_products[0]
                     product = next(p for p in products if str(p['id']) == product_id)
                     video_row = videos_df[videos_df['video_id'] == video_id].iloc[0]
 
@@ -261,52 +270,85 @@ class VideoProductMatchWidget(Widget):
 
             results[method] = pd.DataFrame(method_results)
 
-        return results
+        global_progress.empty()
+        global_scores_df = pd.concat(all_scores_dfs, ignore_index=False) if all_scores_dfs else pd.DataFrame()
+        return results, global_scores_df
+
+    def configure_grid(self, scores_df, products):
+        cellsytle_jscode = JsCode("""
+        function(params) {
+            if (params.value != null) {
+                var value = parseFloat(params.value);
+                var red = Math.round(255 * value);
+                var green = 0;
+                var blue = 0;
+                return {
+                    'color': 'white',
+                    'backgroundColor': 'rgb(' + red + ',' + green + ',' + blue + ')'
+                }
+            }
+            return {
+                'color': 'white',
+                'backgroundColor': 'black'
+            }
+        }
+        """)
+
+        gb = GridOptionsBuilder.from_dataframe(scores_df)
+        gb.configure_default_column(editable=False)
+
+        if 'method' in scores_df.columns:
+            gb.configure_column('method', headerName=t("method_column"), width=150, pinned='left')
+        gb.configure_column('video_title', headerName=t("video_title_column"), width=300, pinned='left')
+
+        for product in products:
+            col_id = str(product['id'])
+            gb.configure_column(
+                col_id,
+                headerName=col_id,
+                width=100,
+                type=["numericColumn"],
+                valueFormatter="Number(x).toFixed(3)",
+                headerTooltip=product['title'],
+                cellStyle=cellsytle_jscode
+            )
+        gb.configure_selection(selection_mode="single")
+        return gb.build()
 
     def display(self):
         st.title(t("match_title"))
 
-        # Get list of video CSV files
         csv_files = [f for f in os.listdir(self.work_directory) if f.startswith('video_list') and f.endswith('.csv')]
         if not csv_files:
             st.error(t("no_videos_error"))
             return
 
-        # Video file selection
-        selected_video_files = st.multiselect(
-            t("select_videos"),
-            csv_files,
-            key=f"{self.prefix}_video_files"
-        )
-
-        # Load videos only if not in session state or if new selection
-        if selected_video_files:
-            videos_key = f"{self.prefix}_videos_data_{'_'.join(sorted(selected_video_files))}"
-            if videos_key not in st.session_state:
-                videos_df = self.load_videos(selected_video_files)
-                if videos_df is None:
-                    st.error(t("no_videos_error"))
-                    return
-                st.session_state[videos_key] = videos_df
-            videos_df = st.session_state[videos_key]
-        else:
+        selected_video_files = st.multiselect(t("select_videos"), csv_files, key=f"{self.prefix}_video_files")
+        if not selected_video_files:
             st.error(t("no_videos_error"))
             return
+
+        videos_key = f"{self.prefix}_videos_data_{'_'.join(sorted(selected_video_files))}"
+        if videos_key not in st.session_state:
+            videos_df = self.load_videos(selected_video_files)
+            if videos_df is None:
+                st.error(t("no_videos_error"))
+                return
+            st.session_state[videos_key] = videos_df
+        videos_df = st.session_state[videos_key]
 
         products = self.db.get_all_products()
         if not products:
             st.error(t("no_products_error"))
             return
 
-        # Similarity method selection
         similarity_method = st.selectbox(
             t("similarity_method"),
-            ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy", "manual_count", "llm_score"],
+            self.methods,
             format_func=lambda x: t(x),
             key=f"{self.prefix}_similarity_method"
         )
 
-        # Comparison type selection
         comparison_type = st.selectbox(
             t("comparison_type"),
             ["keywords_only", "full_text"],
@@ -314,108 +356,57 @@ class VideoProductMatchWidget(Widget):
             key=f"{self.prefix}_comparison_type"
         )
 
-        # Thresholds for method comparison
         st.subheader(t("thresholds"))
+        cols = st.columns(len(self.methods))
         thresholds = {}
-        for method in ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy", "manual_count", "llm_score"]:
-            thresholds[method] = st.number_input(
-                f"{t(method)} {t('thresholds')}",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.5,
-                step=0.1,
-                key=f"{self.prefix}_threshold_{method}"
-            )
-
-        if st.button(t("calculate_button"), key=f"{self.prefix}_calculate_button"):
-            st.write(t("progress_text"))
-            scores_df, videos_df, products, video_keywords_list = self.calculate_relevance_scores(videos_df, products, similarity_method, comparison_type)
-            if scores_df is None:
-                st.error(t("no_videos_error"))
-                return
-            # Add video titles to scores_df
-            video_titles = videos_df.set_index('video_id')['title'].to_dict()
-            scores_df.insert(0, 'video_title', [video_titles.get(vid, '') for vid in scores_df.index])
-            st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products, video_keywords_list)
-
-        if st.button(t("compare_methods_button"), key=f"{self.prefix}_compare_methods_button"):
-            st.write(t("progress_text"))
-            results = self.compare_scoring_methods(videos_df, products, comparison_type, thresholds)
-
-            st.subheader(t("method_comparison"))
-            for method, result_df in results.items():
-                if not result_df.empty:
-                    st.write(f"**{t(method)}**")
-                    st.dataframe(
-                        result_df,
-                        column_config={
-                            "Video URL": st.column_config.LinkColumn("Video URL"),
-                            "Product URL": st.column_config.LinkColumn("Product URL"),
-                            "Score": st.column_config.NumberColumn(format="%.3f")
-                        },
-                        use_container_width=True
-                    )
-
-        # Check if scores data exists in session state
-        if f"{self.prefix}_scores_data" in st.session_state:
-            scores_df, videos_df, products, video_keywords_list = st.session_state[f"{self.prefix}_scores_data"]
-
-            # Configure cell style for gradient background (black to red)
-            cellsytle_jscode = JsCode("""
-            function(params) {
-                if (params.value != null) {
-                    var value = parseFloat(params.value);
-                    var red = Math.round(255 * value);
-                    var green = 0;
-                    var blue = 0;
-                    return {
-                        'color': 'white',
-                        'backgroundColor': 'rgb(' + red + ',' + green + ',' + blue + ')'
-                    }
-                }
-                return {
-                    'color': 'white',
-                    'backgroundColor': 'black'
-                }
-            }
-            """)
-
-            # Configure AgGrid
-            gb = GridOptionsBuilder.from_dataframe(scores_df)
-            gb.configure_default_column(editable=False)
-            gb.configure_column('video_title', headerName=t("video_title_column"), width=300, pinned='left')
-            for product in products:
-                col_id = str(product['id'])
-                gb.configure_column(
-                    col_id,
-                    headerName=col_id,
-                    width=100,
-                    type=["numericColumn"],
-                    valueFormatter="Number(x).toFixed(3)",
-                    headerTooltip=product['title'],
-                    cellStyle=cellsytle_jscode
+        for idx, method in enumerate(self.methods):
+            with cols[idx]:
+                thresholds[method] = st.number_input(
+                    t(method),
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.5,
+                    step=0.1,
+                    key=f"{self.prefix}_threshold_{method}"
                 )
-            gb.configure_selection(selection_mode="single")
-            grid_options = gb.build()
 
-            # Display AgGrid
-            grid_response = AgGrid(
-                scores_df,
-                gridOptions=grid_options,
-                height=400,
-                fit_columns_on_grid_load=True,
-                key=f"{self.prefix}_scores_grid",
-                allow_unsafe_jscode=True
-            )
+        col1, col2 = st.columns(2)
+        with col1:
+            calculate_clicked = st.button(t("calculate_button"), key=f"{self.prefix}_calculate_button")
+        with col2:
+            compare_clicked = st.button(t("compare_methods_button"), key=f"{self.prefix}_compare_methods_button")
 
-            # Check for focused cell
-            if "grid_response" in grid_response and "gridState" in grid_response["grid_response"]:
-                focused_cell = grid_response["grid_response"]["gridState"].get("focusedCell", {})
-                if focused_cell:
-                    row_index = focused_cell.get("rowIndex")
-                    col_id = focused_cell.get("colId")
+        single_tab, compare_tab = st.tabs([t("single_method_tab"), t("compare_methods_tab")])
 
-                    if row_index is not None and col_id is not None and col_id != 'video_title':
+        with single_tab:
+            if calculate_clicked:
+                st.write(t("progress_text"))
+                scores_df, videos_df, products, video_keywords_list = self.calculate_relevance_scores(
+                    videos_df, products, similarity_method, comparison_type
+                )
+                if scores_df is None:
+                    st.error(t("no_videos_error"))
+                    return
+                video_titles = videos_df.set_index('video_id')['title'].to_dict()
+                scores_df.insert(0, 'video_title', [video_titles.get(vid, '') for vid in scores_df.index])
+                st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products, video_keywords_list)
+
+            if f"{self.prefix}_scores_data" in st.session_state:
+                scores_df, videos_df, products, video_keywords_list = st.session_state[f"{self.prefix}_scores_data"]
+                grid_options = self.configure_grid(scores_df, products)
+
+                grid_response = AgGrid(
+                    scores_df,
+                    gridOptions=grid_options,
+                    height=400,
+                    fit_columns_on_grid_load=True,
+                    key=f"{self.prefix}_scores_grid",
+                    allow_unsafe_jscode=True
+                )
+
+                if "grid_response" in grid_response and "gridState" in grid_response["grid_response"]:
+                    focused_cell = grid_response["grid_response"]["gridState"].get("focusedCell", {})
+                    if focused_cell and (row_index := focused_cell.get("rowIndex")) is not None and (col_id := focused_cell.get("colId")) is not None and col_id != 'video_title':
                         video_id = scores_df.index[row_index]
                         product_id = col_id
 
@@ -433,3 +424,38 @@ class VideoProductMatchWidget(Widget):
                         product_keywords = str(product['keywords']).split(',') if product['keywords'] else []
                         product_keywords = [self.normalize_keyword(kw.strip()) for kw in product_keywords]
                         st.write(f"**{t('product_keywords')}**: {', '.join(product_keywords)}")
+
+        with compare_tab:
+            if compare_clicked:
+                st.write(t("progress_text"))
+                results, global_scores_df = self.compare_scoring_methods(videos_df, products, comparison_type, thresholds)
+                st.session_state[f"{self.prefix}_compare_data"] = (results, global_scores_df, videos_df, products)
+
+            if f"{self.prefix}_compare_data" in st.session_state:
+                results, global_scores_df, videos_df, products = st.session_state[f"{self.prefix}_compare_data"]
+
+                st.subheader(t("method_comparison"))
+                for method, result_df in results.items():
+                    if not result_df.empty:
+                        st.write(f"**{t(method)}**")
+                        st.dataframe(
+                            result_df,
+                            column_config={
+                                "Video URL": st.column_config.LinkColumn("Video URL"),
+                                "Product URL": st.column_config.LinkColumn("Product URL"),
+                                "Score": st.column_config.NumberColumn(format="%.3f")
+                            },
+                            use_container_width=True
+                        )
+
+                if not global_scores_df.empty:
+                    st.write("**Global Scores Grid**")
+                    grid_options = self.configure_grid(global_scores_df, products)
+                    AgGrid(
+                        global_scores_df,
+                        gridOptions=grid_options,
+                        height=400,
+                        fit_columns_on_grid_load=True,
+                        key=f"{self.prefix}_global_scores_grid",
+                        allow_unsafe_jscode=True
+                    )
