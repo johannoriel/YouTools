@@ -577,53 +577,8 @@ class TrendwatcherPlugin(Plugin):
             else:
                 st.warning("Plugin manager not available, cannot save config.")
 
-        # Extract themes from keywords_input
-        themes = []
-        keyword_configs = []
-        for line in keywords_input.split("\n"):
-            line = line.strip()
-            if line:
-                parts = line.split(":", 2)
-                if len(parts) >= 2:
-                    theme = parts[0].strip()
-                    main_keyword = parts[1].strip()
-                    synonyms = [s.strip() for s in parts[2].split(",") if s.strip()] if len(parts) > 2 else []
-                    if theme not in themes:
-                        themes.append(theme)
-                    keyword_configs.append({
-                        "theme": theme,
-                        "main": main_keyword,
-                        "synonyms": synonyms
-                    })
-                else:
-                    main_keyword = parts[0].strip()
-                    keyword_configs.append({
-                        "theme": "Default",
-                        "main": main_keyword,
-                        "synonyms": []
-                    })
-                    if "Default" not in themes:
-                        themes.append("Default")
-
-        # Theme selection
-        if "selected_themes" not in st.session_state:
-            st.session_state.selected_themes = themes
-
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            selected_themes = st.multiselect(
-                "Select Themes to Search",
-                themes,
-                default=st.session_state.selected_themes,
-                key="theme_filter"
-            )
-        with col2:
-            if st.button("Select All Themes", key="select_all_themes"):
-                selected_themes = themes
-                st.session_state.selected_themes = themes
-                st.rerun()
-
-        st.session_state.selected_themes = selected_themes
+        from widgets.theme_selector import ThemeSelectorWidget
+        selected_themes = ThemeSelectorWidget(self.name, "theme_selector", plugin_manager=self.plugin_manager).display()
 
         debug_mode = st.checkbox(t("trendwatcher_debug"), value=False)
 
