@@ -92,18 +92,15 @@ class ProductImporterWidget(Widget):
     def import_markdown_display(self, root_path, excluded_dirs):
         st.title(t("product_importer_markdown_title"))
 
-        # Récupérer la liste des répertoires dans root_path, en excluant ceux spécifiés
+        # Récupérer la liste des répertoires et sous-répertoires dans root_path, en excluant ceux spécifiés
         excluded_dirs = [d.strip() for d in excluded_dirs if d.strip()]
         directories = []
         try:
-            for dir_name in os.listdir(root_path):
-                dir_path = os.path.join(root_path, dir_name)
-                if (
-                    os.path.isdir(dir_path)
-                    and dir_name not in excluded_dirs
-                    and not dir_name.startswith(".")
-                    and not any(os.path.abspath(dir_path).startswith(os.path.abspath(excl)) for excl in excluded_dirs)
-                ):
+            for root, dirs, _ in os.walk(root_path):
+                # Exclure les répertoires spécifiés et les répertoires cachés
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in excluded_dirs and not any(os.path.abspath(os.path.join(root, d)).startswith(os.path.abspath(excl)) for excl in excluded_dirs)]
+                for dir_name in dirs:
+                    dir_path = os.path.join(root, dir_name)
                     # Calculer le chemin relatif depuis root_path
                     rel_path = os.path.relpath(dir_path, root_path)
                     directories.append(rel_path)
