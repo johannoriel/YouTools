@@ -10,7 +10,7 @@ import os
 from lib.video_utils import *
 from lib.video_anim import replace_with_image
 import json
-from moviepy import VideoFileClip
+from moviepy import VideoFileClip, concatenate_videoclips
 from widgets.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from datetime import datetime
 import glob
@@ -1213,9 +1213,12 @@ class MoviedPlugin(Plugin):
         st.components.v1.html(notification_js)
 
     def _execute_operations(self, video_path, operations, font, font_size):
-        main_clip = VideoFileClip(video_path)
-        target_size = (main_clip.w, main_clip.h)
-        duration_offset = 0
+        clips = []  # Liste pour stocker toutes les vidéos traitées
+        tmpclip = VideoFileClip(video_path)
+        current_clip = ColorClip(tmpclip.size, color=(0, 0, 0), duration=0)
+        target_size= (tmpclip.w,tmpclip.h)
+        duration_offset = 0  # Décalage temporel pour les opérations de la vidéo courante
+        global_time_offset = 0  # Décalage temporel global pour operation_log
         operation_log = []
         total_ops = len([op for op in operations.split(
             "\n") if op.strip() and not op.strip().startswith("//")])
@@ -1244,6 +1247,28 @@ class MoviedPlugin(Plugin):
                 cmd = parts[0]
                 st.write(f"Processing: {op_cleaned}")
 
+                if cmd == "CHANGE_VIDEO":
+                    video_name = parts[1]
+                    new_video_path = os.path.join(self.working_dir, video_name)
+                    if os.path.exists(new_video_path):
+                        # Sauvegarder la vidéo courante dans clips
+                        clips.append(current_clip)
+                        # Mettre à jour global_time_offset avec la durée du clip précédent
+                        global_time_offset += current_clip.duration if current_clip else 0
+                        st.write(f"Video changed to {video_name} offsetting {global_time_offset}")
+                        # Réinitialiser duration_offset pour la nouvelle vidéo
+                        duration_offset = 0
+                        # Charger la nouvelle vidéo
+                        current_clip = VideoFileClip(new_video_path)
+                        target_size = (current_clip.w, current_clip.h)
+                        operation_log.append(
+                            {"Nature": "change_video", "Details": video_name,
+                            "Start": self.format_timecode(global_time_offset),
+                            "End": None, "Duration": ""})
+                    else:
+                        st.warning(f"Video file not found: {new_video_path}")
+                    continue
+
                 if cmd in ["insert_video", "insertVideoWithText", "insert_audio"]:
                     start_time = parts[1]
                     start_sec = self.parse_timecode(
@@ -1265,8 +1290,8 @@ class MoviedPlugin(Plugin):
                     remaining_args = " ".join(
                         parts[3:]) if len(parts) > 3 else ""
 
-                real_start = self.format_timecode(start_sec)
-                real_end = self.format_timecode(end_sec) if end_sec else None
+                real_start = self.format_timecode(start_sec + global_time_offset)
+                real_end = self.format_timecode(end_sec + global_time_offset) if end_sec else None
 
                 # Calculate duration if end_sec exists
                 duration = (end_sec - start_sec) if end_sec else None
@@ -1274,15 +1299,15 @@ class MoviedPlugin(Plugin):
 
                 if cmd == "replace_image":
                     image_path = remaining_args
-                    main_clip = replace_with_image(
-                        main_clip, start_sec, end_sec, image_path, target_size, background=background_type)
+                    current_clip = replace_with_image(
+                        current_clip, start_sec, end_sec, image_path, target_size, background=background_type)
                     operation_log.append(
                         {"Nature": "replace_image", "Details": image_path, "Start": real_start, "End": real_end, "Duration": duration_str})
 
                 elif cmd == "insert_video":
                     video_path_insert = remaining_args
-                    main_clip, duration_change = insert_video(
-                        main_clip, start_sec, video_path_insert, target_size)
+                    current_clip, duration_change = insert_video(
+                        current_clip, start_sec, video_path_insert, target_size)
                     duration_offset += duration_change
                     operation_log.append(
                         {"Nature": "insert_video", "Details": video_path_insert, "Start": real_start, "End": None, "Duration": ""})
@@ -1297,65 +1322,65 @@ class MoviedPlugin(Plugin):
                             f"Invalid format for insertVideoWithText: {op_cleaned}. Use 'timecode path | text'")
                     start_sec = self.parse_timecode(
                         start_time) + duration_offset
-                    real_start = self.format_timecode(start_sec)
-                    main_clip, duration_change = insert_video_with_text(
-                        main_clip, start_sec, video_path_insert, text, target_size, font, font_size, use_green_background, text_style)
+                    real_start = self.format_timecode(start_sec + global_time_offset)
+                    current_clip, duration_change = insert_video_with_text(
+                        current_clip, start_sec, video_path_insert, text, target_size, font, font_size, use_green_background, text_style)
                     duration_offset += duration_change
                     operation_log.append(
                         {"Nature": "insertVideoWithText", "Details": f"{video_path_insert} | {text}", "Start": real_start, "End": None, "Duration": ""})
 
                 elif cmd == "replace_video":
                     video_path_replace = remaining_args
-                    main_clip, duration_change = replace_with_video(
-                        main_clip, start_sec, end_sec, video_path_replace, target_size, background=background_type)
+                    current_clip, duration_change = replace_with_video(
+                        current_clip, start_sec, end_sec, video_path_replace, target_size, background=background_type)
                     duration_offset += duration_change
                     operation_log.append(
                         {"Nature": "replace_video", "Details": video_path_replace, "Start": real_start, "End": real_end, "Duration": duration_str})
 
                 elif cmd == "replace_video_keep_audio":
                     video_path_replace = remaining_args
-                    main_clip = replace_video_keep_audio(
-                        main_clip, start_sec, end_sec, video_path_replace, target_size, background=background_type)
+                    current_clip = replace_video_keep_audio(
+                        current_clip, start_sec, end_sec, video_path_replace, target_size, background=background_type)
                     operation_log.append(
                         {"Nature": "replace_video_keep_audio", "Details": video_path_replace, "Start": real_start, "End": real_end, "Duration": duration_str})
 
                 elif cmd == "addtext":
                     animation_type, anim_duration, text = parts[3], parts[4], parts[5]
                     anim_duration_sec = float(anim_duration[:-1])
-                    main_clip = add_animated_text(main_clip, start_sec, end_sec, text, animation_type,
-                                                  anim_duration_sec, target_size, font, font_size,
-                                                  use_green_background=use_green_background, position="center", text_style=text_style)
+                    current_clip = add_animated_text(current_clip, start_sec, end_sec, text, animation_type,
+                                                anim_duration_sec, target_size, font, font_size,
+                                                use_green_background=use_green_background, position="center", text_style=text_style)
                     operation_log.append(
                         {"Nature": "addtext", "Details": f"{animation_type} {anim_duration} {text}", "Start": real_start, "End": real_end, "Duration": duration_str})
 
                 elif cmd == "addBottomText":
                     animation_type, anim_duration, text = parts[3], parts[4], parts[5]
                     anim_duration_sec = float(anim_duration[:-1])
-                    main_clip = add_animated_text(main_clip, start_sec, end_sec, text, animation_type,
-                                                  anim_duration_sec, target_size, font, font_size,
-                                                  use_green_background=use_green_background, position="bottom", text_style=text_style)
+                    current_clip = add_animated_text(current_clip, start_sec, end_sec, text, animation_type,
+                                                anim_duration_sec, target_size, font, font_size,
+                                                use_green_background=use_green_background, position="bottom", text_style=text_style)
                     operation_log.append(
                         {"Nature": "addBottomText", "Details": f"{animation_type} {anim_duration} {text}", "Start": real_start, "End": real_end, "Duration": duration_str})
 
                 elif cmd == "remove_section":
-                    main_clip, duration_change = remove_section(
-                        main_clip, start_sec, end_sec)
+                    current_clip, duration_change = remove_section(
+                        current_clip, start_sec, end_sec)
                     duration_offset += duration_change
                     operation_log.append(
                         {"Nature": "remove_section", "Details": "", "Start": real_start, "End": real_end, "Duration": duration_str})
 
                 elif cmd == "replace_audio":
                     audio_path = remaining_args
-                    main_clip, duration_change = replace_audio(
-                        main_clip, start_sec, end_sec, audio_path, target_size)
+                    current_clip, duration_change = replace_audio(
+                        current_clip, start_sec, end_sec, audio_path, target_size)
                     duration_offset += duration_change
                     operation_log.append(
                         {"Nature": "replace_audio", "Details": audio_path, "Start": real_start, "End": real_end, "Duration": duration_str})
 
                 elif cmd == "insert_audio":
                     audio_path = remaining_args
-                    main_clip, duration_change = insert_audio(
-                        main_clip, start_sec, audio_path, target_size)
+                    current_clip, duration_change = insert_audio(
+                        current_clip, start_sec, audio_path, target_size)
                     duration_offset += duration_change
                     operation_log.append(
                         {"Nature": "insert_audio", "Details": audio_path, "Start": real_start, "End": None, "Duration": ""})
@@ -1363,8 +1388,17 @@ class MoviedPlugin(Plugin):
                 else:
                     raise ValueError(f"Unknown command: {cmd}")
 
+        # Ajouter la dernière vidéo traitée
+        clips.append(current_clip)
+
+        final_clip = concatenate_videoclips(clips, method="compose")
+
+        # Fermer tous les clips intermédiaires
+        for clip in clips:
+            clip.close()
+
         progress_bar.empty()
-        return main_clip, operation_log
+        return final_clip, operation_log
 
     def execute_operations(self, video_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
@@ -1399,8 +1433,7 @@ class MoviedPlugin(Plugin):
                 if 'previewclip' in st.session_state:
                     st.session_state.previewclip.close()
                 st.session_state.previewclip = main_clip
-                st.rerun()
-                self.alert()
+                #st.rerun()
             except Exception as e:
                 st.error(t("movied_error").format(error=str(e)))
                 raise e
@@ -1557,6 +1590,12 @@ class MoviedPlugin(Plugin):
         selected_rows, subtitles_df, vtt_path = self.handle_transcript(
             selected_video, video_df, selected_model)
 
+        if selected_video["selection"]["rows"]:
+            video_name = os.path.basename(video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"])
+            current_ops = st.session_state.get("operations", "").strip()
+            if not current_ops or current_ops == f"CHANGE_VIDEO {video_name}":
+                st.session_state["operations"] = f"CHANGE_VIDEO {video_name}"
+
         # Gestion des opérations
         video_path = video_df.iloc[selected_video["selection"]["rows"][0]
                                    ]["Full Path"] if selected_video["selection"]["rows"] else None
@@ -1575,7 +1614,7 @@ class MoviedPlugin(Plugin):
 
         # Boutons de génération et vérification
         # Ajout d'une colonne pour "Ordonner"
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         if col1.button(t("movied_generate"), key="generate_btn", type="primary") and st.session_state.get("operations"):
             self.execute_operations(
                 video_path, st.session_state.operations, font, font_size)
@@ -1600,6 +1639,10 @@ class MoviedPlugin(Plugin):
         if col4.button("Preview"):
             self.preview(video_path, st.session_state.operations,
                          font, font_size)
+        if col5.button("Nouveau chapitre", key="new_chapter_btn") and selected_video["selection"]["rows"]:
+                video_name = os.path.basename(video_df.iloc[selected_video["selection"]["rows"][0]]["Full Path"])
+                self.add_to_operations(f"CHANGE_VIDEO {video_name}")
+                st.rerun()
 
         # Gestion des données export/import
         with st.sidebar:
