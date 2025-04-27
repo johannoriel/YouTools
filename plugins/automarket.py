@@ -7,9 +7,6 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import pytz
 from langdetect import detect
-from widgets.auto_campaign import AutoCampaignWidget
-from widgets.watch_yt_trends import YoutubeTrendWatcherWidget
-from widgets.post_response import PostResponseWidget
 
 # Ajout des traductions spécifiques au plugin Automarket
 translations["en"].update({
@@ -219,6 +216,7 @@ class AutomarketPlugin(Plugin):
 
     def post_responses(self, config, selected_responses, campaign_timestamp: str):
         """Poste les réponses et les sauvegarde dans la base et stats."""
+        from widgets.post_response import PostResponseWidget
         post_response = PostResponseWidget("promoteyoutube", "prw",
                            plugin_manager=self.plugin_manager)
         post_response.post_responses(selected_responses, campaign_timestamp)
@@ -248,8 +246,9 @@ class AutomarketPlugin(Plugin):
         })
 
     def run(self, config):
-        tab1, tab2, tab3, tab4 = st.tabs(
-            ["Campagne auto", t("monitor_trends_tab"), "Campagne manuelle", "Product matcher"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
+            ["Campagne auto", t("monitor_trends_tab"), "Campagne manuelle", "Product matcher", "Video-Product Promotion"]
+        )
 
         config_params = {
             'comments_per_video': config['automarket']['comments_per_video'],
@@ -264,6 +263,7 @@ class AutomarketPlugin(Plugin):
         }
 
         with tab1:
+            from widgets.auto_campaign import AutoCampaignWidget
             AutoCampaignWidget(
                 "auto_campaign",
                 "auto_campaign",
@@ -274,8 +274,9 @@ class AutomarketPlugin(Plugin):
             ).display()
 
         with tab2:
+            from widgets.watch_yt_trends import YoutubeTrendWatcherWidget
             YoutubeTrendWatcherWidget(
-                "trend_w vertigo",
+                "trend_watcher",
                 "trend_watcher",
                 self.plugin_manager,
                 self.youtube_api,
@@ -304,3 +305,12 @@ class AutomarketPlugin(Plugin):
                 plugin_manager=self.plugin_manager,
             )
             product_matcher_widget.display()
+
+        with tab5:
+            from widgets.video_product_promotion import VideoProductPromotionWidget
+            video_product_promotion_widget = VideoProductPromotionWidget(
+                name="video_product_promotion",
+                prefix="video_product_promotion",
+                plugin_manager=self.plugin_manager,
+            )
+            video_product_promotion_widget.display()

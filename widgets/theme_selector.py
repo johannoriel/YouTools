@@ -19,7 +19,7 @@ class ThemeSelectorWidget(Widget):
 
     def get_keywords_for_theme(self, theme):
         """Return the list of main keywords and synonyms for a given theme."""
-        keywords_config = self.plugin_manager.config.get(self.name, {}).get(
+        keywords_config = self.plugin_manager.config.get("trendwatcher", {}).get(
             "trendwatcher_keywords", t("trendwatcher_keywords_default"))
 
         keywords = []
@@ -36,9 +36,34 @@ class ThemeSelectorWidget(Widget):
 
         return keywords
 
+    def get_theme_for_keyword(self, keyword):
+        """
+        Retourne le thème associé à un mot-clé donné.
+
+        Args:
+            keyword: Mot-clé à associer
+
+        Returns:
+            Nom du thème correspondant ou None si aucun thème n'est trouvé
+        """
+        keywords_config = self.plugin_manager.config.get("trendwatcher", {}).get(
+            "trendwatcher_keywords", t("trendwatcher_keywords_default"))
+
+        keyword = keyword.lower().strip()
+        for line in keywords_config.split("\n"):
+            line = line.strip()
+            if line:
+                parts = line.split(":", 1)  # Séparer en thème et liste de mots-clés
+                if len(parts) == 2:
+                    theme = parts[0].strip()
+                    keywords = [kw.strip().lower() for kw in parts[1].split(",") if kw.strip()]
+                    if keyword in keywords:
+                        return theme
+        return None
+
     def display(self):
         # Extraire les thèmes depuis la configuration
-        keywords_config = self.plugin_manager.config.get(self.name, {}).get(
+        keywords_config = self.plugin_manager.config.get("trendwatcher", {}).get(
             "trendwatcher_keywords", t("trendwatcher_keywords_default"))
 
         # Extraire les thèmes uniques

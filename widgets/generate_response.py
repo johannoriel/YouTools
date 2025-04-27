@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from lib.youtube_db import cache_campaign_response
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from widgets.utils import generate_responses_for_list, export_responses, remove_quotes
 
 translations["en"].update({
     "generate_response_title": "Generate Responses to Comments (comment_list.csv -> response_list.csv)",
@@ -35,100 +36,16 @@ translations["fr"].update({
     "overwrite_responses_checkbox": "Écraser le fichier de réponses existant",
 })
 
-
-def remove_quotes(text: str) -> str:
-    if text.startswith('"') and text.endswith('"'):
-        return text[1:-1]
-    elif text.startswith("'") and text.endswith("'"):
-        return text[1:-1]
-    return text
-
-
 class GenerateResponseWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
-
-    def generate_responses(self, config, selected_comments, transcript, url, keyword):
-        responses = []
-        total_comments = len(selected_comments)
-        progress_bar = st.progress(0)
-        progress_text = st.empty()
-
-        for idx, comment in enumerate(selected_comments):
-            progress = (idx + 1) / total_comments
-            progress_bar.progress(progress)
-            progress_text.text(
-                f"Processing comment {idx + 1} of {total_comments}")
-
-            comment_with_context = f"Comment by {comment['author']} on video {comment['video_title']} from channel {comment['channel_title']}:\n{comment['comment_text']}"
-            prompt = config['promoteyoutube']['response_prompt'].format(
-                url=url, transcript=transcript)
-            try:
-                llm_response = self.process_with_llm(
-                    prompt,
-                    config.get('llm', {}).get('llm_sys_prompt', ''),
-                    comment_with_context
-                )
-                clean_response = remove_quotes(llm_response.strip())
-            except Exception as e:
-                clean_response = f"Error: {str(e)}"
-            responses.append({
-                'comment_id': comment['comment_id'],
-                'response': clean_response,
-                'target_video_id': comment['video_id'],
-                'channel_id': comment['channel_id'],
-                'keyword': keyword,
-                'comment_text': comment['comment_text'],
-                'author': comment['author'],
-                'video_title': comment['video_title'],
-                'channel_title': comment['channel_title']
-            })
-
-        progress_bar.empty()
-        progress_text.empty()
-        return responses
-
-    def export_responses(self, responses, work_dir, overwrite):
-        try:
-            base_filename = "response_list.csv"
-            output_path = os.path.join(work_dir, base_filename)
-
-            if not overwrite and os.path.exists(output_path):
-                i = 1
-                while True:
-                    new_filename = f"response_list_{i:03d}.csv"
-                    new_output_path = os.path.join(work_dir, new_filename)
-                    if not os.path.exists(new_output_path):
-                        output_path = new_output_path
-                        break
-                    i += 1
-
-            responses_data = [
-                {
-                    'comment_id': resp['comment_id'],
-                    'response_text': resp['response'],
-                    'comment_text': resp['comment_text'],
-                    'video_id': resp['target_video_id'],
-                    'channel_id': resp['channel_id'],
-                    'author': resp['author'],
-                    'video_title': resp['video_title'],
-                    'channel_title': resp['channel_title'],
-                    'keyword': resp['keyword']
-                }
-                for resp in responses
-            ]
-            df = pd.DataFrame(responses_data)
-            df.to_csv(output_path, index=False)
-            st.success(t("export_success").format(filename=output_path))
-        except Exception as e:
-            st.error(t("export_error").format(str(e)))
+        self.work_dir = self.plugin_manager.config["common"]["work_directory"]
 
     def display(self):
         st.title(t("generate_response_title"))
-        work_dir = self.plugin_manager.config["common"]["work_directory"]
 
         # Recherche des fichiers CSV commençant par "comment_list"
-        comment_files = [f for f in os.listdir(work_dir) if f.startswith(
+        comment_files = [f for f in os.listdir(self.work_dir) if f.startswith(
             'comment_list') and f.endswith('.csv')]
         if not comment_files:
             st.error(t("no_file_error"))
@@ -149,9 +66,9 @@ class GenerateResponseWidget(Widget):
         # Charger et concaténer les fichiers sélectionnés
         dfs = []
         required_columns = {'comment_id', 'comment_text',
-                            'video_id', 'video_title', 'channel_title', 'author'}
+                           'video_id', 'video_title', 'channel_title', 'author'}
         for comment_file in selected_comment_files:
-            file_path = os.path.join(work_dir, comment_file)
+            file_path = os.path.join(self.work_dir, comment_file)
             try:
                 df = pd.read_csv(file_path)
                 if required_columns.issubset(df.columns):
@@ -168,10 +85,10 @@ class GenerateResponseWidget(Widget):
             subset='comment_id', keep='first')
 
         # Charger la transcription et l'URL
-        transcript_path = os.path.join(work_dir, "transcript.txt")
+        transcript_path = os.path.join(self.work_dir, "transcript.txt")
         transcript = open(transcript_path, 'r').read(
         ) if os.path.exists(transcript_path) else ""
-        url_path = os.path.join(work_dir, "url.txt")
+        url_path = os.path.join(self.work_dir, "url.txt")
         url = open(url_path, 'r').read().strip(
         ) if os.path.exists(url_path) else ""
 
@@ -203,11 +120,28 @@ class GenerateResponseWidget(Widget):
         # Bouton pour générer les réponses
         if st.button(t("generate_responses"), key=f"{self.prefix}_generate_responses") and selected_comment_rows['selection']['rows']:
             with st.spinner(t("generating")):
-                selected_comments = [combined_df.iloc[i].to_dict(
-                ) for i in selected_comment_rows['selection']['rows']]
-                keyword = selected_comments[0].get('keyword', '')
-                responses = self.generate_responses(
-                    self.plugin_manager.config, selected_comments, transcript, url, keyword)
+                selected_comments = [
+                    {
+                        'comment_id': row['comment_id'],
+                        'comment_text': row['comment_text'],
+                        'video_id': row['video_id'],
+                        'channel_id': row['channel_id'],
+                        'video_title': row['video_title'],
+                        'channel_title': row['channel_title'],
+                        'author': row['author'],
+                        'keyword': row.get('keyword', '')
+                    }
+                    for i, row in combined_df.iloc[selected_comment_rows['selection']['rows']].iterrows()
+                ]
+                responses = generate_responses_for_list(
+                    widget=self,
+                    config=self.plugin_manager.config,
+                    content_list=selected_comments,
+                    prompt_template=self.plugin_manager.config['promoteyoutube']['response_prompt'],
+                    context=transcript,
+                    universitairesurl=url,
+                    keyword=selected_comments[0]['keyword']
+                )
 
                 # Sauvegarde dans la base de données
                 campaign_id = datetime.now().isoformat()
@@ -223,15 +157,14 @@ class GenerateResponseWidget(Widget):
                         status="pending"
                     )
 
-                # Stocker les réponses dans st.session_state
                 st.session_state['generated_responses'] = responses
 
         # Affichage des réponses avec AgGrid
-        if 'generated_responses' in st.session_state and st.session_state['generated_responses']:
+        if 'generated_responses' in st.sessionโปรgramme_state and st.session_state['generated_responses']:
             st.subheader(t("responses"))
             responses_df = pd.DataFrame([
                 {
-                    'comment_text': resp['comment_text'],
+                    'content_text': resp['content_text'],
                     'response_text': resp['response'],
                     'author': resp['author'],
                     'video_title': resp['video_title'],
@@ -251,26 +184,17 @@ class GenerateResponseWidget(Widget):
 
             # Configuration de la grille AgGrid
             gb = GridOptionsBuilder.from_dataframe(responses_df)
-            gb.configure_column(
-                "comment_text", headerName="Comment", width=300, editable=False)
-            gb.configure_column(
-                "response_text", headerName="Response", width=300, editable=True,
-                cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '500'}
-            )
-            gb.configure_column("author", headerName="Author",
-                                width=150, editable=False)
-            gb.configure_column(
-                "video_title", headerName="Video Title", width=200, editable=False)
-            gb.configure_column(
-                "channel_title", headerName="Channel", width=150, editable=False)
-            gb.configure_column(
-                "comment_id", headerName="Comment ID", hide=True)
+            gb.configure_column("content_text", headerName="Comment", width=300, editable=False)
+            gb.configure_column("response_text", headerName="Response", width=300, editable=True,
+                               cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '500'})
+            gb.configure_column("author", headerName="Author", width=150, editable=False)
+            gb.configure_column("video_title", headerName="Video Title", width=200, editable=False)
+            gb.configure_column("channel_title", headerName="Channel", width=150, editable=False)
+            gb.configure_column("comment_id", headerName="Comment ID", hide=True)
             gb.configure_column("video_id", headerName="Video ID", hide=True)
-            gb.configure_column(
-                "channel_id", headerName="Channel ID", hide=True)
+            gb.configure_column("channel_id", headerName="Channel ID", hide=True)
             gb.configure_column("keyword", headerName="keyword", hide=True)
-            gb.configure_selection(
-                selection_mode="multiple", use_checkbox=True, header_checkbox=True)
+            gb.configure_selection(selection_mode="multiple", use_checkbox=True, header_checkbox=True)
             gb.configure_default_column(editable=False, resizable=True)
             grid_options = gb.build()
 
@@ -305,8 +229,7 @@ class GenerateResponseWidget(Widget):
             # Vérification de la limite de caractères
             for i, row in updated_df.iterrows():
                 if len(row['response_text']) > 500:
-                    st.warning(t("char_limit_warning").format(
-                        len(row['response_text'])))
+                    st.warning(t("char_limit_warning").format(len(row['response_text'])))
 
             # Récupérer les lignes sélectionnées
             selected_rows = grid_response['selected_rows']
@@ -322,5 +245,4 @@ class GenerateResponseWidget(Widget):
 
             # Bouton pour exporter les réponses sélectionnées
             if st.button(t("export_responses"), key=f"{self.prefix}_export_responses") and selected_rows is not None and not selected_rows.empty:
-                self.export_responses(selected_responses,
-                                      work_dir, overwrite_responses)
+                export_responses(selected_responses, self.work_dir, "response_list.csv", overwrite_responses)
