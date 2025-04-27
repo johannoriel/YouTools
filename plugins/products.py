@@ -148,73 +148,76 @@ class ProductsPlugin(Plugin):
         from widgets.product_editor import ProductEditorWidget
         st.header(t("products_header_list"))
 
-        grid_widget = ProductGridWidget("productgrid", "grid", self.plugin_manager)
-        selected_rows = grid_widget.display()
+        coll, colr= st.columns([2,1])
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button(t("products_delete_button")) and selected_rows is not None and not selected_rows.empty:
-                with st.spinner(t("products_processing")):
-                    try:
-                        for _, row in selected_rows.iterrows():
-                            self.db.delete_product(int(row['id']))
-                        st.success(t("products_success"))
-                        st.rerun()
-                    except Exception as e:
-                        st.error(t("products_error").format(error=str(e)))
+        with coll:
+            grid_widget = ProductGridWidget("productgrid", "grid", self.plugin_manager)
+            selected_rows = grid_widget.display()
 
-        with col2:
-            if st.button(t("products_generate_keywords_button")) and selected_rows is not None and not selected_rows.empty:
-                with st.spinner(t("products_processing")):
-                    try:
-                        for _, row in selected_rows.iterrows():
-                            prompt = config.get("products", {}).get("keywords_prompt", t("products_keywords_prompt")).format(
-                                title=row['title'],
-                            )
-                            content_context = f"content: {row['content'] or ''}"
-                            description_context = f"description: {row['description'] or ''}"
-                            llm_response = self.process_with_llm(
-                                [content_context, description_context, prompt],
-                            )
-                            if llm_response.startswith("```markdown\n"):
-                                llm_response = llm_response[len("```markdown\n"):-len("\n```")]
-                            self.db.update_product_field(
-                                int(row['id']),
-                                'keywords',
-                                llm_response
-                            )
-                        st.success(t("products_success"))
-                        st.rerun()
-                    except Exception as e:
-                        st.error(t("products_error").format(error=str(e)))
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button(t("products_delete_button")) and selected_rows is not None and not selected_rows.empty:
+                    with st.spinner(t("products_processing")):
+                        try:
+                            for _, row in selected_rows.iterrows():
+                                self.db.delete_product(int(row['id']))
+                            st.success(t("products_success"))
+                            st.rerun()
+                        except Exception as e:
+                            st.error(t("products_error").format(error=str(e)))
 
-        with col3:
-            if st.button(t("products_generate_description_button")) and selected_rows is not None and not selected_rows.empty:
-                with st.spinner(t("products_processing")):
-                    try:
-                        for _, row in selected_rows.iterrows():
-                            prompt = config.get("products", {}).get("description_prompt", t("products_description_prompt")).format(
-                                title=row['title']
-                            )
-                            keywords_context = f"keywords: {row['keywords'] or ''}"
-                            content_context = f"content: {row['content'] or ''}"
-                            llm_response = self.process_with_llm(
-                                [keywords_context, content_context, prompt],
-                            )
-                            if llm_response.startswith("```markdown\n"):
-                                llm_response = llm_response[len("```markdown\n"):-len("\n```")]
-                            self.db.update_product_field(
-                                int(row['id']),
-                                'description',
-                                llm_response
-                            )
-                        st.success(t("products_success"))
-                        st.rerun()
-                    except Exception as e:
-                        st.error(t("products_error").format(error=str(e)))
+            with col2:
+                if st.button(t("products_generate_keywords_button")) and selected_rows is not None and not selected_rows.empty:
+                    with st.spinner(t("products_processing")):
+                        try:
+                            for _, row in selected_rows.iterrows():
+                                prompt = config.get("products", {}).get("keywords_prompt", t("products_keywords_prompt")).format(
+                                    title=row['title'],
+                                )
+                                content_context = f"content: {row['content'] or ''}"
+                                description_context = f"description: {row['description'] or ''}"
+                                llm_response = self.process_with_llm(
+                                    [content_context, description_context, prompt],
+                                )
+                                if llm_response.startswith("```markdown\n"):
+                                    llm_response = llm_response[len("```markdown\n"):-len("\n```")]
+                                self.db.update_product_field(
+                                    int(row['id']),
+                                    'keywords',
+                                    llm_response
+                                )
+                            st.success(t("products_success"))
+                            st.rerun()
+                        except Exception as e:
+                            st.error(t("products_error").format(error=str(e)))
+
+            with col3:
+                if st.button(t("products_generate_description_button")) and selected_rows is not None and not selected_rows.empty:
+                    with st.spinner(t("products_processing")):
+                        try:
+                            for _, row in selected_rows.iterrows():
+                                prompt = config.get("products", {}).get("description_prompt", t("products_description_prompt")).format(
+                                    title=row['title']
+                                )
+                                keywords_context = f"keywords: {row['keywords'] or ''}"
+                                content_context = f"content: {row['content'] or ''}"
+                                llm_response = self.process_with_llm(
+                                    [keywords_context, content_context, prompt],
+                                )
+                                if llm_response.startswith("```markdown\n"):
+                                    llm_response = llm_response[len("```markdown\n"):-len("\n```")]
+                                self.db.update_product_field(
+                                    int(row['id']),
+                                    'description',
+                                    llm_response
+                                )
+                            st.success(t("products_success"))
+                            st.rerun()
+                        except Exception as e:
+                            st.error(t("products_error").format(error=str(e)))
 
         if selected_rows is not None and not selected_rows.empty and len(selected_rows) == 1:
-            with st.expander("Edit Product"):
+            with colr.expander("Edit Product", expanded=True):
                 product = selected_rows.iloc[0]
                 editor = ProductEditorWidget("producteditor", f"edit_{product['id']}", self.plugin_manager)
                 form = editor.display(product, t("products_update_button"))

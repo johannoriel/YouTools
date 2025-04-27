@@ -39,7 +39,7 @@ class ProductEditorWidget(Widget):
         description = streamlit_lexical(
             value=product['description'] or "" if product is not None else "",
             placeholder=t("products_description_label"),
-            height=400,
+            height=200,
             key=f"{self.prefix}_desc"
         )
         content = streamlit_lexical(

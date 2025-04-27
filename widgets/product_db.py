@@ -19,7 +19,7 @@ class ProductGridWidget(Widget):
         gb.configure_column("title", width=200)
         gb.configure_column("url", width=200)
         gb.configure_column("keywords", width=200)
-        gb.configure_column("type", width=150)
+        gb.configure_column("type", width=150, filter=True)
         gb.configure_column("source", width=150)
         gb.configure_column("goal", width=150)
         gb.configure_column("related", width=150)
@@ -29,6 +29,7 @@ class ProductGridWidget(Widget):
             cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '50000'})
         gb.configure_selection(selection_mode="multiple", use_checkbox=True)
         grid_options = gb.build()
+        grid_options['rowMultiSelectWithClick'] = True
 
         response = AgGrid(
             df,
