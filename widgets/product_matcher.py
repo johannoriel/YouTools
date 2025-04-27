@@ -28,12 +28,15 @@ translations["en"].update({
     "tfidf_cosine": "TF-IDF Cosine Similarity",
     "sentence_transformer": "Sentence Transformer",
     "fuzzywuzzy": "FuzzyWuzzy",
+    "manual_count": "Manual Keyword Count",
+    "llm_score": "LLM Similarity Score",
     "comparison_type": "Select Comparison Type",
     "keywords_only": "Keywords Only",
     "full_text": "Full Text",
     "video_title_column": "Video Title",
     "video_keywords": "Video Keywords",
     "product_keywords": "Product Keywords",
+    "llm_prompt": "Evaluate the semantic similarity between the following video content and product content. Provide a score between 0 (no similarity) and 1 (perfect similarity). Video: {video_content} Product: {product_content}",
 })
 
 translations["fr"].update({
@@ -49,12 +52,15 @@ translations["fr"].update({
     "tfidf_cosine": "Similarité Cosinus TF-IDF",
     "sentence_transformer": "Transformeur de Phrases",
     "fuzzywuzzy": "FuzzyWuzzy",
+    "manual_count": "Comptage Manuel des Mots-clés",
+    "llm_score": "Score de Similarité LLM",
     "comparison_type": "Sélectionner le type de comparaison",
     "keywords_only": "Mots-clés uniquement",
     "full_text": "Texte complet",
     "video_title_column": "Titre de la vidéo",
     "video_keywords": "Mots-clés de la vidéo",
     "product_keywords": "Mots-clés du produit",
+    "llm_prompt": "Évaluez la similarité sémantique entre le contenu vidéo suivant et le contenu du produit. Fournissez un score entre 0 (aucune similarité) et 1 (similarité parfaite). Vidéo : {video_content} Produit : {product_content}",
 })
 
 class VideoProductMatchWidget(Widget):
@@ -65,14 +71,10 @@ class VideoProductMatchWidget(Widget):
         self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
 
     def normalize_keyword(self, keyword):
-        # Convert to lowercase
         keyword = keyword.lower()
-        # Remove accents
         keyword = ''.join(c for c in unicodedata.normalize('NFD', keyword)
                          if unicodedata.category(c) != 'Mn')
-        # Replace underscores, hyphens, and other special characters with space
         keyword = re.sub(r'[_-]+|[^\w\s]', ' ', keyword)
-        # Remove extra spaces
         keyword = ' '.join(keyword.split())
         return keyword
 
@@ -143,6 +145,32 @@ class VideoProductMatchWidget(Widget):
                 scores[i, j] = fuzz.token_sort_ratio(v_text, p_text) / 100.0
         return scores
 
+    def calculate_manual_count(self, video_keywords_list, product_keywords_list):
+        scores = np.zeros((len(video_keywords_list), len(product_keywords_list)))
+        for i, video_keywords in enumerate(video_keywords_list):
+            for j, product_keywords in enumerate(product_keywords_list):
+                common_keywords = len(set(video_keywords) & set(product_keywords))
+                scores[i, j] = common_keywords
+        max_score = scores.max() if scores.max() > 0 else 1
+        scores = scores / max_score
+        return scores
+
+    def calculate_llm_score(self, video_texts, product_texts):
+        scores = np.zeros((len(video_texts), len(product_texts)))
+        for i, video_text in enumerate(video_texts):
+            for j, product_text in enumerate(product_texts):
+                prompt = [
+                    t("llm_prompt").format(video_content=video_text, product_content=product_text),
+                    "Return only a number between 0 and 1."
+                ]
+                response = self.process_with_llm(prompt)
+                try:
+                    score = float(response)
+                    scores[i, j] = max(0.0, min(1.0, score))  # Ensure score is between 0 and 1
+                except (ValueError, TypeError):
+                    scores[i, j] = 0.0
+        return scores
+
     def calculate_relevance_scores(self, videos_df, products, similarity_method, comparison_type):
         video_texts = []
         video_ids = []
@@ -160,10 +188,13 @@ class VideoProductMatchWidget(Widget):
 
         product_texts = []
         product_ids = []
+        product_keywords_list = []
         for product in products:
             text = str(product['keywords']).lower() if comparison_type == "keywords_only" and product['keywords'] else f"{product['title']} {product['description'] if product['description'] else ''}".lower()
             product_texts.append(text)
             product_ids.append(str(product['id']))
+            product_keywords = str(product['keywords']).split(',') if product['keywords'] else []
+            product_keywords_list.append([self.normalize_keyword(kw.strip()) for kw in product_keywords])
 
         if not video_texts or not product_texts:
             return None, None, None, None
@@ -172,8 +203,12 @@ class VideoProductMatchWidget(Widget):
             similarity_matrix = self.calculate_tfidf_cosine(video_texts, product_texts)
         elif similarity_method == "sentence_transformer":
             similarity_matrix = self.calculate_sentence_transformer(video_texts, product_texts)
-        else:  # fuzzywuzzy
+        elif similarity_method == "fuzzywuzzy":
             similarity_matrix = self.calculate_fuzzywuzzy(video_texts, product_texts)
+        elif similarity_method == "manual_count":
+            similarity_matrix = self.calculate_manual_count(video_keywords_list, product_keywords_list)
+        else:  # llm_score
+            similarity_matrix = self.calculate_llm_score(video_texts, product_texts)
 
         scores_df = pd.DataFrame(
             similarity_matrix,
@@ -199,7 +234,7 @@ class VideoProductMatchWidget(Widget):
         # Similarity method selection
         similarity_method = st.selectbox(
             t("similarity_method"),
-            ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy"],
+            ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy", "manual_count", "llm_score"],
             format_func=lambda x: t(x),
             key=f"{self.prefix}_similarity_method"
         )
