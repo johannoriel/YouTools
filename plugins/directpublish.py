@@ -176,7 +176,6 @@ class DirectpublishPlugin(Plugin):
             v[1] for v in video_files if v[0] == selected_video)
 
         # Option pour retirer les silences
-        remove_silences = st.checkbox(t("directpublish_remove_silences"))
         run_editing = st.checkbox(t("directpublish_run_editing"))
         operations = ""
         if run_editing:
@@ -187,19 +186,21 @@ class DirectpublishPlugin(Plugin):
             json_files = glob.glob(pattern)
             if not json_files:
                 st.sidebar.warning(f"No export files found for {video_name}.")
-                return
-            export_file = max(json_files, key=os.path.getctime)
-            if os.path.exists(export_file):
-                with open(export_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    operations = data.get('operations', '')
-                    operations = "\n".join(operations)
+            else:
+                export_file = max(json_files, key=os.path.getctime)
+                if os.path.exists(export_file):
+                    with open(export_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        operations = data.get('operations', '')
+                        operations = "\n".join(operations)
             operations = st.text_area(
                 t("directpublish_edit_operations"),
                 value=operations,
                 height=150,
                 key="edit_operations_area"
             )
+
+        remove_silences = st.checkbox(t("directpublish_remove_silences"))
         replace_green_screen = st.checkbox(
             t("directpublish_replace_green_screen"))
 
@@ -264,6 +265,17 @@ class DirectpublishPlugin(Plugin):
                 # try:
                 video_to_process = selected_video_path
 
+                if run_editing and 'edit_operations_area' in st.session_state:
+                    st.text(t("directpublish_performing_editing"))
+                    font = config.get('movied', {}).get('font', 'Arial')
+                    font_size = config.get('movied', {}).get('font_size', 100)
+                    movied_plugin = self.plugin_manager.get_plugin('movied')
+                    movied_plugin.execute_operations(
+                        video_to_process, st.session_state.edit_operations_area, font, font_size)
+                    video_to_process = os.path.splitext(video_to_process)[
+                        0] + "_edited.mp4"
+                    st.text(video_to_process)
+
                 # 1. Retirer les silences si demandé
                 if remove_silences:
                     st.text(t("directpublish_silence_trim"))
@@ -282,17 +294,6 @@ class DirectpublishPlugin(Plugin):
                         st.info(
                             f"Reduction: {reduction} | Initial duration: {original_duration:.1f}s | Final duration: {final_duration:.1f}s")
                     video_to_process = result
-                    st.text(video_to_process)
-
-                if run_editing and 'edit_operations_area' in st.session_state:
-                    st.text(t("directpublish_performing_editing"))
-                    font = config.get('movied', {}).get('font', 'Arial')
-                    font_size = config.get('movied', {}).get('font_size', 100)
-                    movied_plugin = self.plugin_manager.get_plugin('movied')
-                    movied_plugin.execute_operations(
-                        video_to_process, st.session_state.edit_operations_area, font, font_size)
-                    video_to_process = os.path.splitext(video_to_process)[
-                        0] + "_edited.mp4"
                     st.text(video_to_process)
 
                 # 2. Remplacer le fond vert si demandé
