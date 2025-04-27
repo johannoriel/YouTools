@@ -1,4 +1,4 @@
-# File: video_product_match.py
+# File: widgets/video_product_match.py
 from lib.global_vars import translations, t
 from app import Widget
 import streamlit as st
@@ -24,6 +24,7 @@ translations["en"].update({
     "video_details": "Video Details",
     "product_details": "Product Details",
     "calculate_button": "Calculate Relevance Scores",
+    "compare_methods_button": "Compare Scoring Methods",
     "similarity_method": "Select Similarity Method",
     "tfidf_cosine": "TF-IDF Cosine Similarity",
     "sentence_transformer": "Sentence Transformer",
@@ -38,6 +39,8 @@ translations["en"].update({
     "product_keywords": "Product Keywords",
     "llm_prompt": "Evaluate the semantic similarity between the following video content and product content. Provide a score between 0 (no similarity) and 1 (perfect similarity). Video: {video_content} Product: {product_content}",
     "select_videos": "Select Video Files",
+    "thresholds": "Score Thresholds",
+    "method_comparison": "Comparison of Scoring Methods",
 })
 
 translations["fr"].update({
@@ -49,6 +52,7 @@ translations["fr"].update({
     "video_details": "Détails de la vidéo",
     "product_details": "Détails du produit",
     "calculate_button": "Calculer les scores de pertinence",
+    "compare_methods_button": "Comparer les méthodes de scoring",
     "similarity_method": "Sélectionner la méthode de similarité",
     "tfidf_cosine": "Similarité Cosinus TF-IDF",
     "sentence_transformer": "Transformeur de Phrases",
@@ -63,6 +67,8 @@ translations["fr"].update({
     "product_keywords": "Mots-clés du produit",
     "llm_prompt": "Évaluez la similarité sémantique entre le contenu vidéo suivant et le contenu du produit. Fournissez un score entre 0 (aucune similarité) et 1 (similarité parfaite). Vidéo : {video_content} Produit : {product_content}",
     "select_videos": "Sélectionner les fichiers vidéo",
+    "thresholds": "Seuils de score",
+    "method_comparison": "Comparaison des méthodes de scoring",
 })
 
 @st.cache_data
@@ -88,7 +94,6 @@ class VideoProductMatchWidget(Widget):
         if not selected_files:
             return None
 
-        st.write("Loading videos...")
         required_columns = {'keyword', 'url', 'video_id', 'title', 'description'}
         dfs = []
         for csv_file in selected_files:
@@ -224,6 +229,40 @@ class VideoProductMatchWidget(Widget):
         progress_bar.empty()
         return scores_df, videos_df, products, video_keywords_list
 
+    def compare_scoring_methods(self, videos_df, products, comparison_type, thresholds):
+        methods = ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy", "manual_count", "llm_score"]
+        results = {}
+
+        for method in methods:
+            scores_df, _, products, _ = self.calculate_relevance_scores(videos_df, products, method, comparison_type)
+            if scores_df is None:
+                continue
+
+            method_results = []
+            threshold = thresholds.get(method, 0.0)
+
+            for video_id in scores_df.index:
+                scores = scores_df.loc[video_id]
+                max_score = scores.max()
+
+                if max_score > threshold:
+                    top_products = scores[scores == max_score].index.tolist()
+                    product_id = top_products[0]  # Take first product if multiple have same score
+                    product = next(p for p in products if str(p['id']) == product_id)
+                    video_row = videos_df[videos_df['video_id'] == video_id].iloc[0]
+
+                    method_results.append({
+                        "Video Title": video_row['title'],
+                        "Video URL": video_row['url'],
+                        "Product Title": product['title'],
+                        "Product URL": product['url'],
+                        "Score": max_score
+                    })
+
+            results[method] = pd.DataFrame(method_results)
+
+        return results
+
     def display(self):
         st.title(t("match_title"))
 
@@ -275,6 +314,19 @@ class VideoProductMatchWidget(Widget):
             key=f"{self.prefix}_comparison_type"
         )
 
+        # Thresholds for method comparison
+        st.subheader(t("thresholds"))
+        thresholds = {}
+        for method in ["tfidf_cosine", "sentence_transformer", "fuzzywuzzy", "manual_count", "llm_score"]:
+            thresholds[method] = st.number_input(
+                f"{t(method)} {t('thresholds')}",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.5,
+                step=0.1,
+                key=f"{self.prefix}_threshold_{method}"
+            )
+
         if st.button(t("calculate_button"), key=f"{self.prefix}_calculate_button"):
             st.write(t("progress_text"))
             scores_df, videos_df, products, video_keywords_list = self.calculate_relevance_scores(videos_df, products, similarity_method, comparison_type)
@@ -285,6 +337,24 @@ class VideoProductMatchWidget(Widget):
             video_titles = videos_df.set_index('video_id')['title'].to_dict()
             scores_df.insert(0, 'video_title', [video_titles.get(vid, '') for vid in scores_df.index])
             st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products, video_keywords_list)
+
+        if st.button(t("compare_methods_button"), key=f"{self.prefix}_compare_methods_button"):
+            st.write(t("progress_text"))
+            results = self.compare_scoring_methods(videos_df, products, comparison_type, thresholds)
+
+            st.subheader(t("method_comparison"))
+            for method, result_df in results.items():
+                if not result_df.empty:
+                    st.write(f"**{t(method)}**")
+                    st.dataframe(
+                        result_df,
+                        column_config={
+                            "Video URL": st.column_config.LinkColumn("Video URL"),
+                            "Product URL": st.column_config.LinkColumn("Product URL"),
+                            "Score": st.column_config.NumberColumn(format="%.3f")
+                        },
+                        use_container_width=True
+                    )
 
         # Check if scores data exists in session state
         if f"{self.prefix}_scores_data" in st.session_state:
