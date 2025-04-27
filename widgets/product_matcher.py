@@ -37,6 +37,7 @@ translations["en"].update({
     "video_keywords": "Video Keywords",
     "product_keywords": "Product Keywords",
     "llm_prompt": "Evaluate the semantic similarity between the following video content and product content. Provide a score between 0 (no similarity) and 1 (perfect similarity). Video: {video_content} Product: {product_content}",
+    "select_videos": "Select Video Files",
 })
 
 translations["fr"].update({
@@ -61,14 +62,19 @@ translations["fr"].update({
     "video_keywords": "Mots-clés de la vidéo",
     "product_keywords": "Mots-clés du produit",
     "llm_prompt": "Évaluez la similarité sémantique entre le contenu vidéo suivant et le contenu du produit. Fournissez un score entre 0 (aucune similarité) et 1 (similarité parfaite). Vidéo : {video_content} Produit : {product_content}",
+    "select_videos": "Sélectionner les fichiers vidéo",
 })
+
+@st.cache_data
+def get_sentence_model():
+    return SentenceTransformer('all-MiniLM-L6-v2')
 
 class VideoProductMatchWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
         self.db = ProductsDB()
         self.work_directory = self.plugin_manager.config["common"]["work_directory"]
-        self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.sentence_model = get_sentence_model()
 
     def normalize_keyword(self, keyword):
         keyword = keyword.lower()
@@ -78,14 +84,14 @@ class VideoProductMatchWidget(Widget):
         keyword = ' '.join(keyword.split())
         return keyword
 
-    def load_videos(self):
-        csv_files = [f for f in os.listdir(self.work_directory) if f.startswith('video_list') and f.endswith('.csv')]
-        if not csv_files:
+    def load_videos(self, selected_files):
+        if not selected_files:
             return None
 
+        st.write("Loading videos...")
         required_columns = {'keyword', 'url', 'video_id', 'title', 'description'}
         dfs = []
-        for csv_file in csv_files:
+        for csv_file in selected_files:
             file_path = os.path.join(self.work_directory, csv_file)
             try:
                 df = pd.read_csv(file_path)
@@ -166,7 +172,7 @@ class VideoProductMatchWidget(Widget):
                 response = self.process_with_llm(prompt)
                 try:
                     score = float(response)
-                    scores[i, j] = max(0.0, min(1.0, score))  # Ensure score is between 0 and 1
+                    scores[i, j] = max(0.0, min(1.0, score))
                 except (ValueError, TypeError):
                     scores[i, j] = 0.0
         return scores
@@ -221,8 +227,30 @@ class VideoProductMatchWidget(Widget):
     def display(self):
         st.title(t("match_title"))
 
-        videos_df = self.load_videos()
-        if videos_df is None:
+        # Get list of video CSV files
+        csv_files = [f for f in os.listdir(self.work_directory) if f.startswith('video_list') and f.endswith('.csv')]
+        if not csv_files:
+            st.error(t("no_videos_error"))
+            return
+
+        # Video file selection
+        selected_video_files = st.multiselect(
+            t("select_videos"),
+            csv_files,
+            key=f"{self.prefix}_video_files"
+        )
+
+        # Load videos only if not in session state or if new selection
+        if selected_video_files:
+            videos_key = f"{self.prefix}_videos_data_{'_'.join(sorted(selected_video_files))}"
+            if videos_key not in st.session_state:
+                videos_df = self.load_videos(selected_video_files)
+                if videos_df is None:
+                    st.error(t("no_videos_error"))
+                    return
+                st.session_state[videos_key] = videos_df
+            videos_df = st.session_state[videos_key]
+        else:
             st.error(t("no_videos_error"))
             return
 
