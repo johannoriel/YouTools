@@ -42,7 +42,7 @@ translations["fr"].update({
     "char_limit_warning": "⚠️ Ce message dépasse 500 caractères ({} caractères). Veuillez le raccourcir.",
     "export_promotions": "Exporter les messages promotionnels",
     "prompt_label": "Prompt LLM pour les messages promotionnels",
-    "promo_default_prompt": "Générer un message promotionnel concis (<500 chars) pour le produit à {url} (l'URL doit obligatoirement être mentionnée dans le résultat), adapté à la vidéo d'après les mots-clés, et la description de la vidéo.",
+    "promo_default_prompt": "Générer un message promotionnel concis (<500 chars) pour le produit '{product}' à l'url '{url}' (l'URL doit obligatoirement être mentionnée dans le résultat), qui est une réponse de l'auteur du produit à la vidéo '{video}' d'une chaîne youtube externe ou l'on veut acquérir des prospect.",
     "promo_sys_prompt": "Vous êtes un assistant de marketing qui est l'auteur qui vient promouvoir ses produits. Votre message doit être concis et donner envie de consulter le produit.",
     "theme_mapping": "Associer les mots-clés aux thèmes",
     "no_themes_matched": "Aucun thème correspondant aux mots-clés des vidéos sélectionnées.",
@@ -53,6 +53,10 @@ translations["fr"].update({
     "video_product_pairs": "Paires vidéo-produit correspondantes",
     "overwrite_responses_checkbox": "Écraser le fichier de réponses existant",
 })
+
+@st.dialog("Alert")
+def alert(message):
+    st.write(message)
 
 class VideoProductPromotionWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
@@ -94,13 +98,18 @@ class VideoProductPromotionWidget(Widget):
     def generate_response_for_content(self, content_dict, prompt_template, sys_prompt):
         """
         Génère une réponse pour un contenu donné (commentaire, vidéo, etc.) en utilisant un prompt LLM.
+        Args:
+            content_dict: Dictionnaire contenant les informations du contenu
+            prompt_template: Modèle de prompt pour le LLM
+            sys_prompt: Prompt système pour le LLM
+
         Returns:
             Dictionnaire contenant la réponse générée et les métadonnées
         """
-        video_rag = f"Description of video to respond:\n {content_dict.get('video_title', '')} - {content_dict.get('video_description', '')}"
+        video_rag = f"Description of video {content_dict.get('video_title', '')} to be responded:\n {content_dict.get('video_description', '')}"
         keywords_rag = f"Keywords describing the link between the video and the product:\n {content_dict.get('keywords', '')}"
-        product_rag = f"Description of the product to promote:\n {content_dict.get('product_description', '')}"
-        prompt = prompt_template.format(url=content_dict['product_url'])
+        product_rag = f"Description of the product {content_dict.get('product_title', '')} of type {content_dict.get('product_type', '')} to promote:\n {content_dict.get('product_content', '')}"
+        prompt = prompt_template.format(url=content_dict['product_url'], product=content_dict['product_title'], video=content_dict['video_title'])
         prompts = [video_rag,keywords_rag,product_rag,prompt]
         try:
             llm_response = self.process_with_llm(prompts,sys_prompt)
@@ -119,6 +128,7 @@ class VideoProductPromotionWidget(Widget):
             'video_description': content_dict.get('video_description', ''),
             'channel_title': content_dict.get('channel_title', ''),
             'product_title': content_dict.get('product_title', ''),
+            'product_type': content_dict.get('product_type', ''),
         }
 
     def generate_responses_for_list(self, content_list, prompt_template, sys_prompt):
@@ -126,13 +136,9 @@ class VideoProductPromotionWidget(Widget):
         Génère des réponses pour une liste de contenus.
 
         Args:
-            widget: Instance du widget appelant
-            config: Configuration du plugin
             content_list: Liste de dictionnaires de contenus
             prompt_template: Modèle de prompt pour le LLM
-            context: Contexte supplémentaire
-            url: URL à promouvoir
-            keyword: Mot-clé associé
+            sys_prompt: Prompt système pour le LLM
 
         Returns:
             Liste de réponses générées
@@ -261,7 +267,9 @@ class VideoProductPromotionWidget(Widget):
                         'author': '',
                         'product_id': top_product_id,
                         'product_title': product['title'],
+                        'product_type': product['type'],
                         'product_description': product['description'],
+                        'product_content': product['content'],
                         'product_url': product['url'],
                         'keywords': ', '.join(video_keywords_list[videos_df.index.get_loc(video_row.name)])
                     })
@@ -327,15 +335,15 @@ class VideoProductPromotionWidget(Widget):
             st.subheader(t("promotional_messages"))
             responses_df = pd.DataFrame([
                 {
-                    'context': resp['video_description'],
+                    'comment_text': resp['video_description'],
                     'response_text': resp['response'],
                     'video_title': resp['video_title'],
                     'channel_title': resp['channel_title'],
-                    'product_title': resp.get('product_title', ''),
                     'comment_id': resp['comment_id'],
                     'video_id': resp['target_video_id'],
                     'channel_id': resp['channel_id'],
-                    'keyword': resp['keyword']
+                    'keyword': resp['keyword'],
+                    'product_title': resp.get('product_title', ''),
                 }
                 for resp in st.session_state[f"{self.prefix}_generated_promotions"]
             ])
