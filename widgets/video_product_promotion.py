@@ -5,7 +5,7 @@ import pandas as pd
 from widgets.video_list import VideoListWidget
 from widgets.theme_selector import ThemeSelectorWidget
 from widgets.product_matcher import VideoProductMatchWidget
-from widgets.utils import generate_responses_for_list, export_responses
+from widgets.utils import export_responses, remove_quotes
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from datetime import datetime
 from lib.youtube_db import cache_campaign_response
@@ -20,7 +20,8 @@ translations["en"].update({
     "char_limit_warning": "⚠️ This message exceeds 500 characters ({} characters). Please shorten it.",
     "export_promotions": "Export Promotional Messages",
     "prompt_label": "LLM Prompt for Promotional Messages",
-    "default_prompt": "Generate a concise promotional message (<500 chars) for the product at {url} (mandatory in result), tailored to the video '{video_title}' with keywords: {keywords}. Use a direct tone, as if you're a viewer, inspired by: {context}",
+    "prompo_default_prompt": "Generate a concise promotional message (<500 chars) for the product at {url} (mandatory in result), tailored to the video with keywords. Use a direct tone, as if you're a viewer",
+    'promo_sys_prompt': "You are an expert in creating promotional messages for products. Your task is to generate a concise promotional message for the product.",
     "theme_mapping": "Map Keywords to Themes",
     "no_themes_matched": "No themes matched for the selected videos' keywords.",
     "matched_themes": "Matched Themes for Video Keywords",
@@ -41,7 +42,8 @@ translations["fr"].update({
     "char_limit_warning": "⚠️ Ce message dépasse 500 caractères ({} caractères). Veuillez le raccourcir.",
     "export_promotions": "Exporter les messages promotionnels",
     "prompt_label": "Prompt LLM pour les messages promotionnels",
-    "default_prompt": "Générer un message promotionnel concis (<500 chars) pour le produit à {url} (l'URL doit obligaotirement être mentionnée dans le résultat), adapté à la vidéo '{video_title}' avec mots-clés : {keywords}. Utilisez un ton direct, comme si vous étiez un spectateur, inspiré par : {context}",
+    "promo_default_prompt": "Générer un message promotionnel concis (<500 chars) pour le produit à {url} (l'URL doit obligatoirement être mentionnée dans le résultat), adapté à la vidéo d'après les mots-clés, et la description de la vidéo.",
+    "promo_sys_prompt": "Vous êtes un assistant de marketing qui est l'auteur qui vient promouvoir ses produits. Votre message doit être concis et donner envie de consulter le produit.",
     "theme_mapping": "Associer les mots-clés aux thèmes",
     "no_themes_matched": "Aucun thème correspondant aux mots-clés des vidéos sélectionnées.",
     "matched_themes": "Thèmes correspondants pour les mots-clés des vidéos",
@@ -88,6 +90,69 @@ class VideoProductPromotionWidget(Widget):
                         themes.append(theme)
             return themes
         return matched_themes
+
+    def generate_response_for_content(self, content_dict, prompt_template, sys_prompt):
+        """
+        Génère une réponse pour un contenu donné (commentaire, vidéo, etc.) en utilisant un prompt LLM.
+        Returns:
+            Dictionnaire contenant la réponse générée et les métadonnées
+        """
+        video_rag = f"Description of video to respond:\n {content_dict.get('video_title', '')} - {content_dict.get('video_description', '')}"
+        keywords_rag = f"Keywords describing the link between the video and the product:\n {content_dict.get('keywords', '')}"
+        product_rag = f"Description of the product to promote:\n {content_dict.get('product_description', '')}"
+        prompt = prompt_template.format(url=content_dict['product_url'])
+        prompts = [video_rag,keywords_rag,product_rag,prompt]
+        try:
+            llm_response = self.process_with_llm(prompts,sys_prompt)
+            clean_response = remove_quotes(llm_response.strip())
+        except Exception as e:
+            clean_response = f"Error: {str(e)}"
+
+        return {
+            'comment_id': content_dict.get('comment_id', ''),
+            'response': clean_response,
+            'target_video_id': content_dict.get('video_id', ''),
+            'channel_id': content_dict.get('channel_id', ''),
+            'keyword': content_dict.get('keyword',''),
+            'author': content_dict.get('author', ''),
+            'video_title': content_dict.get('video_title', ''),
+            'video_description': content_dict.get('video_description', ''),
+            'channel_title': content_dict.get('channel_title', ''),
+            'product_title': content_dict.get('product_title', ''),
+        }
+
+    def generate_responses_for_list(self, content_list, prompt_template, sys_prompt):
+        """
+        Génère des réponses pour une liste de contenus.
+
+        Args:
+            widget: Instance du widget appelant
+            config: Configuration du plugin
+            content_list: Liste de dictionnaires de contenus
+            prompt_template: Modèle de prompt pour le LLM
+            context: Contexte supplémentaire
+            url: URL à promouvoir
+            keyword: Mot-clé associé
+
+        Returns:
+            Liste de réponses générées
+        """
+        responses = []
+        total_items = len(content_list)
+        progress_bar = st.progress(0)
+        progress_text = st.empty()
+
+        for idx, content in enumerate(content_list):
+            progress = (idx + 1) / total_items
+            progress_bar.progress(progress)
+            progress_text.text(f"Processing item {idx + 1} of {total_items}")
+
+            response = self.generate_response_for_content(content, prompt_template, sys_prompt)
+            responses.append(response)
+
+        progress_bar.empty()
+        progress_text.empty()
+        return responses
 
     def display(self):
         st.title(t("video_product_promotion_title"))
@@ -155,25 +220,6 @@ class VideoProductPromotionWidget(Widget):
             st.error(t("no_products_error"))
             return
 
-        # Afficher les produits dans un DataFrame
-        products_df = pd.DataFrame([
-            {
-                "Product ID": p["id"],
-                "Title": p["title"],
-                "URL": p["url"],
-                "Keywords": p["keywords"] if p["keywords"] else ""
-            }
-            for p in products
-        ])
-        st.dataframe(
-            products_df,
-            column_config={
-                "URL": st.column_config.LinkColumn("URL", display_text="Visit"),
-                "Keywords": st.column_config.TextColumn("Keywords", width="large")
-            },
-            use_container_width=True
-        )
-
         # Étape 5 : Configurer le seuil de score et calculer les paires
         st.subheader(t("score_threshold"))
         score_threshold = st.number_input(
@@ -207,13 +253,15 @@ class VideoProductPromotionWidget(Widget):
                     video_product_pairs.append({
                         'comment_id': f"{video_id}_{top_product_id}",
                         'video_id': video_id,
+                        'video_url' : video_row['url'],
                         'channel_id': video_row['channel_id'],
                         'video_title': video_row['title'],
                         'channel_title': video_row['channel_title'],
-                        'comment_text': f"Video: {video_row['title']} - Description: {video_row['description']}",
+                        'video_description': video_row['description'],
                         'author': '',
                         'product_id': top_product_id,
                         'product_title': product['title'],
+                        'product_description': product['description'],
                         'product_url': product['url'],
                         'keywords': ', '.join(video_keywords_list[videos_df.index.get_loc(video_row.name)])
                     })
@@ -227,9 +275,10 @@ class VideoProductPromotionWidget(Widget):
             st.subheader(t("video_product_pairs"))
             pairs_df = pd.DataFrame(st.session_state[f"{self.prefix}_video_product_pairs"])
             selected_pairs = st.dataframe(
-                pairs_df[["video_title", "channel_title", "product_title", "product_url", "keywords"]],
+                pairs_df[["video_title", "video_url", "channel_title", "product_title", "product_url", "keywords"]],
                 column_config={
                     "video_title": st.column_config.TextColumn("Video Title", width="large"),
+                    "video_url": st.column_config.LinkColumn("Video URL", display_text="Watch"),
                     "channel_title": st.column_config.TextColumn("Channel", width="medium"),
                     "product_title": st.column_config.TextColumn("Product Title", width="large"),
                     "product_url": st.column_config.LinkColumn("Product URL", display_text="Visit"),
@@ -249,7 +298,7 @@ class VideoProductPromotionWidget(Widget):
             selected_pairs_list = []
 
         # Étape 7 : Configurer et afficher le prompt
-        default_prompt = t("default_prompt")
+        default_prompt = t("promo_default_prompt")
         prompt_key = f"{self.prefix}_promotion_prompt"
         if prompt_key not in st.session_state:
             st.session_state[prompt_key] = default_prompt
@@ -265,28 +314,11 @@ class VideoProductPromotionWidget(Widget):
         # Étape 8 : Générer les messages promotionnels pour les paires sélectionnées
         if st.button(t("generate_promotions"), key=f"{self.prefix}_generate_promotions") and selected_pairs_list:
             with st.spinner(t("generating_promotions")):
-                responses = generate_responses_for_list(
-                    widget=self,
-                    config=self.plugin_manager.config,
+                responses = self.generate_responses_for_list(
                     content_list=selected_pairs_list,
                     prompt_template=prompt_template,
-                    context="Promotional message generation for video-product pairs",
-                    keyword=', '.join(keywords)
+                    sys_prompt= t("promo_sys_prompt")
                 )
-
-                # Sauvegarder dans la base de données
-                campaign_id = datetime.now().isoformat()
-                for resp in responses:
-                    cache_campaign_response(
-                        campaign_id=campaign_id,
-                        comment_id=resp['comment_id'],
-                        comment_text=resp['comment_text'],
-                        response_text=resp['response'],
-                        video_id=resp['target_video_id'],
-                        channel_id=resp['channel_id'],
-                        author=resp['author'],
-                        status="pending"
-                    )
 
                 st.session_state[f"{self.prefix}_generated_promotions"] = responses
 
@@ -295,7 +327,7 @@ class VideoProductPromotionWidget(Widget):
             st.subheader(t("promotional_messages"))
             responses_df = pd.DataFrame([
                 {
-                    'comment_text': resp['comment_text'],
+                    'context': resp['video_description'],
                     'response_text': resp['response'],
                     'video_title': resp['video_title'],
                     'channel_title': resp['channel_title'],
@@ -310,9 +342,8 @@ class VideoProductPromotionWidget(Widget):
 
             # Configurer le DataFrame pour les réponses
             selected_responses = st.dataframe(
-                responses_df[["comment_text", "response_text", "video_title", "channel_title", "product_title"]],
+                responses_df[["response_text", "video_title", "channel_title", "product_title"]],
                 column_config={
-                    "comment_text": st.column_config.TextColumn("Video Content", width="large"),
                     "response_text": st.column_config.TextColumn("Promotional Message", width="large"),
                     "video_title": st.column_config.TextColumn("Video Title", width="medium"),
                     "channel_title": st.column_config.TextColumn("Channel", width="medium"),
