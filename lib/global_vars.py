@@ -28,3 +28,8 @@ translations = {
 # Fonction de traduction
 def t(key: str) -> str:
     return translations[get_lang()].get(key, key)
+
+
+@st.dialog("Alert")
+def alert(message):
+    st.write(message)
