@@ -705,13 +705,8 @@ class LlmPlugin(Plugin):
                     name = st.text_input(t("llm_persona_name_label"), value=persona.get(
                         "name", ""), key=f"persona_name_{i}")
                 with col2:
-                    #prompt = st.text_area(t("llm_persona_prompt_label"), value=persona.get(
-                    #    "prompt", ""), key=f"persona_prompt_{i}")
-                    prompt = streamlit_lexical(
-                        value=persona.get("prompt", ""),
-                        height=400,
-                        key=f"persona_prompt_{i}"
-                    )
+                    prompt = st.text_area(t("llm_persona_prompt_label"), value=persona.get(
+                        "prompt", ""), key=f"persona_prompt_{i}")
                 if st.button("Remove", key=f"remove_persona_{i}"):
                     del st.session_state.personas[i]
                     st.rerun()
