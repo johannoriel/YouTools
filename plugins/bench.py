@@ -1,5 +1,5 @@
 # bench.py
-from lib.global_vars import translations, t
+from lib.global_vars import translations, t, alert
 from app import Plugin
 import streamlit as st
 import requests
@@ -94,12 +94,6 @@ class BenchPlugin(Plugin):
         super().__init__(name, plugin_manager)
         self.ragllm_plugin = self.plugin_manager.get_plugin('ragllm')
         self.db = BenchDB()
-        if 'prompts' not in st.session_state:
-            st.session_state.prompts = self.get_config_fields()[
-                "bench_prompts"]["default"]
-        # Ensure config has our structure
-        if not plugin_manager.config.get(name):
-            plugin_manager.config[name] = self.get_config_fields()
 
     def get_config_fields(self):
         return {
