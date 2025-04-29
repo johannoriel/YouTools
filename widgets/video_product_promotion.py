@@ -1,4 +1,4 @@
-from lib.global_vars import translations, t
+from lib.global_vars import translations, t, alert
 from app import Widget
 import streamlit as st
 import pandas as pd
@@ -9,6 +9,7 @@ from widgets.utils import export_responses, remove_quotes
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from datetime import datetime
 from lib.youtube_db import cache_campaign_response
+import re
 
 translations["en"].update({
     "video_product_promotion_title": "Video-Product Promotion",
@@ -42,8 +43,9 @@ translations["fr"].update({
     "char_limit_warning": "⚠️ Ce message dépasse 500 caractères ({} caractères). Veuillez le raccourcir.",
     "export_promotions": "Exporter les messages promotionnels",
     "prompt_label": "Prompt LLM pour les messages promotionnels",
-    "promo_default_prompt": "Générer un message promotionnel concis (<500 chars) pour le produit '{product}' à l'url '{url}' (l'URL doit obligatoirement être mentionnée dans le résultat), qui est une réponse de l'auteur du produit à la vidéo '{video}' d'une chaîne youtube externe ou l'on veut acquérir des prospect.",
-    "promo_sys_prompt": "Vous êtes un assistant de marketing qui est l'auteur qui vient promouvoir ses produits. Votre message doit être concis et donner envie de consulter le produit.",
+    #"promo_default_prompt": "Tu es un youtubeur qui répond à la vidéo '{video}' d'une autre chaîne. Ne confonds pas, la vidéo est étrangère, toi, tu es l'auteur du produit. Tu défends les idées contenues dans '{product}' dont le contenu est mentionné ci-avant. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
+    "promo_default_prompt": "Tu es un youtubeur qui répond à la vidéo '{video}' d'une autre chaîne, d'après les idées défendues dans '{product}'. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
+    "promo_sys_prompt": "Vous êtes un assistant qui suit fidèlement les instructions dans un objectif marketing.",
     "theme_mapping": "Associer les mots-clés aux thèmes",
     "no_themes_matched": "Aucun thème correspondant aux mots-clés des vidéos sélectionnées.",
     "matched_themes": "Thèmes correspondants pour les mots-clés des vidéos",
@@ -54,9 +56,6 @@ translations["fr"].update({
     "overwrite_responses_checkbox": "Écraser le fichier de réponses existant",
 })
 
-@st.dialog("Alert")
-def alert(message):
-    st.write(message)
 
 class VideoProductPromotionWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
@@ -106,14 +105,15 @@ class VideoProductPromotionWidget(Widget):
         Returns:
             Dictionnaire contenant la réponse générée et les métadonnées
         """
-        video_rag = f"Description of video {content_dict.get('video_title', '')} to be responded:\n {content_dict.get('video_description', '')}"
+        video_rag = f"Description of video '{content_dict.get('video_title', '')}' to be responded:\n {content_dict.get('video_description', '')}"
         keywords_rag = f"Keywords describing the link between the video and the product:\n {content_dict.get('keywords', '')}"
-        product_rag = f"Description of the product {content_dict.get('product_title', '')} of type {content_dict.get('product_type', '')} to promote:\n {content_dict.get('product_content', '')}"
+        product_rag = f"Content of the product '{content_dict.get('product_title', '')}' of type {content_dict.get('product_type', '')} :\n {content_dict.get('product_content', '')}"
         prompt = prompt_template.format(url=content_dict['product_url'], product=content_dict['product_title'], video=content_dict['video_title'])
         prompts = [video_rag,keywords_rag,product_rag,prompt]
         try:
             llm_response = self.process_with_llm(prompts,sys_prompt)
-            clean_response = remove_quotes(llm_response.strip())
+            no_think_response = re.sub(r'<think>[\s\S]*?</think>', '', llm_response)
+            clean_response = remove_quotes(no_think_response.strip())
         except Exception as e:
             clean_response = f"Error: {str(e)}"
 
