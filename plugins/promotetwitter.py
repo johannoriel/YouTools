@@ -25,6 +25,7 @@ translations["en"].update({
     "promotetwitter_posting": "Posting responses...",
     "promotetwitter_success": "Responses posted successfully!",
     "promotetwitter_error": "Error posting responses: ",
+    "promotetwitter_randomtweet_tab": "Random Tweet",
 })
 
 translations["fr"].update({
@@ -44,6 +45,7 @@ translations["fr"].update({
     "promotetwitter_posting": "Publication des réponses...",
     "promotetwitter_success": "Réponses publiées avec succès !",
     "promotetwitter_error": "Erreur lors de la publication : ",
+    "promotetwitter_randomtweet_tab": "Tweet Aléatoire",
 })
 
 
@@ -93,13 +95,32 @@ class PromotetwitterPlugin(Plugin):
                 "type": "text",
                 "label": "Twitter User ID",
                 "default": ""
-            }
+            },
+            "randomtweet_prompt": {
+                "type": "textarea",
+                "label": "LLM Prompt for Random Tweet Thread",
+                "default": """À partir du contenu suivant d'un produit ({content}), agis comme un infopreneur et crée un fil de tweets pour expliquer pédagogiquement un point clé du produit intitulé "{title}" avec les mots-clés ({keywords}).
+
+            Format de sortie attendu :
+            TWEET:
+            [Contenu du premier tweet]
+            ---
+            TWEET:
+            [Contenu du deuxième tweet]
+            ---
+            TWEET:
+            [Contenu du troisième tweet]
+            etc...
+
+            Chaque tweet doit faire maximum 280 caractères et rester fidèle au contenu sans le trahir."""
+                    }
         }
 
     def get_tabs(self):
         return [
             {"name": t("promotetwitter_tab"), "plugin": "promotetwitter"},
-            {"name": "Timeline", "plugin": "promotetwitter_timeline"}
+            {"name": "Timeline", "plugin": "promotetwitter_timeline"},
+            {"name": t("randomtweet_tab"), "plugin": "randomtweet"}
         ]
 
     def search_tweets(self, query: str, max_tweets: int, api_version: str) -> List[Dict[str, Any]]:
@@ -147,130 +168,6 @@ class PromotetwitterPlugin(Plugin):
 
     def has_llm_error(self, response_text: str) -> bool:
         return "litellm.APIError" in response_text
-
-    def run_timeline(self, config):
-        st.header("Timeline des abonnements")
-
-        # Vérifier la présence du user_id
-        user_id = config['promotetwitter'].get('user_id', '')
-        if not user_id:
-            st.error("Veuillez configurer votre User ID dans les paramètres.")
-            return
-
-        # Case à cocher pour choisir l'API
-        use_api_v1 = st.checkbox(
-            "Utiliser l'API v1 (limité à 20 tweets)", value=False)
-
-        # Afficher les limites de taux
-        if use_api_v1:
-            twitter_api = TwitterAPI(self.plugin_manager.config)
-            rate_limit = twitter_api.get_rate_limit_status()
-            st.subheader("Statut des limites de taux")
-            st.write("**Timeline (home_timeline)** :")
-            if rate_limit['timeline']['remaining'] is not None:
-                st.write(
-                    f"Requêtes restantes : {rate_limit['timeline']['remaining']} sur {rate_limit['timeline']['limit']}")
-                st.write(
-                    f"Réinitialisation : {rate_limit['timeline']['reset']}")
-            else:
-                st.warning(
-                    "Impossible de récupérer les limites de taux pour la timeline.")
-            st.write("**Publication de tweets (update)** :")
-            if rate_limit['update']['remaining'] is not None:
-                st.write(
-                    f"Requêtes restantes : {rate_limit['update']['remaining']} sur {rate_limit['update']['limit']}")
-                st.write(f"Réinitialisation : {rate_limit['update']['reset']}")
-            else:
-                st.warning(
-                    "Impossible de récupérer les limites de taux pour la publication.")
-
-        # Bouton pour récupérer la timeline
-        if st.button("Récupérer la timeline"):
-            with st.spinner("Récupération des tweets..."):
-                if use_api_v1:
-                    st.session_state.tweets = twitter_api.get_following_timeline_v1(
-                        max_results=20)
-                else:
-                    st.session_state.tweets = twitter_api.get_following_timeline(
-                        user_id, max_results=100)
-
-        # Afficher les threads
-        if st.session_state.tweets:
-            st.subheader("Threads récents des abonnements")
-            threads = twitter_api.organize_tweets_into_threads(
-                st.session_state.tweets)
-            selected_tweet = None
-            for i, thread in enumerate(threads):
-                root_tweet = thread['root_tweet']
-                with st.expander(f"Thread de @{root_tweet['user']} - {root_tweet['created_at']}"):
-                    # Afficher le tweet racine
-                    st.image(root_tweet['profile_image_url'], width=50)
-                    st.write(
-                        f"**{root_tweet['name']} (@{root_tweet['user']})**")
-                    st.write(root_tweet['text'])
-                    st.write(f"**Langue** : {root_tweet['lang']}")
-                    st.write(f"**Source** : {root_tweet['source']}")
-                    st.write(f"**Métriques** : {root_tweet['public_metrics']['like_count']} likes, "
-                             f"{root_tweet['public_metrics']['retweet_count']} retweets, "
-                             f"{root_tweet['public_metrics']['reply_count']} réponses, "
-                             f"{root_tweet['public_metrics']['quote_count']} citations")
-                    st.markdown(f"[Voir le tweet]({root_tweet['url']})")
-                    if st.button(f"Sélectionner pour répondre au tweet racine", key=f"select_root_tweet_{i}"):
-                        selected_tweet = root_tweet
-                        st.session_state.selected_tweet = root_tweet
-
-                    # Afficher les réponses dans des sous-expanders
-                    if thread['replies']:
-                        st.write("**Réponses dans ce thread** :")
-                        for j, reply in enumerate(thread['replies']):
-                            with st.expander(f"Réponse de @{reply['user']} - {reply['created_at']}"):
-                                st.image(reply['profile_image_url'], width=50)
-                                st.write(
-                                    f"**{reply['name']} (@{reply['user']})**")
-                                st.write(reply['text'])
-                                st.write(f"**Langue** : {reply['lang']}")
-                                st.write(f"**Source** : {reply['source']}")
-                                st.write(f"**Métriques** : {reply['public_metrics']['like_count']} likes, "
-                                         f"{reply['public_metrics']['retweet_count']} retweets, "
-                                         f"{reply['public_metrics']['reply_count']} réponses, "
-                                         f"{reply['public_metrics']['quote_count']} citations")
-                                st.markdown(f"[Voir le tweet]({reply['url']})")
-                                if st.button(f"Sélectionner pour répondre", key=f"select_reply_tweet_{i}_{j}"):
-                                    selected_tweet = reply
-                                    st.session_state.selected_tweet = reply
-
-        # Section pour répondre manuellement
-        if 'selected_tweet' in st.session_state and st.session_state.selected_tweet:
-            st.subheader("Répondre au tweet sélectionné")
-            tweet = st.session_state.selected_tweet
-            st.write(
-                f"**Tweet sélectionné de @{tweet['user']}** : {tweet['text']}")
-            response_text = st.text_area(
-                "Votre réponse (max 280 caractères)", max_chars=280, key="manual_response")
-            if len(response_text) > 280:
-                st.warning(
-                    f"La réponse dépasse 280 caractères ({len(response_text)}).")
-            if st.button("Poster la réponse"):
-                if response_text:
-                    with st.spinner("Publication de la réponse..."):
-                        if use_api_v1:
-                            response = twitter_api.create_tweet_v1(
-                                text=response_text,
-                                in_reply_to_tweet_id=tweet['id']
-                            )
-                        else:
-                            response = twitter_api.create_tweet(
-                                text=response_text,
-                                in_reply_to_tweet_id=tweet['id']
-                            )
-                        if response:
-                            st.success("Réponse publiée avec succès !")
-                            st.session_state.selected_tweet = None  # Réinitialiser la sélection
-                        else:
-                            st.error(
-                                "Erreur lors de la publication de la réponse.")
-                else:
-                    st.warning("Veuillez entrer une réponse.")
 
     def run_post(self, config):
         st.header(t("promotetwitter_header"))
@@ -432,8 +329,12 @@ class PromotetwitterPlugin(Plugin):
 
     def run(self, config):
         """Main plugin logic"""
-        tab1, tab2 = st.tabs(["Poster", "Répondre"])
+        tab1, tab2, tab3 = st.tabs([t("promotetwitter_tab"), "Timeline", t("promotetwitter_randomtweet_tab")])
         with tab1:
             self.run_post(config)
         with tab2:
-            self.run_timeline(config)
+            from widgets.twitter_timeline import TwitterTimelineWidget
+            TwitterTimelineWidget("promotetwitter_timeline", "twittertimeline", self.plugin_manager).display(config)
+        with tab3:
+            from widgets.random_tweet import RandomTweetWidget
+            RandomTweetWidget("randomtweet", "randomtweet", self.plugin_manager).display(config)
