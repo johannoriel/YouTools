@@ -19,6 +19,7 @@ translations["en"].update({
     "randomtweet_error": "Error posting tweet thread: ",
     "randomtweet_add_url": "Add URL Tweet at the End",
     "randomtweet_prompt": "LLM Prompt for Random Tweet Thread",
+    "randomtweet_select_product": "Select a Product",
 })
 
 translations["fr"].update({
@@ -33,6 +34,7 @@ translations["fr"].update({
     "randomtweet_error": "Erreur lors de la publication du fil : ",
     "randomtweet_add_url": "Ajouter un tweet avec l'URL à la fin",
     "randomtweet_prompt": "Prompt LLM pour le fil de tweets aléatoire",
+    "randomtweet_select_product": "Sélectionner un produit",
 })
 
 class RandomTweetWidget(Widget):
@@ -43,6 +45,12 @@ class RandomTweetWidget(Widget):
     def _initialize_session_state(self):
         if f'{self.prefix}_generated_tweets' not in st.session_state:
             st.session_state[f'{self.prefix}_generated_tweets'] = []
+        if f'{self.prefix}_selected_product' not in st.session_state:
+            st.session_state[f'{self.prefix}_selected_product'] = None
+        if f'{self.prefix}_add_url_tweet' not in st.session_state:
+            st.session_state[f'{self.prefix}_add_url_tweet'] = False
+        if f'{self.prefix}_url_tweet' not in st.session_state:
+            st.session_state[f'{self.prefix}_url_tweet'] = ""
 
     def parse_tweets(self, llm_response: str) -> List[str]:
         """Parse LLM response into a list of tweets."""
@@ -87,16 +95,35 @@ class RandomTweetWidget(Widget):
             st.warning("No products found in the database.")
             return
 
-        # Select a random product
-        random_product = random.choice(products)
+        # Create a list of product titles for the selectbox
+        product_titles = [product['title'] for product in products]
+
+        # Set initial random product if not already selected
+        if not st.session_state[f'{self.prefix}_selected_product']:
+            st.session_state[f'{self.prefix}_selected_product'] = random.choice(products)
+
+        # Find the index of the selected product
+        selected_product_title = st.session_state[f'{self.prefix}_selected_product']['title']
+        default_index = product_titles.index(selected_product_title) if selected_product_title in product_titles else 0
+
+        # Selectbox to choose a product
+        selected_title = st.selectbox(
+            t("randomtweet_select_product"),
+            options=product_titles,
+            index=default_index,
+            key=f"{self.prefix}_product_select"
+        )
+
+        # Update selected product based on user choice
+        selected_product = next((p for p in products if p['title'] == selected_title), products[0])
+        if selected_product['title'] != st.session_state[f'{self.prefix}_selected_product']['title']:
+            st.session_state[f'{self.prefix}_selected_product'] = selected_product
+            st.session_state[f'{self.prefix}_generated_tweets'] = []  # Reset tweets if product changes
 
         # Display product information
-        st.write(f"**Selected Product**: {random_product['title']}")
-        st.write(f"**Keywords**: {random_product['keywords']}")
-        st.write(f"**Content**: {random_product['content'][:200]}...")
-
-        # Checkbox to add URL tweet
-        add_url_tweet = st.checkbox(t("randomtweet_add_url"), key=f"{self.prefix}_add_url")
+        st.write(f"**Selected Product**: {selected_product['title']}")
+        st.write(f"**Keywords**: {selected_product['keywords']}")
+        st.write(f"**Content**: {selected_product['content'][:200]}...")
 
         # LLM Prompt
         prompt = st.text_area(
@@ -110,10 +137,10 @@ class RandomTweetWidget(Widget):
         # Generate tweet thread button
         if st.button(t("randomtweet_generate"), key=f"{self.prefix}_generate"):
             with st.spinner(t("randomtweet_generating")):
-                tweets = self.generate_tweet_thread(config, random_product)
-                if add_url_tweet and random_product['url']:
-                    tweets.append(f"Retrouvez plus sur {random_product['url']}")
+                tweets = self.generate_tweet_thread(config, selected_product)
                 st.session_state[f'{self.prefix}_generated_tweets'] = tweets
+                st.session_state[f'{self.prefix}_add_url_tweet'] = False
+                st.session_state[f'{self.prefix}_url_tweet'] = f"Retrouvez plus sur {selected_product['url']}" if selected_product['url'] else ""
 
         # Display generated tweets
         if st.session_state[f'{self.prefix}_generated_tweets']:
@@ -133,9 +160,37 @@ class RandomTweetWidget(Widget):
                         f"⚠️ Tweet {i+1} exceeds 280 characters ({len(edited_tweet)} characters). Please shorten it."
                     )
 
+            # Checkbox for adding URL tweet (shown only after tweets are generated)
+            if selected_product['url']:
+                add_url_tweet = st.checkbox(
+                    t("randomtweet_add_url"),
+                    value=st.session_state[f'{self.prefix}_add_url_tweet'],
+                    key=f"{self.prefix}_add_url"
+                )
+                st.session_state[f'{self.prefix}_add_url_tweet'] = add_url_tweet
+
+                # Display and edit URL tweet if checkbox is checked
+                if add_url_tweet:
+                    url_tweet = st.text_area(
+                        "URL Tweet",
+                        st.session_state[f'{self.prefix}_url_tweet'],
+                        key=f"{self.prefix}_url_tweet",
+                        height=100
+                    )
+                    st.session_state[f'{self.prefix}_url_tweet'] = url_tweet
+
+                    # Validate URL tweet length
+                    if len(url_tweet) > 280:
+                        st.warning(
+                            f"⚠️ URL Tweet exceeds 280 characters ({len(url_tweet)} characters). Please shorten it."
+                        )
+
         # Post tweet thread button
         if st.session_state[f'{self.prefix}_generated_tweets']:
             if st.button(t("randomtweet_post"), key=f"{self.prefix}_post"):
                 with st.spinner(t("randomtweet_posting")):
-                    self.post_tweet_thread(
-                        config, st.session_state[f'{self.prefix}_generated_tweets'])
+                    # Prepare final tweet thread
+                    final_tweets = st.session_state[f'{self.prefix}_generated_tweets'].copy()
+                    if st.session_state[f'{self.prefix}_add_url_tweet'] and st.session_state[f'{self.prefix}_url_tweet']:
+                        final_tweets.append(st.session_state[f'{self.prefix}_url_tweet'])
+                    self.post_tweet_thread(config, final_tweets)
