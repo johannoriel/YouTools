@@ -12,6 +12,7 @@ from streamlit_lexical import streamlit_lexical
 import subprocess
 import time
 import requests
+import re
 
 # Translations
 translations["en"].update({
@@ -56,6 +57,7 @@ translations["en"].update({
     "llm_add_persona": "Add Persona",
     "llm_select_persona": "Select Persona",
     "llm_ollama_restart": "Restart Ollama",
+    "llm_prompt_sequence_tab": "Prompt Sequence",
 })
 
 translations["fr"].update({
@@ -100,6 +102,7 @@ translations["fr"].update({
     "llm_add_persona": "Ajouter un Persona",
     "llm_select_persona": "Sélectionner un Persona",
     "llm_ollama_restart": "Redémarer Ollama",
+    "llm_prompt_sequence_tab": "Séquence de Prompts",
 })
 
 
@@ -175,15 +178,13 @@ class LlmPlugin(Plugin):
 
     def get_tabs(self):
         return [
-            {"name": t("llm_llm_tab"), "plugin": "llmplugin"},]
-        return [
             {"name": t("llm_keys_tab"), "plugin": "llmplugin", "tab": "keys"},
             {"name": t("llm_apis_tab"), "plugin": "llmplugin", "tab": "apis"},
-            {"name": t("llm_models_tab"),
-             "plugin": "llmplugin", "tab": "models"},
-            {"name": t("llm_personas_tab"),
-             "plugin": "llmplugin", "tab": "personas"},
-            {"name": t("llm_chat_tab"), "plugin": "llmplugin", "tab": "chat"}
+            {"name": t("llm_models_tab"), "plugin": "llmplugin", "tab": "models"},
+            {"name": t("llm_personas_tab"), "plugin": "llmplugin", "tab": "personas"},
+            {"name": t("llm_chat_tab"), "plugin": "llmplugin", "tab": "chat"},
+            {"name": t("llm_prompt_sequence_tab"), "plugin": "llmplugin", "tab": "prompt_sequence"},
+            {"name": t("llm_ollama_restart"), "plugin": "llmplugin", "tab": "ollama_restart"}
         ]
 
     def get_api_keys(self):
@@ -479,7 +480,8 @@ class LlmPlugin(Plugin):
                 data = response.json()
                 time.sleep(delay)
                 result = data["choices"][0]["message"]["content"] if "choices" in data else "Error: Unexpected response format"
-                return result
+                no_think_result = re.sub(r'<think>[\s\S]*?</think>', '', result)
+                return no_think_result
             except Exception as e:
                 st.warning(f"Failed to call {model} at {full_url} with {api_key} wait {delay}s timeout {timeout}s : {str(e)}")
                 attempts += 1
@@ -819,8 +821,10 @@ class LlmPlugin(Plugin):
         self.restart_ollama()
 
     def run(self, config):
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-            [t("llm_keys_tab"), t("llm_apis_tab"), t("llm_models_tab"), t("llm_personas_tab"), t("llm_chat_tab"), t("llm_ollama_restart")])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+            [t("llm_keys_tab"), t("llm_apis_tab"), t("llm_models_tab"),
+             t("llm_personas_tab"), t("llm_chat_tab"), t("llm_prompt_sequence_tab"),
+             t("llm_ollama_restart")])
         with tab1:
             self.keys_tab(config)
         with tab2:
@@ -832,7 +836,9 @@ class LlmPlugin(Plugin):
         with tab5:
             self.chat_tab(config)
         with tab6:
+            from widgets.prompt_sequence import PromptSequenceWidget
+            PromptSequenceWidget("prompt_sequence", f"{self.name}_prompt_sequence", self.plugin_manager).display()
+        with tab7:
             self.ollama_restart(config)
-
 if __name__ == "__main__":
     st.write("LLM Plugin standalone test")
