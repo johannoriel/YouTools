@@ -270,8 +270,13 @@ class DirectpublishPlugin(Plugin):
                     font = config.get('movied', {}).get('font', 'Arial')
                     font_size = config.get('movied', {}).get('font_size', 100)
                     movied_plugin = self.plugin_manager.get_plugin('movied')
-                    movied_plugin.execute_operations(
-                        video_to_process, st.session_state.edit_operations_area, font, font_size)
+                    if replace_green_screen and background_video:
+                        movied_plugin.execute_operations(
+                            video_to_process, st.session_state.edit_operations_area, font, font_size, t("movied_green_background"))
+                    else:
+                        movied_plugin.execute_operations(
+                            video_to_process, st.session_state.edit_operations_area, font, font_size, t("movied_original_video") )
+
                     video_to_process = os.path.splitext(video_to_process)[
                         0] + "_edited.mp4"
                     st.text(video_to_process)
