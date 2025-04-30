@@ -6,10 +6,12 @@ import requests
 import json
 import time
 import random
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import ast
 from streamlit_lexical import streamlit_lexical
-
+import subprocess
+import time
+import requests
 
 # Translations
 translations["en"].update({
@@ -53,6 +55,7 @@ translations["en"].update({
     "llm_persona_prompt_label": "Persona System Prompt",
     "llm_add_persona": "Add Persona",
     "llm_select_persona": "Select Persona",
+    "llm_ollama_restart": "Restart Ollama",
 })
 
 translations["fr"].update({
@@ -96,6 +99,7 @@ translations["fr"].update({
     "llm_persona_prompt_label": "Prompt Système du Persona",
     "llm_add_persona": "Ajouter un Persona",
     "llm_select_persona": "Sélectionner un Persona",
+    "llm_ollama_restart": "Redémarer Ollama",
 })
 
 
@@ -181,20 +185,6 @@ class LlmPlugin(Plugin):
              "plugin": "llmplugin", "tab": "personas"},
             {"name": t("llm_chat_tab"), "plugin": "llmplugin", "tab": "chat"}
         ]
-
-    def run(self, config):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(
-            [t("llm_keys_tab"), t("llm_apis_tab"), t("llm_models_tab"), t("llm_personas_tab"), t("llm_chat_tab")])
-        with tab1:
-            self.keys_tab(config)
-        with tab2:
-            self.apis_tab(config)
-        with tab3:
-            self.models_tab(config)
-        with tab4:
-            self.personas_tab(config)
-        with tab5:
-            self.chat_tab(config)
 
     def get_api_keys(self):
         if 'api_keys' not in st.session_state:
@@ -679,6 +669,110 @@ class LlmPlugin(Plugin):
         except Exception as e:
             raise e
 
+    def run_command(self, command: str, sudo: bool = False) -> Tuple[bool, str]:
+        """Exécute une commande shell avec ou sans sudo."""
+        try:
+            if sudo:
+                command = f"sudo -S {command}"  # -S permet de lire le mot de passe depuis stdin
+                result = subprocess.run(
+                    command.split(),
+                    input=st.session_state.get("sudo_pwd", "") + "\n",
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+            else:
+                result = subprocess.run(command.split(), capture_output=True, text=True, check=True)
+            return (True, result.stdout)
+        except subprocess.CalledProcessError as e:
+            return (False, e.stderr)
+
+    def is_ollama_running(self) -> bool:
+        """Vérifie si Ollama tourne."""
+        success, _ = self.run_command("pgrep -f ollama")
+        return success
+
+    def stop_ollama(self) -> bool:
+        """Arrête Ollama avec escalade de privilèges si nécessaire."""
+        tab1, tab2 = st.tabs(["Méthode standard", "Avec sudo"])
+
+        with tab1:
+            if st.button("Arrêt normal"):
+                success, output = self.run_command("pkill -f ollama")
+                if success:
+                    st.success("Arrêt réussi sans sudo")
+                    return True
+                else:
+                    st.warning("Échec de l'arrêt normal")
+
+        with tab2:
+            if "sudo_pwd" not in st.session_state:
+                st.session_state.sudo_pwd = st.text_input("Mot de passe sudo", type="password")
+
+            if st.button("Forcer l'arrêt (sudo)"):
+                success, output = self.run_command("pkill -9 -f ollama", sudo=True)
+                if success:
+                    st.success("Arrêt forcé réussi")
+                    return True
+                else:
+                    st.error(f"Échec sudo : {output}")
+
+        return False
+
+    def start_ollama(self) -> bool:
+        """Démarre Ollama avec gestion des droits."""
+        choice = st.radio(
+            "Mode de démarrage",
+            ["Utilisateur normal", "Privilèges élevés (systemd)"],
+            horizontal=True
+        )
+
+        if st.button("Démarrer"):
+            if choice == "Utilisateur normal":
+                self.ollama_process = subprocess.Popen(["ollama", "serve"])
+                st.session_state.start_mode = "user"
+            else:
+                success, output = self.run_command("systemctl start ollama", sudo=True)
+                if not success:
+                    st.error(f"Erreur systemd : {output}")
+                    return False
+                st.session_state.start_mode = "systemd"
+
+            if self.wait_for_ollama():
+                st.success("Ollama est opérationnel !")
+                return True
+        return False
+
+    def wait_for_ollama(self, timeout: int = 30) -> bool:
+        """Attend que le serveur soit prêt."""
+        with st.spinner("Attente du démarrage..."):
+            for _ in range(timeout):
+                try:
+                    requests.get("http://localhost:11434", timeout=1)
+                    return True
+                except:
+                    time.sleep(1)
+        st.error("Timeout : serveur non répondant")
+        return False
+
+    def restart_ollama(self):
+        """Interface complète de redémarrage."""
+        st.title("🔌 Gestion Ollama - Nécessite sudo")
+
+        if not self.is_ollama_running():
+            if st.button("Démarrer simple (sans sudo)"):
+                self.start_ollama()
+            return
+
+        with st.expander("Journal système (sudo requis)"):
+            if st.button("Afficher les logs"):
+                _, logs = self.run_command("journalctl -u ollama -n 20", sudo=True)
+                st.code(logs)
+
+        if self.stop_ollama():
+            time.sleep(2)  # Pause entre arrêt/démarrage
+            self.start_ollama()
+
     def get_personas(self):
         if 'personas' not in st.session_state:
             if not 'personas' in self.plugin_manager.config[self.name] :
@@ -721,6 +815,24 @@ class LlmPlugin(Plugin):
             self.plugin_manager.save_config(config)
             st.success("Personas saved successfully!")
 
+    def ollama_restart(self, config):
+        self.restart_ollama()
+
+    def run(self, config):
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+            [t("llm_keys_tab"), t("llm_apis_tab"), t("llm_models_tab"), t("llm_personas_tab"), t("llm_chat_tab"), t("llm_ollama_restart")])
+        with tab1:
+            self.keys_tab(config)
+        with tab2:
+            self.apis_tab(config)
+        with tab3:
+            self.models_tab(config)
+        with tab4:
+            self.personas_tab(config)
+        with tab5:
+            self.chat_tab(config)
+        with tab6:
+            self.ollama_restart(config)
 
 if __name__ == "__main__":
     st.write("LLM Plugin standalone test")
