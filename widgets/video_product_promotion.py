@@ -21,8 +21,6 @@ translations["en"].update({
     "char_limit_warning": "⚠️ This message exceeds 500 characters ({} characters). Please shorten it.",
     "export_promotions": "Export Promotional Messages",
     "prompt_label": "LLM Prompt for Promotional Messages",
-    "prompo_default_prompt": "Generate a concise promotional message (<500 chars) for the product at {url} (mandatory in result), tailored to the video with keywords. Use a direct tone, as if you're a viewer",
-    'promo_sys_prompt': "You are an expert in creating promotional messages for products. Your task is to generate a concise promotional message for the product.",
     "theme_mapping": "Map Keywords to Themes",
     "no_themes_matched": "No themes matched for the selected videos' keywords.",
     "matched_themes": "Matched Themes for Video Keywords",
@@ -30,7 +28,8 @@ translations["en"].update({
     "products_list": "Available Products",
     "calculate_pairs": "Calculate Video-Product Pairs",
     "video_product_pairs": "Matched Video-Product Pairs",
-    "overwrite_responses_checkbox": "Overwrite Existing Responses"
+    "overwrite_responses_checkbox": "Overwrite Existing Responses",
+    "save_prompt_button": "Save Prompt as Default",
 })
 
 translations["fr"].update({
@@ -43,10 +42,6 @@ translations["fr"].update({
     "char_limit_warning": "⚠️ Ce message dépasse 500 caractères ({} caractères). Veuillez le raccourcir.",
     "export_promotions": "Exporter les messages promotionnels",
     "prompt_label": "Prompt LLM pour les messages promotionnels",
-    #"promo_default_prompt": "Tu es un youtubeur qui répond à la vidéo '{video}' d'une autre chaîne. Ne confonds pas, la vidéo est étrangère, toi, tu es l'auteur du produit. Tu défends les idées contenues dans '{product}' dont le contenu est mentionné ci-avant. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
-    #"promo_default_prompt": "Tu es un youtubeur qui répond à la vidéo '{video}' d'une autre chaîne, d'après les idées défendues dans '{product}'. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
-    "promot_default_prompt": "Tu es un youtubeur qui vient commenter la '{video}' de la chaîne '{channel}'. Tu defends les idées du produit '{product}'. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
-    "promo_sys_prompt": "Vous êtes un assistant qui suit fidèlement les instructions dans un objectif marketing.",
     "theme_mapping": "Associer les mots-clés aux thèmes",
     "no_themes_matched": "Aucun thème correspondant aux mots-clés des vidéos sélectionnées.",
     "matched_themes": "Thèmes correspondants pour les mots-clés des vidéos",
@@ -55,6 +50,7 @@ translations["fr"].update({
     "calculate_pairs": "Calculer les paires vidéo-produit",
     "video_product_pairs": "Paires vidéo-produit correspondantes",
     "overwrite_responses_checkbox": "Écraser le fichier de réponses existant",
+    "save_prompt_button": "Sauvegarder le Prompt par Défaut",
 })
 
 
@@ -95,35 +91,44 @@ class VideoProductPromotionWidget(Widget):
             return themes
         return matched_themes
 
-    def generate_response_for_content(self, content_dict, prompt_template, sys_prompt):
+    def generate_response_for_content(self, content_dict, sequence, sys_prompt):
         """
-        Génère une réponse pour un contenu donné (commentaire, vidéo, etc.) en utilisant un prompt LLM.
+        Génère une réponse pour un contenu donné en utilisant PromptSequenceWidget.
         Args:
             content_dict: Dictionnaire contenant les informations du contenu
             prompt_template: Modèle de prompt pour le LLM
-            sys_prompt: Prompt système pour le LLM
+            sys_prompt: Prompt système pour le LLM (non utilisé ici)
 
         Returns:
             Dictionnaire contenant la réponse générée et les métadonnées
         """
-        video_rag = f"Description de la vidéo '{content_dict.get('video_title', '')}' à laquelle je réponds :\n {content_dict.get('video_description', '')}"
-        keywords_rag = f"Mots clés qui font le lien entre mon produit et la vidéo externe :\n {content_dict.get('keywords', '')}"
-        product_rag = f"Contenu de mon produit '{content_dict.get('product_title', '')}' que je promeus :\n {content_dict.get('product_content', '')}"
-        prompt = prompt_template.format(url=content_dict['product_url'], product=content_dict['product_title'], video=content_dict['video_title'], channel=content_dict['channel_title'])
-        prompts = [video_rag,keywords_rag,product_rag,prompt]
-        try:
-            llm_response = self.process_with_llm(prompts,sys_prompt)
+        # Créer le dictionnaire pour PromptSequenceWidget
+        work_dict = {
+            "url": content_dict['product_url'],
+            "product": content_dict['product_title'],
+            "video": content_dict['video_title'],
+            "channel": content_dict['channel_title'],
+            "video_description": content_dict.get('video_description', ''),
+            "keywords": content_dict.get('keywords', ''),
+            "product_content": content_dict.get('product_content', '')
+        }
+        # Instancier PromptSequenceWidget et exécuter la séquence
+        from widgets.prompt_sequence import PromptSequenceWidget
+        prompt_sequence_widget = PromptSequenceWidget(
+            "prompt_sequence",
+            f"{self.prefix}_prompt_sequence",
+            self.plugin_manager,
+        )
+        llm_response = prompt_sequence_widget.prompt_sequence(sequence, work_dict, debug=True)
 
-            clean_response = remove_quotes(llm_response.strip())
-        except Exception as e:
-            clean_response = f"Error: {str(e)}"
+        clean_response = remove_quotes(llm_response.strip())
 
         return {
             'comment_id': content_dict.get('comment_id', ''),
             'response': clean_response,
             'target_video_id': content_dict.get('video_id', ''),
             'channel_id': content_dict.get('channel_id', ''),
-            'keyword': content_dict.get('keyword',''),
+            'keyword': content_dict.get('keyword', ''),
             'author': content_dict.get('author', ''),
             'video_title': content_dict.get('video_title', ''),
             'video_description': content_dict.get('video_description', ''),
@@ -308,7 +313,7 @@ class VideoProductPromotionWidget(Widget):
             selected_pairs_list = []
 
         # Étape 7 : Configurer et afficher le prompt
-        default_prompt = t("promo_default_prompt")
+        default_prompt = self.plugin_manager.config["automarket"]["automarket_prompt_sequence"]
         prompt_key = f"{self.prefix}_promotion_prompt"
         if prompt_key not in st.session_state:
             st.session_state[prompt_key] = default_prompt
@@ -320,6 +325,13 @@ class VideoProductPromotionWidget(Widget):
             height=150,
             key=prompt_key
         )
+
+
+        if st.button(t("save_prompt_button"), key=f"{self.prefix}_save_prompt"):
+            config = self.plugin_manager.config
+            config["automarket"]["automarket_prompt_sequence"] = prompt_template
+            self.plugin_manager.save_config(config)
+            st.success("Prompt saved as default!")
 
         # Étape 8 : Générer les messages promotionnels pour les paires sélectionnées
         if st.button(t("generate_promotions"), key=f"{self.prefix}_generate_promotions") and selected_pairs_list:

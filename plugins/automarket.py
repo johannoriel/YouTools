@@ -204,6 +204,11 @@ class AutomarketPlugin(Plugin):
                 "type": "textarea",
                 "label": "LLM Prompt for Campaign Responses",
                 "default": """Suggest a concise response (<500 chars) to this comment, promoting the video at {url} (mention it). Use a direct tone, as if you're the commenter, inspired by this transcript: {transcript}"""
+            },
+            "automarket_prompt_sequence": {
+                "type": "textarea",
+                "label": "Default Prompt for Campaign Promotions",
+                "default": """Suggest a concise response (<500 chars) to this comment, promoting the video at {url} (mention it). Use a direct tone, as if you're the commenter, inspired by this : {description}"""
             }
         }
 
