@@ -57,16 +57,10 @@ class RandomTweetWidget(Widget):
         return tweets
 
     def generate_tweet_thread(self, config: Dict[str, Any], product: Dict[str, Any]) -> List[str]:
-        """Generate a tweet thread based on a product's content."""
-        prompt = config['promotetwitter']['randomtweet_prompt'].format(
-            title=product['title'],
-            content=product['content'],
-            keywords=product['keywords']
-        )
-        llm_response = self.process_with_llm(
-            prompt,
-            config.get('llm', {}).get('llm_sys_prompt', ''),
-            product['content']
+        from widgets.prompt_sequence import PromptSequenceWidget
+        llm = PromptSequenceWidget("tweet", "tweet", self.plugin_manager)
+        llm_response = llm.prompt_sequence(
+            config['promotetwitter']['randomtweet_prompt'], product, debug=True
         )
         return self.parse_tweets(llm_response)
 

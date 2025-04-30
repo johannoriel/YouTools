@@ -178,13 +178,7 @@ class LlmPlugin(Plugin):
 
     def get_tabs(self):
         return [
-            {"name": t("llm_keys_tab"), "plugin": "llmplugin", "tab": "keys"},
-            {"name": t("llm_apis_tab"), "plugin": "llmplugin", "tab": "apis"},
-            {"name": t("llm_models_tab"), "plugin": "llmplugin", "tab": "models"},
-            {"name": t("llm_personas_tab"), "plugin": "llmplugin", "tab": "personas"},
-            {"name": t("llm_chat_tab"), "plugin": "llmplugin", "tab": "chat"},
-            {"name": t("llm_prompt_sequence_tab"), "plugin": "llmplugin", "tab": "prompt_sequence"},
-            {"name": t("llm_ollama_restart"), "plugin": "llmplugin", "tab": "ollama_restart"}
+            {"name": "LLM", "plugin": "llmplugin", "tab": "LLM"},
         ]
 
     def get_api_keys(self):
