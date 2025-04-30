@@ -308,6 +308,12 @@ Chaque tweet doit faire maximum 280 caractères."""
 
         # Recap transcription and video URL
         work_dir = config['common']['work_directory']
+
+        from widgets.recentvideos import RecentVideosWidget
+        widget = RecentVideosWidget(
+            "recentvideos", "rvw", self.plugin_manager)
+        widget.display_simple(config)
+
         transcript_path = os.path.join(work_dir, "transcript.txt")
         if os.path.exists(transcript_path):
             with open(transcript_path, 'r') as f:
