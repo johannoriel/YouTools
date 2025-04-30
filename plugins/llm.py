@@ -480,7 +480,7 @@ class LlmPlugin(Plugin):
                 data = response.json()
                 time.sleep(delay)
                 result = data["choices"][0]["message"]["content"] if "choices" in data else "Error: Unexpected response format"
-                no_think_result = re.sub(r'<think>[\s\S]*?</think>', '', result)
+                no_think_result = re.sub(r'<think>[\s\S]*?</think>', '', result).strip()
                 return no_think_result
             except Exception as e:
                 st.warning(f"Failed to call {model} at {full_url} with {api_key} wait {delay}s timeout {timeout}s : {str(e)}")
