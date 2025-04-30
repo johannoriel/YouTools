@@ -44,7 +44,8 @@ translations["fr"].update({
     "export_promotions": "Exporter les messages promotionnels",
     "prompt_label": "Prompt LLM pour les messages promotionnels",
     #"promo_default_prompt": "Tu es un youtubeur qui répond à la vidéo '{video}' d'une autre chaîne. Ne confonds pas, la vidéo est étrangère, toi, tu es l'auteur du produit. Tu défends les idées contenues dans '{product}' dont le contenu est mentionné ci-avant. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
-    "promo_default_prompt": "Tu es un youtubeur qui répond à la vidéo '{video}' d'une autre chaîne, d'après les idées défendues dans '{product}'. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
+    #"promo_default_prompt": "Tu es un youtubeur qui répond à la vidéo '{video}' d'une autre chaîne, d'après les idées défendues dans '{product}'. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
+    "promot_default_prompt": "Tu es un youtubeur qui vient commenter la '{video}' de la chaîne '{channel}'. Tu defends les idées du produit '{product}'. Ta réponse doit obligatoirement mentionner l'url du produit '{url}' et faire moins de 500 caractères.",
     "promo_sys_prompt": "Vous êtes un assistant qui suit fidèlement les instructions dans un objectif marketing.",
     "theme_mapping": "Associer les mots-clés aux thèmes",
     "no_themes_matched": "Aucun thème correspondant aux mots-clés des vidéos sélectionnées.",
@@ -105,15 +106,15 @@ class VideoProductPromotionWidget(Widget):
         Returns:
             Dictionnaire contenant la réponse générée et les métadonnées
         """
-        video_rag = f"Description of video '{content_dict.get('video_title', '')}' to be responded:\n {content_dict.get('video_description', '')}"
-        keywords_rag = f"Keywords describing the link between the video and the product:\n {content_dict.get('keywords', '')}"
-        product_rag = f"Content of the product '{content_dict.get('product_title', '')}' of type {content_dict.get('product_type', '')} :\n {content_dict.get('product_content', '')}"
-        prompt = prompt_template.format(url=content_dict['product_url'], product=content_dict['product_title'], video=content_dict['video_title'])
+        video_rag = f"Description de la vidéo '{content_dict.get('video_title', '')}' à laquelle je réponds :\n {content_dict.get('video_description', '')}"
+        keywords_rag = f"Mots clés qui font le lien entre mon produit et la vidéo externe :\n {content_dict.get('keywords', '')}"
+        product_rag = f"Contenu de mon produit '{content_dict.get('product_title', '')}' que je promeus :\n {content_dict.get('product_content', '')}"
+        prompt = prompt_template.format(url=content_dict['product_url'], product=content_dict['product_title'], video=content_dict['video_title'], channel=content_dict['channel_title'])
         prompts = [video_rag,keywords_rag,product_rag,prompt]
         try:
             llm_response = self.process_with_llm(prompts,sys_prompt)
-            no_think_response = re.sub(r'<think>[\s\S]*?</think>', '', llm_response)
-            clean_response = remove_quotes(no_think_response.strip())
+
+            clean_response = remove_quotes(llm_response.strip())
         except Exception as e:
             clean_response = f"Error: {str(e)}"
 
@@ -126,6 +127,7 @@ class VideoProductPromotionWidget(Widget):
             'author': content_dict.get('author', ''),
             'video_title': content_dict.get('video_title', ''),
             'video_description': content_dict.get('video_description', ''),
+            'comment_text': content_dict.get('video_description'),
             'channel_title': content_dict.get('channel_title', ''),
             'product_title': content_dict.get('product_title', ''),
             'product_type': content_dict.get('product_type', ''),
