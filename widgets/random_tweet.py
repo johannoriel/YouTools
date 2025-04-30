@@ -3,8 +3,7 @@ from app import Widget
 import streamlit as st
 from typing import List, Dict, Any
 from lib.social_api import TwitterAPI
-import random
-from lib.products_db import ProductsDB
+from widgets.product_selector import ProductSelectorWidget
 
 # Ajout des traductions spécifiques au widget
 translations["en"].update({
@@ -19,7 +18,6 @@ translations["en"].update({
     "randomtweet_error": "Error posting tweet thread: ",
     "randomtweet_add_url": "Add URL Tweet at the End",
     "randomtweet_prompt": "LLM Prompt for Random Tweet Thread",
-    "randomtweet_select_product": "Select a Product",
 })
 
 translations["fr"].update({
@@ -34,7 +32,6 @@ translations["fr"].update({
     "randomtweet_error": "Erreur lors de la publication du fil : ",
     "randomtweet_add_url": "Ajouter un tweet avec l'URL à la fin",
     "randomtweet_prompt": "Prompt LLM pour le fil de tweets aléatoire",
-    "randomtweet_select_product": "Sélectionner un produit",
 })
 
 class RandomTweetWidget(Widget):
@@ -45,8 +42,6 @@ class RandomTweetWidget(Widget):
     def _initialize_session_state(self):
         if f'{self.prefix}_generated_tweets' not in st.session_state:
             st.session_state[f'{self.prefix}_generated_tweets'] = []
-        if f'{self.prefix}_selected_product' not in st.session_state:
-            st.session_state[f'{self.prefix}_selected_product'] = None
         if f'{self.prefix}_add_url_tweet' not in st.session_state:
             st.session_state[f'{self.prefix}_add_url_tweet'] = False
         if f'{self.prefix}_url_tweet' not in st.session_state:
@@ -87,43 +82,18 @@ class RandomTweetWidget(Widget):
     def display(self, config: Dict[str, Any]):
         st.header(t("randomtweet_header"))
 
-        # Initialize ProductsDB
-        products_db = ProductsDB()
-        products = products_db.get_all_products()
+        # Use ProductSelectorWidget to select a product
+        product_selector = ProductSelectorWidget("product_selector", f"{self.prefix}_product_selector", self.plugin_manager)
+        selected_product = product_selector.display()
 
-        if not products:
-            st.warning("No products found in the database.")
+        if not selected_product:
+            st.warning("No product selected. Please select a product to continue.")
             return
-
-        # Create a list of product titles for the selectbox
-        product_titles = [product['title'] for product in products]
-
-        # Set initial random product if not already selected
-        if not st.session_state[f'{self.prefix}_selected_product']:
-            st.session_state[f'{self.prefix}_selected_product'] = random.choice(products)
-
-        # Find the index of the selected product
-        selected_product_title = st.session_state[f'{self.prefix}_selected_product']['title']
-        default_index = product_titles.index(selected_product_title) if selected_product_title in product_titles else 0
-
-        # Selectbox to choose a product
-        selected_title = st.selectbox(
-            t("randomtweet_select_product"),
-            options=product_titles,
-            index=default_index,
-            key=f"{self.prefix}_product_select"
-        )
-
-        # Update selected product based on user choice
-        selected_product = next((p for p in products if p['title'] == selected_title), products[0])
-        if selected_product['title'] != st.session_state[f'{self.prefix}_selected_product']['title']:
-            st.session_state[f'{self.prefix}_selected_product'] = selected_product
-            st.session_state[f'{self.prefix}_generated_tweets'] = []  # Reset tweets if product changes
 
         # Display product information
         st.write(f"**Selected Product**: {selected_product['title']}")
         st.write(f"**Keywords**: {selected_product['keywords']}")
-        st.write(f"**Content**: {selected_product['content'][:200]}...")
+        st.markdown(f"**Content**: {selected_product['content'][:1000]}{'...' if len(selected_product['content']) > 1000 else ''}")
 
         # LLM Prompt
         prompt = st.text_area(
@@ -167,17 +137,20 @@ class RandomTweetWidget(Widget):
                     value=st.session_state[f'{self.prefix}_add_url_tweet'],
                     key=f"{self.prefix}_add_url"
                 )
-                st.session_state[f'{self.prefix}_add_url_tweet'] = add_url_tweet
+                if add_url_tweet != st.session_state[f'{self.prefix}_add_url_tweet']:
+                    st.session_state[f'{self.prefix}_add_url_tweet'] = add_url_tweet
+                    if not add_url_tweet:
+                        st.session_state[f'{self.prefix}_url_tweet'] = ""  # Reset URL tweet if unchecked
+                    st.rerun()
 
                 # Display and edit URL tweet if checkbox is checked
                 if add_url_tweet:
                     url_tweet = st.text_area(
                         "URL Tweet",
-                        st.session_state[f'{self.prefix}_url_tweet'],
+                        value=st.session_state[f'{self.prefix}_url_tweet'],
                         key=f"{self.prefix}_url_tweet",
                         height=100
                     )
-                    st.session_state[f'{self.prefix}_url_tweet'] = url_tweet
 
                     # Validate URL tweet length
                     if len(url_tweet) > 280:
