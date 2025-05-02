@@ -163,7 +163,7 @@ class PromptSequenceWidget(Widget):
         sys_prompts = []
         rag_content = []
         keywords = []
-        rag_params = {"top_k": 3, "threshold": 0.1}
+        rag_params = {"top_k": 10, "threshold": 0.1}
         current_sub = ""
         is_rag = False
 
@@ -171,16 +171,15 @@ class PromptSequenceWidget(Widget):
             line = line.strip()
             if line.startswith("%rag:"):
                 is_rag = True
-                rag_instruction = line.split("%")[1]
-                # Check for (x/y) format in rag_instruction
-                param_match = re.match(r"\((\d+|\d*\.\d+)/(\d*\.\d+)\)(.+)", rag_instruction)
+                rag_instruction = line.split("%")[1].split(":", 1)[1].strip()
+                # Check for n prefix (0-9)
+                param_match = re.match(r"(\d{1,2})\s+(.+)", rag_instruction)
                 if param_match:
-                    top_k, threshold, keywords_str = param_match.groups()
-                    rag_params["top_k"] = int(top_k) if top_k else None
-                    rag_params["threshold"] = float(threshold)
+                    top_k, keywords_str = param_match.groups()
+                    rag_params["top_k"] = int(top_k)
                     keywords = self.replace_variables(keywords_str, work_dict).split(",")
                 else:
-                    keywords = self.replace_variables(rag_instruction.split(":")[1], work_dict).split(",")
+                    keywords = self.replace_variables(rag_instruction, work_dict).split(",")
                 continue
             elif line == "%endrag%" and is_rag:
                 is_rag = False
@@ -228,7 +227,7 @@ class PromptSequenceWidget(Widget):
         # Handle RAG processing
         if rag_content or keywords:
             content = "\n".join([self.replace_variables(c, work_dict) for c in rag_content] or formatted_sub_prompts)
-            chunks = self.chunk_content(content, chunk_size=1000)
+            chunks = self.chunk_content(content, chunk_size=500)
             relevant_content = self.rag_search(chunks, keywords, rag_params)
             formatted_sub_prompts = [relevant_content]
 
@@ -280,7 +279,7 @@ class PromptSequenceWidget(Widget):
 
         return result
 
-    def chunk_content(self, content: str, chunk_size: int = 1000) -> list:
+    def chunk_content(self, content: str, chunk_size: int = 500) -> list:
         """Split content into chunks of specified size."""
         chunks = []
         for i in range(0, len(content), chunk_size):
