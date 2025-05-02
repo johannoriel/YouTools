@@ -1,8 +1,12 @@
 # widgets/prompt_sequence.py
-from lib.global_vars import translations, t
+from lib.global_vars import translations, t, alert
 from app import Widget
 import streamlit as st
 import json
+from sentence_transformers import SentenceTransformer, util
+import numpy as np
+from widgets.product_matcher import get_sentence_model
+import re
 
 translations["en"].update({
     "prompt_sequence_tab": "Prompt Sequence",
@@ -113,33 +117,82 @@ class PromptSequenceWidget(Widget):
             st.subheader(t("prompt_sequence_result"))
             st.write(result)
 
+    def replace_variables(self, text: str, work_dict: dict) -> str:
+        """Replace variables in text with values from work_dict."""
+        formatted = text
+        for key, value in work_dict.items():
+            formatted = formatted.replace(f"{{{key}}}", str(value))
+        return formatted
+
     def prompt_sequence(self, sequence: str, work_dict: dict, debug: bool = False) -> str:
         work_dict = work_dict.copy()
-        # Split sequence by '#' and handle single prompt case
-        prompts = sequence.split("#")
-        if not prompts[0].strip().startswith("prompt") and prompts[0].strip():
-            prompts = [f"prompt1\n{prompts[0]}"] + prompts[1:]  # Add artificial title
-        else:
-            prompts = prompts[1:]  # Skip empty first split if it starts with '#'
-
+        prompts = self._split_prompts(sequence)
         final_result = ""
         debug_expander = None
         if debug:
-            debug_expander = st.expander("Debug Information", expanded=False)
-            with debug_expander:
-                progress_bar = st.progress(0)
-                total_prompts = len(prompts)
-                st.write(work_dict)
+            debug_expander = self._setup_debug_expander(work_dict, len(prompts))
 
         for idx, prompt in enumerate(prompts):
-            lines = prompt.strip().split("\n")
-            title = lines[0].strip()
-            persona = title.split(":")[1] if ":" in title else None
-            sub_prompts = []
-            sys_prompts = []
-            current_sub = ""
-            for line in lines[1:]:
-                if line.strip() == "---":
+            result = self._process_single_prompt(prompt, work_dict, debug, debug_expander, idx, len(prompts))
+            prompt_name = prompt.strip().split("\n")[0].split(":")[0].strip()
+            work_dict[prompt_name] = result
+            final_result = result
+
+        return final_result
+
+    def _split_prompts(self, sequence: str) -> list:
+        """Split sequence into individual prompts."""
+        prompts = sequence.split("#")
+        if not prompts[0].strip().startswith("prompt") and prompts[0].strip():
+            prompts = [f"prompt1\n{prompts[0]}"] + prompts[1:]
+        else:
+            prompts = prompts[1:]
+        return prompts
+
+    def _setup_debug_expander(self, work_dict: dict, total_prompts: int):
+        """Setup debug expander for logging."""
+        debug_expander = st.expander("Debug Information", expanded=False)
+        with debug_expander:
+            progress_bar = st.progress(0)
+            st.write(work_dict)
+        return {"expander": debug_expander, "progress_bar": progress_bar, "total_prompts": total_prompts}
+
+    def _parse_prompt_lines(self, lines: list, work_dict: dict) -> tuple:
+        """Parse prompt lines into sub-prompts, system prompts, and RAG content."""
+        sub_prompts = []
+        sys_prompts = []
+        rag_content = []
+        keywords = []
+        rag_params = {"top_k": 3, "threshold": 0.1}
+        current_sub = ""
+        is_rag = False
+
+        for line in lines:
+            line = line.strip()
+            if line.startswith("%rag:"):
+                is_rag = True
+                rag_instruction = line.split("%")[1]
+                # Check for (x/y) format in rag_instruction
+                param_match = re.match(r"\((\d+|\d*\.\d+)/(\d*\.\d+)\)(.+)", rag_instruction)
+                if param_match:
+                    top_k, threshold, keywords_str = param_match.groups()
+                    rag_params["top_k"] = int(top_k) if top_k else None
+                    rag_params["threshold"] = float(threshold)
+                    keywords = self.replace_variables(keywords_str, work_dict).split(",")
+                else:
+                    keywords = self.replace_variables(rag_instruction.split(":")[1], work_dict).split(",")
+                continue
+            elif line == "%endrag%" and is_rag:
+                is_rag = False
+                content = "\n".join([self.replace_variables(c, work_dict) for c in rag_content])
+                sub_prompts.append(content)
+                rag_content = []
+                continue
+
+            if is_rag:
+                rag_content.append(line)
+            else:
+                if line == "---":
                     if current_sub:
                         if "%system%" in current_sub:
                             sys_prompts.append(current_sub.strip().replace("%system%", ""))
@@ -148,62 +201,118 @@ class PromptSequenceWidget(Widget):
                         current_sub = ""
                 else:
                     current_sub += line + "\n"
-            if current_sub:
-                if "%system%" in current_sub:
-                    sys_prompts.append(current_sub.strip().replace("%system%", ""))
-                else:
-                    sub_prompts.append(current_sub.strip())
 
-            # Replace variables in sub-prompts and sys-prompts
-            formatted_sub_prompts = []
-            formatted_sys_prompts = []
-            for sub in sub_prompts:
-                formatted = sub
-                for key, value in work_dict.items():
-                    formatted = formatted.replace(f"{{{key}}}", str(value))
-                formatted_sub_prompts.append(formatted)
-            for sys in sys_prompts:
-                formatted = sys
-                for key, value in work_dict.items():
-                    formatted = formatted.replace(f"{{{key}}}", str(value))
-                formatted_sys_prompts.append(formatted)
+        if current_sub:
+            if "%system%" in current_sub:
+                sys_prompts.append(current_sub.strip().replace("%system%", ""))
+            else:
+                sub_prompts.append(current_sub.strip())
 
-            if debug and debug_expander:
-                with debug_expander:
-                    st.write(f"**Prompt {idx + 1}: {title}**")
-                    for i, sub in enumerate(formatted_sub_prompts, 1):
-                        st.write(f"Sub-prompt {i}:\n```\n{sub}\n```")
-                    for i, sys in enumerate(formatted_sys_prompts, 1):
-                        st.write(f"System prompt {i}:\n```\n{sys}\n```")
-                    progress_bar.progress((idx + 1) / total_prompts)
+        if is_rag and rag_content:
+            content = "\n".join([self.replace_variables(c, work_dict) for c in rag_content])
+            sub_prompts.append(content)
 
-            # Execute prompt with LLM
-            original_persona = self.plugin_manager.config.get("llm", {}).get("current_persona", "None")
-            if persona and persona != "None":
-                self.plugin_manager.config.setdefault("llm", {})["current_persona"] = persona
-                self.plugin_manager.save_config(self.plugin_manager.config)
+        return sub_prompts, sys_prompts, rag_content, keywords, rag_params
 
-            result = self.process_with_llm(
-                formatted_sub_prompts,
-                sysprompt=formatted_sys_prompts if formatted_sys_prompts else None,
-                context=None,
-                repeat_on_failure=True,
-                number_repeat=3
-            )
+    def _process_single_prompt(self, prompt: str, work_dict: dict, debug: bool, debug_expander: dict, idx: int, total_prompts: int) -> str:
+        """Process a single prompt."""
+        lines = prompt.strip().split("\n")
+        title = lines[0].strip()
+        persona = title.split(":")[1] if ":" in title else None
+        sub_prompts, sys_prompts, rag_content, keywords, rag_params = self._parse_prompt_lines(lines[1:], work_dict)
 
-            if persona and persona != "None":
-                self.plugin_manager.config["llm"]["current_persona"] = original_persona
-                self.plugin_manager.save_config(self.plugin_manager.config)
+        # Replace variables in sub-prompts and sys-prompts
+        formatted_sub_prompts = [self.replace_variables(sub, work_dict) for sub in sub_prompts]
+        formatted_sys_prompts = [self.replace_variables(sys.replace("%system%", ""), work_dict) for sys in sys_prompts]
 
-            # Store result in work_dict
-            prompt_name = title.split(":")[0].strip()
-            work_dict[prompt_name] = result
-            final_result = result
+        # Handle RAG processing
+        if rag_content or keywords:
+            content = "\n".join([self.replace_variables(c, work_dict) for c in rag_content] or formatted_sub_prompts)
+            chunks = self.chunk_content(content, chunk_size=1000)
+            relevant_content = self.rag_search(chunks, keywords, rag_params)
+            formatted_sub_prompts = [relevant_content]
 
-            if debug and debug_expander:
-                with debug_expander:
-                    st.markdown(f"**Response:**\n{result}")
-                    if idx < len(prompts) - 1:
-                        st.markdown("---")
+        # Log debug information
+        if debug and debug_expander:
+            self._log_debug_info(debug_expander, title, idx, formatted_sub_prompts, formatted_sys_prompts, keywords, rag_params)
 
-        return final_result
+        # Execute prompt with LLM
+        result = self._execute_llm(formatted_sub_prompts, formatted_sys_prompts, persona, debug, debug_expander, idx, total_prompts)
+
+        return result
+
+    def _log_debug_info(self, debug_expander: dict, title: str, idx: int, sub_prompts: list, sys_prompts: list, keywords: list, rag_params: dict):
+        """Log debug information to the expander."""
+        with debug_expander["expander"]:
+            st.write(f"**Prompt {idx + 1}: {title}**")
+            if keywords:
+                st.write(f"RAG Instruction: Keywords={keywords}, Parameters={rag_params}")
+            for i, sub in enumerate(sub_prompts, 1):
+                st.write(f"Sub-prompt {i}:\n```\n{sub}\n```")
+            for i, sys in enumerate(sys_prompts, 1):
+                st.write(f"System prompt {i}:\n```\n{sys}\n```")
+            debug_expander["progress_bar"].progress((idx + 1) / debug_expander["total_prompts"])
+
+    def _execute_llm(self, sub_prompts: list, sys_prompts: list, persona: str, debug: bool, debug_expander: dict, idx: int, total_prompts: int) -> str:
+        """Execute the LLM with the given prompts and persona."""
+        original_persona = self.plugin_manager.config.get("llm", {}).get("current_persona", "None")
+        if persona and persona != "None":
+            self.plugin_manager.config.setdefault("llm", {})["current_persona"] = persona
+            self.plugin_manager.save_config(self.plugin_manager.config)
+
+        result = self.process_with_llm(
+            sub_prompts,
+            sysprompt=sys_prompts if sys_prompts else None,
+            context=None,
+            repeat_on_failure=True,
+            number_repeat=3
+        )
+
+        if persona and persona != "None":
+            self.plugin_manager.config["llm"]["current_persona"] = original_persona
+            self.plugin_manager.save_config(self.plugin_manager.config)
+
+        if debug and debug_expander:
+            with debug_expander["expander"]:
+                st.markdown(f"**Response:**\n{result}")
+                if idx < total_prompts - 1:
+                    st.markdown("---")
+
+        return result
+
+    def chunk_content(self, content: str, chunk_size: int = 1000) -> list:
+        """Split content into chunks of specified size."""
+        chunks = []
+        for i in range(0, len(content), chunk_size):
+            chunks.append(content[i:i + chunk_size])
+        return chunks
+
+    def rag_search(self, chunks: list, keywords: list, rag_params: dict) -> str:
+        """Search for relevant content in chunks using sentence transformers."""
+        model = get_sentence_model()  # Use cached model from product_matcher
+        keyword_query = " ".join(keywords)
+
+        # Encode query and chunks
+        query_embedding = model.encode([keyword_query], convert_to_tensor=True)
+        chunk_embeddings = model.encode(chunks, convert_to_tensor=True)
+
+        # Compute cosine similarities
+        similarities = util.cos_sim(query_embedding, chunk_embeddings)[0].cpu().numpy()
+
+        # Get relevant chunks based on parameters
+        top_k = rag_params["top_k"]
+        threshold = rag_params["threshold"]
+
+        if top_k == 0:
+            # Select all chunks above threshold
+            relevant_indices = [i for i, sim in enumerate(similarities) if sim > threshold]
+        else:
+            # Select top-k chunks above threshold
+            k = min(top_k, len(chunks))
+            relevant_indices = np.argsort(similarities)[-k:][::-1]
+            relevant_indices = [i for i in relevant_indices if similarities[i] > threshold]
+
+        # Collect relevant chunks
+        relevant_chunks = [chunks[i] for i in relevant_indices]
+
+        return "\n".join(relevant_chunks) if relevant_chunks else "No relevant content found."
