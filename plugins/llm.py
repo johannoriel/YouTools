@@ -656,28 +656,26 @@ class LlmPlugin(Plugin):
         prompt = st.text_area(t("llm_prompt_label"), height=100)
 
         col1, col2 = st.columns([1, 4])
-        with col1:
-            if st.button(t("llm_send_prompt")) and prompt:
-                with st.spinner("Generating response..."):
-                    response = self.call_llm(
-                        url=model["url"],
-                        api_key=api_key,
-                        model=model["model"],
-                        prompts=prompt,
-                        temperature=model["temperature"],
-                        max_tokens=model["max_tokens"],
-                        delay=model["delay"],
-                        max_retries=model["max_retries"],
-                        no_v1=no_v1,
-                        timeout=model.get("timeout", 3),
-                        no_think=model.get("no_think", False),
-                        remove_think_tags=model.get("remove_think_tags", False)
-                    )
-                    st.subheader(t("llm_response_label"))
-                    st.write(response)
+        if col1.button(t("llm_send_prompt")) and prompt:
+            with st.spinner("Generating response..."):
+                response = self.call_llm(
+                    url=model["url"],
+                    api_key=api_key,
+                    model=model["model"],
+                    prompts=prompt,
+                    temperature=model["temperature"],
+                    max_tokens=model["max_tokens"],
+                    delay=model["delay"],
+                    max_retries=model["max_retries"],
+                    no_v1=no_v1,
+                    timeout=model.get("timeout", 3),
+                    no_think=model.get("no_think", False),
+                    remove_think_tags=model.get("remove_think_tags", False)
+                )
+                st.subheader(t("llm_response_label"))
+                st.write(response)
 
-        with col2:
-            if st.button("Envoyer à tous") and prompt:
+        if col2.button("Envoyer à tous") and prompt:
                 with st.spinner("Envoi à tous les modèles en cours..."):
                     results = self.call_all_llms(prompt)
 
