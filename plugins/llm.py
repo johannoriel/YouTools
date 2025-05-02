@@ -463,13 +463,17 @@ class LlmPlugin(Plugin):
                 text = str(text)
             return text[:max_len] + ('...' if len(text) > max_len else '')
 
-        print(f"Calling LLM {model} wit prompt {smart_truncate(prompts)} ")
+        print(f"Calling LLM {model} with prompt {smart_truncate(prompts)} ")
+        messages = []
 
         # Récupérer le sysprompt par défaut si aucun n'est fourni
-        sysprompt = sysprompt or self.plugin_manager.config['llm']['llm_sys_prompt']
-
-        # Créer la liste des messages
-        messages = [{"role": "system", "content": sysprompt}]
+        if sysprompt is None:
+            messages.append({"role": "system", "content": self.plugin_manager.config['llm']['llm_sys_prompt']})
+        elif isinstance(sysprompt, str):
+            messages.append({"role": "system", "content": sysprompt})
+        elif isinstance(sysprompt, list):
+            for sp in sysprompt:
+                messages.append({"role": "system", "content": sp})
 
         # Ajouter un message système pour le persona si sélectionné
         current_persona_name = self.plugin_manager.config.get(self.name, {}).get("current_persona", "None")
@@ -489,14 +493,12 @@ class LlmPlugin(Plugin):
                 messages.append({"role": "user", "content": prompt})
         else:
             raise ValueError("Prompts must be a string or a list of strings")
-
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-
         endpoint = "/chat/completions" if no_v1 else "/v1/chat/completions"
         full_url = f"{url}{endpoint}"
 
@@ -562,7 +564,7 @@ class LlmPlugin(Plugin):
 
         return results
 
-    def process_with_llm(self, prompt, sysprompt: str = None, context = None, repeat_on_failure: bool = True, number_repeat: int = 1) -> str:
+    def process_with_llm(self, prompt, sysprompt = None, context = None, repeat_on_failure: bool = True, number_repeat: int = 1) -> str:
         self.get_api_keys()
         self.get_models()
         self.get_apis()

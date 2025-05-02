@@ -83,30 +83,45 @@ class PromptSequenceWidget(Widget):
             title = lines[0].strip()
             persona = title.split(":")[1] if ":" in title else None
             sub_prompts = []
+            sys_prompts = []
             current_sub = ""
             for line in lines[1:]:
                 if line.strip() == "---":
                     if current_sub:
-                        sub_prompts.append(current_sub.strip())
+                        if "%system%" in current_sub:
+                            sys_prompts.append(current_sub.strip().replace("%system%", ""))
+                        else:
+                            sub_prompts.append(current_sub.strip())
                         current_sub = ""
                 else:
                     current_sub += line + "\n"
             if current_sub:
-                sub_prompts.append(current_sub.strip())
+                if "%system%" in current_sub:
+                    sys_prompts.append(current_sub.strip().replace("%system%", ""))
+                else:
+                    sub_prompts.append(current_sub.strip())
 
-            # Replace variables in sub-prompts
+            # Replace variables in sub-prompts and sys-prompts
             formatted_sub_prompts = []
+            formatted_sys_prompts = []
             for sub in sub_prompts:
                 formatted = sub
                 for key, value in work_dict.items():
                     formatted = formatted.replace(f"{{{key}}}", str(value))
                 formatted_sub_prompts.append(formatted)
+            for sys in sys_prompts:
+                formatted = sys
+                for key, value in work_dict.items():
+                    formatted = formatted.replace(f"{{{key}}}", str(value))
+                formatted_sys_prompts.append(formatted)
 
             if debug and debug_expander:
                 with debug_expander:
                     st.write(f"**Prompt {idx + 1}: {title}**")
                     for i, sub in enumerate(formatted_sub_prompts, 1):
                         st.write(f"Sub-prompt {i}:\n```\n{sub}\n```")
+                    for i, sys in enumerate(formatted_sys_prompts, 1):
+                        st.write(f"System prompt {i}:\n```\n{sys}\n```")
                     progress_bar.progress((idx + 1) / total_prompts)
 
             # Execute prompt with LLM
@@ -117,6 +132,10 @@ class PromptSequenceWidget(Widget):
 
             result = self.process_with_llm(
                 formatted_sub_prompts,
+                sysprompt=formatted_sys_prompts if formatted_sys_prompts else None,
+                context=None,
+                repeat_on_failure=True,
+                number_repeat=3
             )
 
             if persona and persona != "None":
