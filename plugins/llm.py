@@ -1,5 +1,5 @@
 # llm.py
-from lib.global_vars import translations, t
+from lib.global_vars import translations, t, alert
 from app import Plugin
 import streamlit as st
 import requests
@@ -146,7 +146,18 @@ class LlmPlugin(Plugin):
             "models": {
                 "type": "json",
                 "label": t("llm_models_header"),
-                "default": [{'name': 'ollama-qwen2.5:7b-instruct-q4_K_S', 'url': 'http://localhost:11434', 'model': 'qwen2.5:7b-instruct-q4_K_S', 'api_key': '', 'temperature': 0.7, 'max_tokens': 4096, 'delay': 0.0, 'max_retries': 3}]
+                "default": [{
+                                'name': 'ollama-qwen2.5:7b-instruct-q4_K_S',
+                                'url': 'http://localhost:11434',
+                                'model': 'qwen2.5:7b-instruct-q4_K_S',
+                                'api_key': '',
+                                'temperature': 0.7,
+                                'max_tokens': 4096,
+                                'delay': 0.0,
+                                'max_retries': 3,
+                                'no_think': False,
+                                'remove_think_tags': False
+                            }]
             },
             "current_llm_model": {
                 "type": "select",
@@ -390,7 +401,9 @@ class LlmPlugin(Plugin):
                 "max_tokens": max_tokens,
                 "delay": delay,
                 "max_retries": max_retries,
-                "timeout": timeout  # Ajout du timeout
+                "timeout": timeout,
+                "no_think": False,
+                "remove_think_tags": False
             })
             st.rerun()
 
@@ -415,13 +428,25 @@ class LlmPlugin(Plugin):
                 # Ajout du champ timeout pour l'édition
                 timeout = st.number_input("Timeout (seconds)", min_value=1, value=model.get(
                     "timeout", 3), step=1, key=f"timeout_{i}")
+                no_think = st.checkbox("Force no think (/no_think)", value=model.get(
+                    "no_think", False), key=f"no_think_{i}")
+                remove_think_tags = st.checkbox("Remove think tags", value=model.get(
+                    "remove_think_tags", False), key=f"remove_think_tags_{i}")
                 if st.button("Remove", key=f"remove_model_{i}"):
                     del st.session_state.models[i]
                     st.rerun()
                 st.session_state.models[i] = {
-                    "name": name, "url": url, "model": model_name, "api_key": api_key,
-                    "temperature": temp, "max_tokens": max_tokens, "delay": delay,
-                    "max_retries": max_retries, "timeout": timeout  # Ajout du timeout
+                    "name": name,
+                    "url": url,
+                    "model": model_name,
+                    "api_key": api_key,
+                    "temperature": temp,
+                    "max_tokens": max_tokens,
+                    "delay": delay,
+                    "max_retries": max_retries,
+                    "timeout": timeout,
+                    "no_think": no_think,
+                    "remove_think_tags": remove_think_tags
                 }
 
         if st.button("Save Models"):
@@ -429,9 +454,16 @@ class LlmPlugin(Plugin):
             self.plugin_manager.save_config(config)
             st.success("Models saved successfully!")
 
-    def call_llm(self, url, api_key, model, prompts, sysprompt=None, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False, timeout=3):
+    def call_llm(self, url, api_key, model, prompts, sysprompt=None, temperature=0.7, max_tokens=4096, delay=0, max_retries=1, no_v1=False, timeout=3, no_think=False, remove_think_tags=False):
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         headers["Content-Type"] = "application/json"
+
+        def smart_truncate(text, max_len=100):
+            if not isinstance(text, str):
+                text = str(text)
+            return text[:max_len] + ('...' if len(text) > max_len else '')
+
+        print(f"Calling LLM {model} wit prompt {smart_truncate(prompts)} ")
 
         # Récupérer le sysprompt par défaut si aucun n'est fourni
         sysprompt = sysprompt or self.plugin_manager.config['llm']['llm_sys_prompt']
@@ -446,6 +478,8 @@ class LlmPlugin(Plugin):
             persona = next((p for p in personas if p["name"] == current_persona_name), None)
             if persona:
                 messages.append({"role": "system", "content": persona["prompt"]})
+        if no_think:
+            messages.append({"role": "system", "content": "/no_think"})
 
         # Gérer prompts comme chaîne ou liste
         if isinstance(prompts, str):
@@ -474,8 +508,9 @@ class LlmPlugin(Plugin):
                 data = response.json()
                 time.sleep(delay)
                 result = data["choices"][0]["message"]["content"] if "choices" in data else "Error: Unexpected response format"
-                no_think_result = re.sub(r'<think>[\s\S]*?</think>', '', result).strip()
-                return no_think_result
+                if remove_think_tags:
+                    result = re.sub(r'<think>[\s\S]*?</think>', '', result).strip()
+                return result
             except Exception as e:
                 st.warning(f"Failed to call {model} at {full_url} with {api_key} wait {delay}s timeout {timeout}s : {str(e)}")
                 attempts += 1
@@ -546,6 +581,9 @@ class LlmPlugin(Plugin):
         api = next((a for a in st.session_state.apis if a["url"] == model["url"]), None)
         no_v1 = api.get("no_v1", False) if api else False
 
+        # Récupérer les paramètres think
+        no_think = model.get("no_think", False)
+        remove_think_tags = model.get("remove_think_tags", False)
         attempt = 0
         max_delay = 60
         api_key = next((k["value"] for k in st.session_state.api_keys if k["name"] == model["api_key"]), "")
@@ -557,7 +595,9 @@ class LlmPlugin(Plugin):
                 else:
                     prompts = prompt
 
-                prompts.append(context)
+                if not(context is None or context == ""):
+                    prompts.append(context)
+
                 return self.call_llm(
                     url=model["url"],
                     api_key=api_key,
@@ -569,7 +609,9 @@ class LlmPlugin(Plugin):
                     delay=int(model["delay"]),
                     max_retries=1,
                     no_v1=no_v1,
-                    timeout=model.get("timeout", 3)
+                    timeout=model.get("timeout", 3),
+                    no_think=no_think,
+                    remove_think_tags=remove_think_tags
                 )
             except Exception as e:
                 if not repeat_on_failure or attempt == number_repeat:
@@ -625,7 +667,9 @@ class LlmPlugin(Plugin):
                         delay=model["delay"],
                         max_retries=model["max_retries"],
                         no_v1=no_v1,
-                        timeout=model.get("timeout", 3)
+                        timeout=model.get("timeout", 3),
+                        no_think=model.get("no_think", False),
+                        remove_think_tags=model.get("remove_think_tags", False)
                     )
                     st.subheader(t("llm_response_label"))
                     st.write(response)

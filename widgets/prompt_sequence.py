@@ -70,114 +70,68 @@ class PromptSequenceWidget(Widget):
             prompts = prompts[1:]  # Skip empty first split if it starts with '#'
 
         final_result = ""
+        debug_expander = None
         if debug:
-            with st.expander("Debug Information", expanded=False):
+            debug_expander = st.expander("Debug Information", expanded=False)
+            with debug_expander:
                 progress_bar = st.progress(0)
                 total_prompts = len(prompts)
                 st.write(work_dict)
 
-                for idx, prompt in enumerate(prompts):
-                    lines = prompt.strip().split("\n")
-                    title = lines[0].strip()
-                    persona = title.split(":")[1] if ":" in title else None
-                    sub_prompts = []
-                    current_sub = ""
-                    for line in lines[1:]:
-                        if line.strip() == "---":
-                            if current_sub:
-                                sub_prompts.append(current_sub.strip())
-                                current_sub = ""
-                        else:
-                            current_sub += line + "\n"
+        for idx, prompt in enumerate(prompts):
+            lines = prompt.strip().split("\n")
+            title = lines[0].strip()
+            persona = title.split(":")[1] if ":" in title else None
+            sub_prompts = []
+            current_sub = ""
+            for line in lines[1:]:
+                if line.strip() == "---":
                     if current_sub:
                         sub_prompts.append(current_sub.strip())
+                        current_sub = ""
+                else:
+                    current_sub += line + "\n"
+            if current_sub:
+                sub_prompts.append(current_sub.strip())
 
-                    # Replace variables in sub-prompts
-                    formatted_sub_prompts = []
-                    for sub in sub_prompts:
-                        formatted = sub
-                        for key, value in work_dict.items():
-                            formatted = formatted.replace(f"{{{key}}}", str(value))
-                        formatted_sub_prompts.append(formatted)
+            # Replace variables in sub-prompts
+            formatted_sub_prompts = []
+            for sub in sub_prompts:
+                formatted = sub
+                for key, value in work_dict.items():
+                    formatted = formatted.replace(f"{{{key}}}", str(value))
+                formatted_sub_prompts.append(formatted)
 
+            if debug and debug_expander:
+                with debug_expander:
                     st.write(f"**Prompt {idx + 1}: {title}**")
                     for i, sub in enumerate(formatted_sub_prompts, 1):
                         st.write(f"Sub-prompt {i}:\n```\n{sub}\n```")
                     progress_bar.progress((idx + 1) / total_prompts)
 
-                    # Execute prompt with LLM
-                    original_persona = self.plugin_manager.config.get("llm", {}).get("current_persona", "None")
-                    if persona and persona != "None":
-                        self.plugin_manager.config.setdefault("llm", {})["current_persona"] = persona
-                        self.plugin_manager.save_config(self.plugin_manager.config)
+            # Execute prompt with LLM
+            original_persona = self.plugin_manager.config.get("llm", {}).get("current_persona", "None")
+            if persona and persona != "None":
+                self.plugin_manager.config.setdefault("llm", {})["current_persona"] = persona
+                self.plugin_manager.save_config(self.plugin_manager.config)
 
-                    result = self.process_with_llm(
-                        formatted_sub_prompts,
-                        sysprompt=None,
-                        context=None,
-                        repeat_on_failure=True,
-                        number_repeat=3
-                    )
+            result = self.process_with_llm(
+                formatted_sub_prompts,
+            )
 
-                    if persona and persona != "None":
-                        self.plugin_manager.config["llm"]["current_persona"] = original_persona
-                        self.plugin_manager.save_config(self.plugin_manager.config)
+            if persona and persona != "None":
+                self.plugin_manager.config["llm"]["current_persona"] = original_persona
+                self.plugin_manager.save_config(self.plugin_manager.config)
 
-                    # Store result in work_dict
-                    prompt_name = title.split(":")[0].strip()
-                    work_dict[prompt_name] = result
-                    final_result = result
+            # Store result in work_dict
+            prompt_name = title.split(":")[0].strip()
+            work_dict[prompt_name] = result
+            final_result = result
 
+            if debug and debug_expander:
+                with debug_expander:
                     st.markdown(f"**Response:**\n{result}")
                     if idx < len(prompts) - 1:
                         st.markdown("---")
-
-        else:
-            for idx, prompt in enumerate(prompts):
-                lines = prompt.strip().split("\n")
-                title = lines[0].strip()
-                persona = title.split(":")[1] if ":" in title else None
-                sub_prompts = []
-                current_sub = ""
-                for line in lines[1:]:
-                    if line.strip() == "---":
-                        if current_sub:
-                            sub_prompts.append(current_sub.strip())
-                            current_sub = ""
-                    else:
-                        current_sub += line + "\n"
-                if current_sub:
-                    sub_prompts.append(current_sub.strip())
-
-                # Replace variables in sub-prompts
-                formatted_sub_prompts = []
-                for sub in sub_prompts:
-                    formatted = sub
-                    for key, value in work_dict.items():
-                        formatted = formatted.replace(f"{{{key}}}", str(value))
-                    formatted_sub_prompts.append(formatted)
-
-                # Execute prompt with LLM
-                original_persona = self.plugin_manager.config.get("llm", {}).get("current_persona", "None")
-                if persona and persona != "None":
-                    self.plugin_manager.config.setdefault("llm", {})["current_persona"] = persona
-                    self.plugin_manager.save_config(self.plugin_manager.config)
-
-                result = self.process_with_llm(
-                    formatted_sub_prompts,
-                    sysprompt=None,
-                    context=None,
-                    repeat_on_failure=True,
-                    number_repeat=3
-                )
-
-                if persona and persona != "None":
-                    self.plugin_manager.config["llm"]["current_persona"] = original_persona
-                    self.plugin_manager.save_config(self.plugin_manager.config)
-
-                # Store result in work_dict
-                prompt_name = title.split(":")[0].strip()
-                work_dict[prompt_name] = result
-                final_result = result
 
         return final_result
