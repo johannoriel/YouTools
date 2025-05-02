@@ -37,16 +37,69 @@ class PromptSequenceWidget(Widget):
     def display(self, input_dict=None):
         st.header(t("prompt_sequence_dict_header"))
         dict_value = input_dict if input_dict is not None else self.init_dict
-        dict_input = st.text_area(
+
+        # Initialize session state for dictionary entries
+        if f"{self.prefix}_dict_entries" not in st.session_state:
+            st.session_state[f"{self.prefix}_dict_entries"] = [
+                {"id": k, "value": v} for k, v in dict_value.items()
+            ]
+
+        # Dictionary editor
+        st.write("Dictionary Entries")
+        cols = st.columns([2, 3, 1])
+        with cols[0]:
+            st.write("Identifier")
+        with cols[1]:
+            st.write("Value")
+        with cols[2]:
+            st.write("Action")
+
+        # Display and edit existing entries
+        for i, entry in enumerate(st.session_state[f"{self.prefix}_dict_entries"]):
+            with st.container():
+                cols = st.columns([2, 3, 1])
+                with cols[0]:
+                    entry["id"] = st.text_input(
+                        "Identifier",
+                        value=entry["id"],
+                        key=f"{self.prefix}_dict_id_{i}"
+                    )
+                with cols[1]:
+                    entry["value"] = st.text_area(
+                        "Value",
+                        value=entry["value"],
+                        key=f"{self.prefix}_dict_value_{i}",
+                        height=100
+                    )
+                with cols[2]:
+                    if st.button("Delete", key=f"{self.prefix}_delete_{i}"):
+                        st.session_state[f"{self.prefix}_dict_entries"].pop(i)
+                        st.rerun()
+
+        # Add new entry
+        if st.button("Add New Entry", key=f"{self.prefix}_add_entry"):
+            st.session_state[f"{self.prefix}_dict_entries"].append({"id": "", "value": ""})
+            st.rerun()
+
+        # Convert entries to dictionary
+        work_dict = {}
+        for entry in st.session_state[f"{self.prefix}_dict_entries"]:
+            if entry["id"].strip():
+                try:
+                    # Try to parse value as JSON to handle potential multiline strings
+                    parsed_value = json.loads(entry["value"])
+                except json.JSONDecodeError:
+                    # If not valid JSON, treat as string
+                    parsed_value = entry["value"]
+                work_dict[entry["id"]] = parsed_value
+
+        # Display current dictionary as JSON for reference
+        st.text_area(
             t("prompt_sequence_dict_label"),
-            value=json.dumps(dict_value, indent=2),
-            key=f"{self.prefix}_dict_input"
+            value=json.dumps(work_dict, indent=2),
+            disabled=True,
+            key=f"{self.prefix}_dict_output"
         )
-        try:
-            work_dict = json.loads(dict_input)
-        except json.JSONDecodeError:
-            st.error("Invalid JSON format in dictionary")
-            work_dict = {}
 
         st.header(t("prompt_sequence_sequence_label"))
         sequence = st.text_area(
