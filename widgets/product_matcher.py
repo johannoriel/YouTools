@@ -186,6 +186,7 @@ class VideoProductMatchWidget(Widget):
         video_texts = []
         video_ids = []
         video_keywords_list = []
+        common_keywords_list = []  # Nouvelle liste pour les mots-clés communs
         total_steps = len(videos_df)
 
         for idx, row in videos_df.iterrows():
@@ -194,6 +195,7 @@ class VideoProductMatchWidget(Widget):
                 video_texts.append(keywords_text if comparison_type == "keywords_only" else f"{row['title']} {row['description'] if pd.notnull(row['description']) else ''}".lower())
                 video_ids.append(row['video_id'])
                 video_keywords_list.append(keywords_list)
+                common_keywords_list.append([])  # Placeholder pour chaque vidéo
             if progress_bar:
                 progress_bar.progress(min((idx + 1) / total_steps * progress_step, 1.0))
 
@@ -208,7 +210,7 @@ class VideoProductMatchWidget(Widget):
             product_keywords_list.append([self.normalize_keyword(kw.strip()) for kw in product_keywords])
 
         if not video_texts or not product_texts:
-            return None, None, None, None
+            return None, None, None, None, None
 
         if similarity_method == "tfidf_cosine":
             similarity_matrix = self.calculate_tfidf_cosine(video_texts, product_texts)
@@ -221,8 +223,15 @@ class VideoProductMatchWidget(Widget):
         else:  # llm_score
             similarity_matrix = self.calculate_llm_score(video_texts, product_texts)
 
+        # Calculer les mots-clés communs pour chaque paire vidéo-produit
+        for i, video_keywords in enumerate(video_keywords_list):
+            for j, product_keywords in enumerate(product_keywords_list):
+                common_keywords = list(set(video_keywords) & set(product_keywords))
+                if common_keywords:
+                    common_keywords_list[i].extend(common_keywords)
+
         scores_df = pd.DataFrame(similarity_matrix, index=video_ids, columns=product_ids)
-        return scores_df, videos_df, products, video_keywords_list
+        return scores_df, videos_df, products, video_keywords_list, common_keywords_list
 
     def compare_scoring_methods(self, videos_df, products, comparison_type, thresholds):
         results = {}
@@ -233,7 +242,7 @@ class VideoProductMatchWidget(Widget):
 
         for idx, method in enumerate(self.methods):
             method_progress = st.progress(0)
-            scores_df, _, products, _ = self.calculate_relevance_scores(
+            scores_df, _, products, _, _ = self.calculate_relevance_scores(
                 videos_df, products, method, comparison_type, method_progress, progress_per_method
             )
             method_progress.empty()
@@ -381,7 +390,7 @@ class VideoProductMatchWidget(Widget):
         with single_tab:
             if calculate_clicked:
                 st.write(t("progress_text"))
-                scores_df, videos_df, products, video_keywords_list = self.calculate_relevance_scores(
+                scores_df, videos_df, products, video_keywords_list, match_keywords = self.calculate_relevance_scores(
                     videos_df, products, similarity_method, comparison_type
                 )
                 if scores_df is None:
@@ -389,7 +398,7 @@ class VideoProductMatchWidget(Widget):
                     return
                 video_titles = videos_df.set_index('video_id')['title'].to_dict()
                 scores_df.insert(0, 'video_title', [video_titles.get(vid, '') for vid in scores_df.index])
-                st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products, video_keywords_list)
+                st.session_state[f"{self.prefix}_scores_data"] = (scores_df, videos_df, products, match_keywords)
 
             if f"{self.prefix}_scores_data" in st.session_state:
                 scores_df, videos_df, products, video_keywords_list = st.session_state[f"{self.prefix}_scores_data"]

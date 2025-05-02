@@ -246,7 +246,7 @@ class VideoProductPromotionWidget(Widget):
 
         if st.button(t("calculate_pairs"), key=f"{self.prefix}_calculate_pairs"):
             # Calculer les scores de pertinence
-            scores_df, _, products, video_keywords_list = product_matcher.calculate_relevance_scores(
+            scores_df, _, products, video_keywords_list, common_keywords_list = product_matcher.calculate_relevance_scores(
                 videos_df, products, "manual_count", "keywords_only"
             )
 
@@ -263,6 +263,7 @@ class VideoProductPromotionWidget(Widget):
                     top_product_id = scores.idxmax()
                     video_row = videos_df[videos_df['video_id'] == video_id].iloc[0]
                     product = next(p for p in products if str(p['id']) == top_product_id)
+                    video_idx = videos_df.index.get_loc(video_row.name)
                     video_product_pairs.append({
                         'comment_id': f"{video_id}_{top_product_id}",
                         'video_id': video_id,
@@ -278,7 +279,9 @@ class VideoProductPromotionWidget(Widget):
                         'product_description': product['description'],
                         'product_content': product['content'],
                         'product_url': product['url'],
-                        'keywords': ', '.join(video_keywords_list[videos_df.index.get_loc(video_row.name)])
+                        # Étape 6 : Afficher les paires vidéo-produit (si disponibles)
+                        # Modifier la ligne dans la construction de video_product_pairs
+                        'keywords': ', '.join(set(common_keywords_list[video_idx]))
                     })
 
             st.session_state[f"{self.prefix}_video_product_pairs"] = video_product_pairs
