@@ -185,7 +185,8 @@ def time_to_milliseconds(time_str):
 class MoviedPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
-        self.working_dir = None
+        self.working_dir = plugin_manager.config.get(self.name, {}).get(
+            "movied_workdir", t("movied_workdir_default"))
         self.media_dirs = []
         self.reference_audio_path = None
 
@@ -1212,7 +1213,7 @@ class MoviedPlugin(Plugin):
         """
         st.components.v1.html(notification_js)
 
-    def _execute_operations(self, video_path, operations, font, font_size):
+    def _execute_operations(self, video_path, operations, font, font_size, text_background):
         clips = []  # Liste pour stocker toutes les vidéos traitées
         tmpclip = VideoFileClip(video_path)
         current_clip = ColorClip(tmpclip.size, color=(0, 0, 0), duration=0)
@@ -1225,8 +1226,6 @@ class MoviedPlugin(Plugin):
         progress_bar = st.progress(0)
         current_op = 0
 
-        text_background = st.session_state.get(
-            "text_background_select", t("movied_green_background"))
         use_green_background = text_background == t("movied_green_background")
         background_type = "green" if use_green_background else "video"
         text_style = st.session_state.get(
@@ -1251,15 +1250,17 @@ class MoviedPlugin(Plugin):
                     video_name = parts[1]
                     new_video_path = os.path.join(self.working_dir, video_name)
                     if os.path.exists(new_video_path):
-                        # Sauvegarder la vidéo courante dans clips
                         clips.append(current_clip)
-                        # Mettre à jour global_time_offset avec la durée du clip précédent
                         global_time_offset += current_clip.duration if current_clip else 0
                         st.write(f"Video changed to {video_name} offsetting {global_time_offset}")
-                        # Réinitialiser duration_offset pour la nouvelle vidéo
                         duration_offset = 0
-                        # Charger la nouvelle vidéo
                         current_clip = VideoFileClip(new_video_path)
+                        #current_clip = current_clip.subclipped(0, current_clip.duration).resized(target_size).with_audio(current_clip.audio)
+                        current_clip = current_clip.resized(target_size)
+                        # Vérifier si le clip a une piste audio
+                        if current_clip.audio is None:
+                            st.warning(f"Warning: Video {video_name} has no audio track. Adding silent audio.")
+                            current_clip = current_clip.set_audio(AudioClip(lambda t: np.zeros((int(t * 44100), 2)), duration=current_clip.duration))
                         target_size = (current_clip.w, current_clip.h)
                         operation_log.append(
                             {"Nature": "change_video", "Details": video_name,
@@ -1365,6 +1366,9 @@ class MoviedPlugin(Plugin):
                 elif cmd == "remove_section":
                     current_clip, duration_change = remove_section(
                         current_clip, start_sec, end_sec)
+                    if current_clip.audio is None:
+                        st.warning(f"Warning: Audio removed in section {start_time} to {end_time}. Adding silent audio.")
+                        current_clip = current_clip.set_audio(AudioClip(lambda t: np.zeros((int(t * 44100), 2)), duration=current_clip.duration))
                     duration_offset += duration_change
                     operation_log.append(
                         {"Nature": "remove_section", "Details": "", "Start": real_start, "End": real_end, "Duration": duration_str})
@@ -1400,11 +1404,11 @@ class MoviedPlugin(Plugin):
         progress_bar.empty()
         return final_clip, operation_log
 
-    def execute_operations(self, video_path, operations, font, font_size):
+    def execute_operations(self, video_path, operations, font, font_size, text_background):
         with st.spinner("Processing video operations..."):
             try:
                 main_clip, operation_log = self._execute_operations(
-                    video_path, operations, font, font_size)
+                    video_path, operations, font, font_size, text_background)
                 output_path = os.path.splitext(video_path)[0] + "_edited.mp4"
                 main_clip.write_videofile(
                     output_path, codec="libx264", audio_codec="aac")
@@ -1419,12 +1423,15 @@ class MoviedPlugin(Plugin):
                 main_clip.close()
             except Exception as e:
                 st.error(t("movied_error").format(error=str(e)))
+                raise e
 
     def preview(self, video_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
             try:
+                text_background = st.session_state.get(
+                    "text_background_select", t("movied_green_background"))
                 main_clip, operation_log = self._execute_operations(
-                    video_path, operations, font, font_size)
+                    video_path, operations, font, font_size, text_background)
                 st.success(f"Video generated successfully")
                 operations_df = pd.DataFrame(operation_log, columns=[
                                              "Nature", "Details", "Start", "End", "Duration"])
@@ -1559,8 +1566,6 @@ class MoviedPlugin(Plugin):
         self._import_data(imported_data, video_name)
 
     def run(self, config):
-        self.working_dir = config.get(self.name, {}).get(
-            "movied_workdir", t("movied_workdir_default"))
         self.media_dirs = config.get(self.name, {}).get(
             "movied_media_dirs", t("movied_media_dirs_default")).split("\n")
         self.reference_audio_path = config.get(self.name, {}).get(
@@ -1616,9 +1621,11 @@ class MoviedPlugin(Plugin):
         # Ajout d'une colonne pour "Ordonner"
         col1, col2, col3, col4, col5 = st.columns(5)
         if col1.button(t("movied_generate"), key="generate_btn", type="primary") and st.session_state.get("operations"):
+            text_background = st.session_state.get(
+                "text_background_select", t("movied_green_background"))
             self.execute_operations(
-                video_path, st.session_state.operations, font, font_size)
-            st.rerun()
+                video_path, st.session_state.operations, font, font_size, text_background)
+            #st.rerun()
         if col2.button(t("movied_verify")):
             self.verify_operations()
         if col3.button("Ordonner", key="sort_ops_btn"):  # Nouveau bouton
