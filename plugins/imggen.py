@@ -43,6 +43,11 @@ translations["en"].update({
     "backremove_processing": "Processing image...",
     "backremove_success": "Background removed successfully!",
     "download_button": "Download Result",
+    "prompt_generator_tab": "Prompt Generator",
+    "prompt_generator_header": "Generate Image Prompt",
+    "user_description": "Describe what you want to draw",
+    "generate_prompt": "Generate Prompt",
+    "generated_prompt": "Generated Prompt",
 })
 
 translations["fr"].update({
@@ -72,6 +77,11 @@ translations["fr"].update({
     "backremove_processing": "Traitement de l'image...",
     "backremove_success": "Arrière-plan supprimé avec succès !",
     "download_button": "Télécharger le résultat",
+    "prompt_generator_tab": "Générateur de Prompt",
+    "prompt_generator_header": "Générer un Prompt d'Image",
+    "user_description": "Décrivez ce que vous voulez dessiner",
+    "generate_prompt": "Générer le Prompt",
+    "generated_prompt": "Prompt Généré",
 })
 
 
@@ -110,7 +120,8 @@ class ImggenPlugin(Plugin):
     def get_tabs(self):
         return [
             {"name": t("generate_image"), "plugin": "imggen"},
-            {"name": t("backremove_tab"), "plugin": "imggen"}  # Nouvel onglet
+            {"name": t("backremove_tab"), "plugin": "imggen"},
+            {"name": t("prompt_generator_tab"), "plugin": "imggen"}  # Nouvel onglet
         ]
 
     def load_prompt_history(self):
@@ -133,17 +144,6 @@ class ImggenPlugin(Plugin):
         self.prompt_history = self.prompt_history[:20]
         self.save_prompt_history()
 
-    def run(self, config):
-        # Sélection de l'onglet actif via Streamlit
-        tab1, tab2 = st.tabs([t("generate_image"), t("backremove_tab")])
-
-        # Onglet 1 : Génération d'image (code original)
-        with tab1:
-            self.run_generate_image(config)
-
-        # Onglet 2 : Suppression d'arrière-plan
-        with tab2:
-            self.run_background_removal(config)
 
     def run_generate_image(self, config):
         st.header(t("generate_image"))
@@ -428,6 +428,54 @@ class ImggenPlugin(Plugin):
         filepath = os.path.join(output_dir, filename)
         image.save(filepath)
         return filepath
+
+    def run_prompt_generator(self, config):
+        st.header(t("prompt_generator_header"))
+
+        # Champ pour la description de l'utilisateur
+        user_description = st.text_area(t("user_description"), height=150, key="imggen_user_description")
+
+        # Bouton pour générer le prompt
+        if st.button(t("generate_prompt")) and user_description:
+            with st.spinner(t("imggen_processing")):
+                try:
+                    # Système prompt pour guider le LLM
+                    sys_prompt = (
+                        "You are an expert in generating detailed and vivid prompts for image generation models. "
+                        "Based on the user's description, create a concise, descriptive, and creative prompt optimized for an image generation model. "
+                        "Include specific details about style, colors, lighting, and composition where relevant. "
+                        "Return only the generated prompt without additional explanations."
+                        "Respond in english"
+                    )
+
+                    # Appeler le LLM pour générer le prompt
+                    generated_prompt = self.process_with_llm(user_description, sysprompt=sys_prompt)
+
+                    # Afficher le prompt généré
+                    st.text_area(t("generated_prompt"), value=generated_prompt, height=150, key="imggen_generated_prompt")
+
+                    # Option pour copier le prompt dans l'onglet de génération d'image
+                    if st.button("Use in Image Generation"):
+                        st.session_state.imggen_prompt = st.sesion_state.imggen_generated_prompt
+
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
+
+    def run(self, config):
+        # Sélection de l'onglet actif via Streamlit
+        tab1, tab2, tab3 = st.tabs([t("generate_image"), t("backremove_tab"), t("prompt_generator_tab")])
+
+        # Onglet 3 : Génération de prompt
+        with tab3:
+            self.run_prompt_generator(config)
+
+        # Onglet 1 : Génération d'image
+        with tab1:
+            self.run_generate_image(config)
+
+        # Onglet 2 : Suppression d'arrière-plan
+        with tab2:
+            self.run_background_removal(config)
 
 
 def main():
