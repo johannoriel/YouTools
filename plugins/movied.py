@@ -2,19 +2,19 @@ from tkinter.constants import VERTICAL
 from tarfile import version
 from enum import verify
 import base64
-from lib.global_vars import translations, t
+from lib.global_vars import translations, t, alert
 from app import Plugin
 import streamlit as st
 import pandas as pd
 import os
-from lib.video_utils import *
-from lib.video_anim import replace_with_image
+from lib.video_utils import load_subtitles_and_chapters
 import json
 from moviepy import VideoFileClip, concatenate_videoclips
 from widgets.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from datetime import datetime
 import glob
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
+from lib.movied_commands import CommandOrchestrator
 
 # Translations
 translations["en"].update({
@@ -189,6 +189,7 @@ class MoviedPlugin(Plugin):
             "movied_workdir", t("movied_workdir_default"))
         self.media_dirs = []
         self.reference_audio_path = None
+        self.orchestrator = CommandOrchestrator()
 
     def get_config_fields(self):
         return {
@@ -932,8 +933,8 @@ class MoviedPlugin(Plugin):
         self.refresh_grid_key()
         return subtitles_df
 
-    def handle_operation(self, operation_type, selected_rows):
-        """Gère l'ajout d'opérations basées sur les lignes sélectionnées, avec fusion des consécutifs"""
+    def handle_operation(self, selected_rows):
+        """Gère l'ajout d'une opération basée sur les lignes sélectionnées et la commande choisie."""
         if selected_rows.empty:
             st.warning("Please select at least one subtitle row.")
             return
@@ -942,76 +943,74 @@ class MoviedPlugin(Plugin):
         media_path = st.session_state.get("movied_media_selector", None)
         text_input = st.session_state.get("text_input", "")
 
-        # Vérifications préliminaires
-        if operation_type in ["replace_image", "replace_video", "replace_video_keep_audio", "replace_audio"] and not media_path:
-            st.warning("Please select a media file first.")
-            return
-        if operation_type in ["addtext", "addBottomText"] and not text_input:
-            st.warning("Please enter text first.")
-            return
-        if operation_type in ["insertVideoWithText"] and (not media_path or not text_input):
-            st.warning("Please select a video and enter text first.")
-            return
-        if operation_type in ["insert_audio"] and not media_path:
-            st.warning("Please select an audio file first.")
+        # Déterminer le type de média
+        media_type = None
+        if media_path:
+            ext = os.path.splitext(media_path)[1].lower()
+            if ext in IMAGE_EXTENSIONS:
+                media_type = "image"
+            elif ext in VIDEO_EXTENSIONS:
+                media_type = "video"
+            elif ext in AUDIO_EXTENSIONS:
+                media_type = "audio"
+
+        # Obtenir les commandes disponibles
+        available_commands = self.orchestrator.get_available_commands(
+            has_selection=not selected_rows.empty,
+            has_text=bool(text_input.strip()),
+            media_type=media_type
+        )
+
+        if not available_commands:
+            st.warning("No commands available for the current context.")
             return
 
-        # Récupérer subtitles_df pour vérifier l'ordre
+        # Créer la liste des libellés pour le selectbox
+        command_labels = {cmd.get_label(): name for name, cmd in available_commands.items()}
+
+        # Sélecteur de commande
+        selected_command_label = st.selectbox(
+            "Select Operation",
+            options=list(command_labels.keys()),
+            key="command_select"
+        )
+
+        # Regrouper les lignes consécutives pour une sélection multiple
         subtitles_df = st.session_state["subtitles_df"]
-
-        # Trier selected_rows par Start pour garantir l'ordre chronologique
         selected_rows = selected_rows.sort_values("Start")
-
-        # Regrouper les lignes consécutives
         groups = []
         current_group = [selected_rows.iloc[0]]
 
         for i in range(1, len(selected_rows)):
             prev_end = time_to_seconds(current_group[-1]["End"])
             curr_start = time_to_seconds(selected_rows.iloc[i]["Start"])
-
-            # Vérifier si les timecodes se suivent (pas de trou significatif)
-            if abs(curr_start - prev_end) < 0.8:  # Tolérance de 0.1s pour les petites différences
+            if abs(curr_start - prev_end) < 0.8:  # Tolérance de 0.1s
                 current_group.append(selected_rows.iloc[i])
             else:
                 groups.append(current_group)
                 current_group = [selected_rows.iloc[i]]
-        groups.append(current_group)  # Ajouter le dernier groupe
+        groups.append(current_group)
 
-        # Générer les opérations pour chaque groupe
-        for group in groups:
-            start_time = group[0]["Start"]
-            end_time = group[-1]["End"] if operation_type not in ["insert_video",
-                                                                  "insertVideoWithText", "insert_audio"] else None
+        # Bouton pour ajouter l'opération
+        if st.button("Add Operation", key="add_operation_btn"):
+            selected_command = available_commands[command_labels[selected_command_label]]
 
-            # Construire la commande
-            if operation_type == "replace_image":
-                operation = f"replace_image {start_time} {end_time} {media_path}"
-            elif operation_type == "insert_video":
-                operation = f"insert_video {start_time} {media_path}"
-            elif operation_type == "insert_video_after":
-                operation = f"insert_video {end_time} {media_path}"
-            elif operation_type == "replace_video":
-                operation = f"replace_video {start_time} {end_time} {media_path}"
-            elif operation_type == "replace_video_keep_audio":
-                operation = f"replace_video_keep_audio {start_time} {end_time} {media_path}"
-            elif operation_type in ["addtext", "addBottomText"]:
-                text_command = text_input.replace("\n", "\\")
-                operation = f"{operation_type} {start_time} {end_time} fromLeft 1s {text_command}"
-            elif operation_type == "insertVideoWithText":
-                text_command = text_input.replace("\n", "\\")
-                operation = f"insertVideoWithText {start_time} {media_path} | {text_command}"
-            elif operation_type == "remove_section":
-                operation = f"remove_section {start_time} {end_time}"
-            elif operation_type == "replace_audio":
-                operation = f"replace_audio {start_time} {end_time} {media_path}"
-            elif operation_type == "insert_audio":
-                operation = f"insert_audio {start_time} {media_path}"
+            for group in groups:
+                start_time = group[0]["Start"]
+                end_time = group[-1]["End"] if selected_command.is_enabled(has_selection=True, has_text=bool(text_input), media_type=media_type) else None
 
-            self.add_to_operations(operation)
+                # Générer la commande par défaut
+                operation = selected_command.get_default_command(
+                    start_time=start_time,
+                    end_time=end_time,
+                    text=text_input if text_input.strip() else None,
+                    media_path=media_path
+                )
+
+                self.add_to_operations(operation)
 
     def handle_operations(self, selected_rows, video_path, vtt_path, thumbnail_size, font, font_size):
-        """Gère la sélection de médias, l'entrée de texte et les opérations"""
+        """Gère la sélection de médias, l'entrée de texte et les opérations."""
         if not video_path:
             st.warning("Please select a video to edit first.")
             return
@@ -1020,54 +1019,43 @@ class MoviedPlugin(Plugin):
 
         col1, col2 = st.columns([1, 3])
         with col1:
-            # Directory selection
             media_dir_options = [t("movied_all_directories")] + self.media_dirs
             selected_dirs = st.multiselect(
                 t("movied_filter_media_dir"),
                 options=media_dir_options,
                 default=[t("movied_all_directories")],
                 key="media_dir_select",
-                label_visibility="collapsed"  # Réduit l'espace du label
+                label_visibility="collapsed"
             )
         with col2:
-            # Extension selection
             all_extensions = ALL_EXTENSIONS
             selected_extensions = st.multiselect(
                 "Filter by File Extensions",
                 options=all_extensions,
                 default=ALL_EXTENSIONS,
                 key="extension_select",
-                label_visibility="collapsed"  # Réduit l'espace du label
+                label_visibility="collapsed"
             )
 
-        # Ligne pour les filtres, le sélecteur et la prévisualisation
         col_selector, col_preview = st.columns([1, 1])
-
         if t("movied_all_directories") in selected_dirs:
             dirs_to_scan = self.media_dirs
         else:
-            dirs_to_scan = [d for d in selected_dirs if d !=
-                            t("movied_all_directories")]
+            dirs_to_scan = [d for d in selected_dirs if d != t("movied_all_directories")]
 
         if not dirs_to_scan:
             st.warning("Please select at least one directory.")
             return
-
         if not selected_extensions:
             st.warning("Please select at least one file extension.")
             return
 
-        # Media selector
         with col_selector:
             initial_search = None
             if selected_rows is not None and not selected_rows.empty and "Category" in selected_rows.columns:
-                # Filtrer les lignes avec Category "illustration" ou "meme" et concaténer les Complement
-                valid_rows = selected_rows[selected_rows["Category"].isin(
-                    ["illustration", "meme"])]
+                valid_rows = selected_rows[selected_rows["Category"].isin(["illustration", "meme"])]
                 if not valid_rows.empty:
-                    initial_search = ", ".join(
-                        valid_rows["Complement"].dropna().astype(str))
-
+                    initial_search = ", ".join(valid_rows["Complement"].dropna().astype(str))
             selected_media = media_selector(
                 media_dirs=dirs_to_scan,
                 extensions=selected_extensions,
@@ -1075,89 +1063,23 @@ class MoviedPlugin(Plugin):
                 initial_search=initial_search
             )
 
-        # Prévisualisation
         with col_preview:
             if selected_media:
                 self.show_media_preview(selected_media)
             else:
                 plugin = self.plugin_manager.get_plugin('illustrator')
                 plugin.run(self.plugin_manager.config)
-        # Text input for operations that need it
+
         st.write(t("movied_text_operations"))
         text_input = st.text_input(
             t("movied_text_input"),
             key="text_input"
         )
 
-        # Stocker le média dans session_state
         st.session_state["movied_media_selector"] = selected_media
 
-        # Déterminer le type de média
-        is_image = False
-        is_video = False
-        is_audio = False
-        if selected_media:
-            ext = os.path.splitext(selected_media)[1].lower()
-            image_extensions = IMAGE_EXTENSIONS
-            video_extensions = VIDEO_EXTENSIONS
-            audio_extensions = AUDIO_EXTENSIONS
-            is_image = ext in image_extensions
-            is_video = ext in video_extensions
-            is_audio = ext in audio_extensions
-
-        # Boutons d'opérations après le media_selector et le texte
-        st.write("Operations:")
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col6, col7, col8, col9, col10, col11 = st.columns(6)
-
-        # Conditions pour activer/désactiver les boutons
-        has_text = bool(text_input.strip())
-        has_selection = not selected_rows.empty if selected_rows is not None else False
-
-        with col1:
-            if st.button(t("movied_replace_image"), key="replace_image_btn", disabled=not (is_image and has_selection)):
-                self.handle_operation("replace_image", selected_rows)
-
-        with col2:
-            if st.button(t("movied_insert_video"), key="insert_video_btn", disabled=not (is_video and has_selection)):
-                self.handle_operation("insert_video", selected_rows)
-
-        with col3:
-            if st.button("Insérer une vidéo après", key="insert_video_after_btn", disabled=not (is_video and has_selection)):
-                self.handle_operation("insert_video_after", selected_rows)
-
-        with col4:
-            if st.button(t("movied_replace_video"), key="replace_video_btn", disabled=not (is_video and has_selection)):
-                self.handle_operation("replace_video", selected_rows)
-
-        with col5:
-            if st.button(t("movied_replace_video_keep_audio"), key="replace_video_keep_audio_btn", disabled=not (is_video and has_selection)):
-                self.handle_operation(
-                    "replace_video_keep_audio", selected_rows)
-
-        with col6:
-            if st.button(t("movied_animate_text"), key="animate_text_btn", disabled=not (has_text and has_selection)):
-                self.handle_operation("addtext", selected_rows)
-
-        with col7:
-            if st.button(t("movied_add_bottom_text"), key="add_bottom_text_btn", disabled=not (has_text and has_selection)):
-                self.handle_operation("addBottomText", selected_rows)
-
-        with col8:
-            if st.button(t("movied_insert_video_with_text"), key="insert_video_with_text_btn", disabled=not (is_video and has_text and has_selection)):
-                self.handle_operation("insertVideoWithText", selected_rows)
-
-        with col9:
-            if st.button(t("movied_remove_section"), key="remove_section_btn", disabled=not has_selection):
-                self.handle_operation("remove_section", selected_rows)
-
-        with col10:
-            if st.button(t("movied_replace_audio"), key="replace_audio_btn", disabled=not (is_audio and has_selection)):
-                self.handle_operation("replace_audio", selected_rows)
-
-        with col11:
-            if st.button(t("movied_insert_audio"), key="insert_audio_btn", disabled=not (is_audio and has_selection)):
-                self.handle_operation("insert_audio", selected_rows)
+        # Appel à la nouvelle méthode handle_operation
+        self.handle_operation(selected_rows)
 
     def add_to_operations(self, operation):
         current_ops = st.session_state.get("operations", "")
@@ -1190,233 +1112,42 @@ class MoviedPlugin(Plugin):
                                 "End"] = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
         return subtitles_df
 
-    def alert(self):
-        notification_js = """
-        <script>
-        function sendBrowserNotification() {
-            // Demande la permission si nécessaire
-            if ("Notification" in window) {
-                Notification.requestPermission().then(function (permission) {
-                    if (permission === "granted") {
-                        new Notification("Alerte Streamlit", {
-                            body: "Génération terminée",
-                            icon: "https://streamlit.io/favicon.ico"
-                        });
-                    }
-                });
-            } else {
-                alert("Votre navigateur ne supporte pas les notifications desktop.");
-            }
-        }
-        sendBrowserNotification();
-        </script>
-        """
-        st.components.v1.html(notification_js)
-
-    def _execute_operations(self, video_path, operations, font, font_size, text_background):
-        clips = []  # Liste pour stocker toutes les vidéos traitées
-        tmpclip = VideoFileClip(video_path)
-        current_clip = ColorClip(tmpclip.size, color=(0, 0, 0), duration=0)
-        target_size= (tmpclip.w,tmpclip.h)
-        duration_offset = 0  # Décalage temporel pour les opérations de la vidéo courante
-        global_time_offset = 0  # Décalage temporel global pour operation_log
-        operation_log = []
-        total_ops = len([op for op in operations.split(
-            "\n") if op.strip() and not op.strip().startswith("//")])
-        progress_bar = st.progress(0)
-        current_op = 0
-
-        use_green_background = text_background == t("movied_green_background")
-        background_type = "green" if use_green_background else "video"
-        text_style = st.session_state.get(
-            "text_style_select", t("movied_text_style_outline"))
-        text_style = "outline" if text_style == t(
-            "movied_text_style_outline") else "box"
-
-        with st.expander("Debug Information"):
-            for op in operations.split("\n"):
-                if not op.strip():
-                    continue
-                op_cleaned = op.split("//")[0].strip()
-                if not op_cleaned:
-                    continue
-                current_op += 1
-                progress_bar.progress(min(current_op / total_ops, 1.0))
-                parts = op_cleaned.split(maxsplit=5)
-                cmd = parts[0]
-                st.write(f"Processing: {op_cleaned}")
-
-                if cmd == "CHANGE_VIDEO":
-                    video_name = parts[1]
-                    new_video_path = os.path.join(self.working_dir, video_name)
-                    if os.path.exists(new_video_path):
-                        clips.append(current_clip)
-                        global_time_offset += current_clip.duration if current_clip else 0
-                        st.write(f"Video changed to {video_name} offsetting {global_time_offset}")
-                        duration_offset = 0
-                        current_clip = VideoFileClip(new_video_path)
-                        #current_clip = current_clip.subclipped(0, current_clip.duration).resized(target_size).with_audio(current_clip.audio)
-                        current_clip = current_clip.resized(target_size)
-                        # Vérifier si le clip a une piste audio
-                        if current_clip.audio is None:
-                            st.warning(f"Warning: Video {video_name} has no audio track. Adding silent audio.")
-                            current_clip = current_clip.set_audio(AudioClip(lambda t: np.zeros((int(t * 44100), 2)), duration=current_clip.duration))
-                        target_size = (current_clip.w, current_clip.h)
-                        operation_log.append(
-                            {"Nature": "change_video", "Details": video_name,
-                            "Start": self.format_timecode(global_time_offset),
-                            "End": None, "Duration": ""})
-                    else:
-                        st.warning(f"Video file not found: {new_video_path}")
-                    continue
-
-                if cmd in ["insert_video", "insertVideoWithText", "insert_audio"]:
-                    start_time = parts[1]
-                    start_sec = self.parse_timecode(
-                        start_time) + duration_offset
-                    end_sec = None
-                    remaining_args = " ".join(parts[2:])
-                else:
-                    start_time, end_time = parts[1], parts[2]
-                    if start_time.endswith("F"):
-                        start_sec = self.parse_timecode(start_time.rstrip("F"))
-                    else:
-                        start_sec = self.parse_timecode(
-                            start_time) + duration_offset
-                    if end_time.endswith("F"):
-                        end_sec = self.parse_timecode(end_time.rstrip("F"))
-                    else:
-                        end_sec = self.parse_timecode(
-                            end_time) + duration_offset
-                    remaining_args = " ".join(
-                        parts[3:]) if len(parts) > 3 else ""
-
-                real_start = self.format_timecode(start_sec + global_time_offset)
-                real_end = self.format_timecode(end_sec + global_time_offset) if end_sec else None
-
-                # Calculate duration if end_sec exists
-                duration = (end_sec - start_sec) if end_sec else None
-                duration_str = f"{duration:.3f}s" if duration else ""
-
-                if cmd == "replace_image":
-                    image_path = remaining_args
-                    current_clip = replace_with_image(
-                        current_clip, start_sec, end_sec, image_path, target_size, background=background_type)
-                    operation_log.append(
-                        {"Nature": "replace_image", "Details": image_path, "Start": real_start, "End": real_end, "Duration": duration_str})
-
-                elif cmd == "insert_video":
-                    video_path_insert = remaining_args
-                    current_clip, duration_change = insert_video(
-                        current_clip, start_sec, video_path_insert, target_size)
-                    duration_offset += duration_change
-                    operation_log.append(
-                        {"Nature": "insert_video", "Details": video_path_insert, "Start": real_start, "End": None, "Duration": ""})
-
-                elif cmd == "insertVideoWithText":
-                    start_time = parts[1]
-                    rest = " ".join(parts[2:])
-                    try:
-                        video_path_insert, text = rest.split(" | ", 1)
-                    except ValueError:
-                        raise ValueError(
-                            f"Invalid format for insertVideoWithText: {op_cleaned}. Use 'timecode path | text'")
-                    start_sec = self.parse_timecode(
-                        start_time) + duration_offset
-                    real_start = self.format_timecode(start_sec + global_time_offset)
-                    current_clip, duration_change = insert_video_with_text(
-                        current_clip, start_sec, video_path_insert, text, target_size, font, font_size, use_green_background, text_style)
-                    duration_offset += duration_change
-                    operation_log.append(
-                        {"Nature": "insertVideoWithText", "Details": f"{video_path_insert} | {text}", "Start": real_start, "End": None, "Duration": ""})
-
-                elif cmd == "replace_video":
-                    video_path_replace = remaining_args
-                    current_clip, duration_change = replace_with_video(
-                        current_clip, start_sec, end_sec, video_path_replace, target_size, background=background_type)
-                    duration_offset += duration_change
-                    operation_log.append(
-                        {"Nature": "replace_video", "Details": video_path_replace, "Start": real_start, "End": real_end, "Duration": duration_str})
-
-                elif cmd == "replace_video_keep_audio":
-                    video_path_replace = remaining_args
-                    current_clip = replace_video_keep_audio(
-                        current_clip, start_sec, end_sec, video_path_replace, target_size, background=background_type)
-                    operation_log.append(
-                        {"Nature": "replace_video_keep_audio", "Details": video_path_replace, "Start": real_start, "End": real_end, "Duration": duration_str})
-
-                elif cmd == "addtext":
-                    animation_type, anim_duration, text = parts[3], parts[4], parts[5]
-                    anim_duration_sec = float(anim_duration[:-1])
-                    current_clip = add_animated_text(current_clip, start_sec, end_sec, text, animation_type,
-                                                anim_duration_sec, target_size, font, font_size,
-                                                use_green_background=use_green_background, position="center", text_style=text_style)
-                    operation_log.append(
-                        {"Nature": "addtext", "Details": f"{animation_type} {anim_duration} {text}", "Start": real_start, "End": real_end, "Duration": duration_str})
-
-                elif cmd == "addBottomText":
-                    animation_type, anim_duration, text = parts[3], parts[4], parts[5]
-                    anim_duration_sec = float(anim_duration[:-1])
-                    current_clip = add_animated_text(current_clip, start_sec, end_sec, text, animation_type,
-                                                anim_duration_sec, target_size, font, font_size,
-                                                use_green_background=use_green_background, position="bottom", text_style=text_style)
-                    operation_log.append(
-                        {"Nature": "addBottomText", "Details": f"{animation_type} {anim_duration} {text}", "Start": real_start, "End": real_end, "Duration": duration_str})
-
-                elif cmd == "remove_section":
-                    current_clip, duration_change = remove_section(
-                        current_clip, start_sec, end_sec)
-                    if current_clip.audio is None:
-                        st.warning(f"Warning: Audio removed in section {start_time} to {end_time}. Adding silent audio.")
-                        current_clip = current_clip.set_audio(AudioClip(lambda t: np.zeros((int(t * 44100), 2)), duration=current_clip.duration))
-                    duration_offset += duration_change
-                    operation_log.append(
-                        {"Nature": "remove_section", "Details": "", "Start": real_start, "End": real_end, "Duration": duration_str})
-
-                elif cmd == "replace_audio":
-                    audio_path = remaining_args
-                    current_clip, duration_change = replace_audio(
-                        current_clip, start_sec, end_sec, audio_path, target_size)
-                    duration_offset += duration_change
-                    operation_log.append(
-                        {"Nature": "replace_audio", "Details": audio_path, "Start": real_start, "End": real_end, "Duration": duration_str})
-
-                elif cmd == "insert_audio":
-                    audio_path = remaining_args
-                    current_clip, duration_change = insert_audio(
-                        current_clip, start_sec, audio_path, target_size)
-                    duration_offset += duration_change
-                    operation_log.append(
-                        {"Nature": "insert_audio", "Details": audio_path, "Start": real_start, "End": None, "Duration": ""})
-
-                else:
-                    raise ValueError(f"Unknown command: {cmd}")
-
-        # Ajouter la dernière vidéo traitée
-        clips.append(current_clip)
-
-        final_clip = concatenate_videoclips(clips, method="compose")
-
-        # Fermer tous les clips intermédiaires
-        for clip in clips:
-            clip.close()
-
-        progress_bar.empty()
-        return final_clip, operation_log
-
     def execute_operations(self, video_path, operations, font, font_size, text_background):
         with st.spinner("Processing video operations..."):
             try:
-                main_clip, operation_log = self._execute_operations(
-                    video_path, operations, font, font_size, text_background)
+                # Préparer les arguments pour l'orchestrateur
+                use_green_background = text_background == t("movied_green_background")
+                text_style = st.session_state.get(
+                    "text_style_select", t("movied_text_style_outline"))
+                text_style = "outline" if text_style == t("movied_text_style_outline") else "box"
+
+                kwargs = {
+                    "working_dir": self.working_dir,
+                    "font": font,
+                    "font_size": font_size,
+                    "use_green_background": use_green_background,
+                    "text_style": text_style
+                }
+
+                # Obtenir la taille cible à partir du clip initial
+                with VideoFileClip(video_path) as tmpclip:
+                    target_size = (tmpclip.w, tmpclip.h)
+
+                # Exécuter les opérations via l'orchestrateur
+                main_clip, operation_log = self.orchestrator.execute_operations(
+                    video_path, operations, target_size, **kwargs)
+
+                # Sauvegarder le clip final
                 output_path = os.path.splitext(video_path)[0] + "_edited.mp4"
+                from lib.movied_commands import display_video_clip_debug
+                display_video_clip_debug(main_clip)
                 main_clip.write_videofile(
                     output_path, codec="libx264", audio_codec="aac")
                 st.success(f"Video generated successfully at {output_path}")
 
-                # Créer un DataFrame avec les opérations et timecodes réels
+                # Stocker le journal des opérations
                 operations_df = pd.DataFrame(operation_log, columns=[
-                                             "Nature", "Details", "Start", "End", "Duration"])
+                    "Nature", "Details", "Start", "End", "Duration"])
                 st.session_state["operations_log"] = operations_df
                 st.session_state["generated_video_path"] = output_path
                 st.session_state.preview_mode = False
@@ -1428,19 +1159,39 @@ class MoviedPlugin(Plugin):
     def preview(self, video_path, operations, font, font_size):
         with st.spinner("Processing video operations..."):
             try:
+                # Préparer les arguments pour l'orchestrateur
                 text_background = st.session_state.get(
                     "text_background_select", t("movied_green_background"))
-                main_clip, operation_log = self._execute_operations(
-                    video_path, operations, font, font_size, text_background)
-                st.success(f"Video generated successfully")
+                use_green_background = text_background == t("movied_green_background")
+                text_style = st.session_state.get(
+                    "text_style_select", t("movied_text_style_outline"))
+                text_style = "outline" if text_style == t("movied_text_style_outline") else "box"
+
+                kwargs = {
+                    "working_dir": self.working_dir,
+                    "font": font,
+                    "font_size": font_size,
+                    "use_green_background": use_green_background,
+                    "text_style": text_style
+                }
+
+                # Obtenir la taille cible à partir du clip initial
+                with VideoFileClip(video_path) as tmpclip:
+                    target_size = (tmpclip.w, tmpclip.h)
+
+                # Exécuter les opérations via l'orchestrateur
+                main_clip, operation_log = self.orchestrator.execute_operations(
+                    video_path, operations, target_size, **kwargs)
+
+                # Stocker le journal des opérations et le clip pour la prévisualisation
                 operations_df = pd.DataFrame(operation_log, columns=[
-                                             "Nature", "Details", "Start", "End", "Duration"])
+                    "Nature", "Details", "Start", "End", "Duration"])
                 st.session_state["operations_log"] = operations_df
                 st.session_state.preview_mode = True
                 if 'previewclip' in st.session_state:
                     st.session_state.previewclip.close()
                 st.session_state.previewclip = main_clip
-                #st.rerun()
+                st.success("Video preview generated successfully")
             except Exception as e:
                 st.error(t("movied_error").format(error=str(e)))
                 raise e
