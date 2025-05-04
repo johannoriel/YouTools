@@ -147,6 +147,7 @@ class CommandOrchestrator:
 
     def __init__(self):
         self.commands: Dict[str, MovieCommand] = {}
+        self.register_command("CHANGE_VIDEO", ChangeVideoCommand())
         self.register_command("replace_image", ReplaceImageCommand())
         self.register_command("insert_video", InsertVideoCommand())
         self.register_command("insertVideoWithText", InsertVideoWithTextCommand())
@@ -184,63 +185,51 @@ class CommandOrchestrator:
             Tuple contenant le clip final et le journal des opérations
         """
         clips = []
-        duration_offset = 0
         current_clip = None
+        duration_offset = 0
         global_time_offset = 0
         operation_log = []
+
+        # Nettoyer et préparer les opérations
         ops_list = [op.split("//")[0].strip() for op in operations.split("\n") if op.strip()]
+
+        # Vérifier si la première commande est CHANGE_VIDEO
         if not ops_list or not ops_list[0].startswith("CHANGE_VIDEO"):
             # Insérer une commande CHANGE_VIDEO artificielle avec video_path
             video_name = os.path.basename(video_path)
             ops_list.insert(0, f"CHANGE_VIDEO {video_name}")
-            st.write("inserting artificial CHANGE_VIDEO")
 
-        for op in ops_list:
-            op_cleaned = op.split("//")[0].strip()
-            if not op_cleaned:
-                continue
-
+        for op_cleaned in ops_list:
             parts = op_cleaned.split(maxsplit=1)
             cmd = parts[0]
-
-            if cmd == "CHANGE_VIDEO":
-                video_name = parts[1] if len(parts) > 1 else ""
-                new_video_path = os.path.join(kwargs.get("working_dir", ""), video_name)
-                if os.path.exists(new_video_path):
-                    if current_clip is not None:
-                        clips.append(current_clip)
-                    global_time_offset += current_clip.duration if current_clip else 0
-                    duration_offset = 0
-                    st.write(f"New video file: {new_video_path}")
-                    current_clip = VideoFileClip(new_video_path)
-                    current_clip = current_clip.resized(target_size)
-                    current_clip = concatenate_videoclips([current_clip.subclipped(0, current_clip.duration)]) # BUG correction
-
-                    target_size = (current_clip.w, current_clip.h)
-                    operation_log.append({
-                        "Nature": "change_video",
-                        "Details": video_name,
-                        "Start": self._format_timecode(global_time_offset),
-                        "End": None,
-                        "Duration": ""
-                    })
-                continue
 
             if cmd in self.commands:
                 command = self.commands[cmd]
                 try:
+                    # Si c'est CHANGE_VIDEO, le clip actuel est remplacé
+                    if cmd == "CHANGE_VIDEO":
+                        if current_clip is not None:
+                            clips.append(current_clip)
+                            global_time_offset += current_clip.duration if current_clip else 0
+                        duration_offset = 0
+                    elif current_clip is None:
+                        raise ValueError("No video loaded. A CHANGE_VIDEO command must be executed first.")
+
+                    # Exécuter la commande
                     current_clip, duration_change = command.execute(
                         current_clip, op_cleaned, target_size, **kwargs)
                     duration_offset += duration_change
 
                     # Calculer les timecodes réels
                     start_time = parts[1].split()[0] if len(parts) > 1 else ""
-                    start_sec = self._parse_timecode(start_time) + duration_offset
+                    start_sec = 0
+                    if cmd != "CHANGE_VIDEO" and start_time:
+                        start_sec = self._parse_timecode(start_time) + duration_offset
                     real_start = self._format_timecode(start_sec + global_time_offset)
 
                     # Extraire end_time si pertinent
                     end_sec = None
-                    if len(parts) > 1 and len(parts[1].split()) > 1:
+                    if len(parts) > 1 and len(parts[1].split()) > 1 and cmd != "CHANGE_VIDEO":
                         end_time = parts[1].split()[1]
                         end_sec = self._parse_timecode(end_time) + duration_offset
                     real_end = self._format_timecode(end_sec + global_time_offset) if end_sec else None
@@ -258,8 +247,11 @@ class CommandOrchestrator:
             else:
                 raise ValueError(f"Unknown command: {cmd}")
 
+        if current_clip is None:
+            raise ValueError("No video was loaded during execution.")
+
         clips.append(current_clip)
-        final_clip = concatenate_videoclips(clips, method="compose", bg_color=None, padding=0)
+        final_clip = concatenate_videoclips(clips, method="compose")
 
         for clip in clips:
             clip.close()
@@ -568,3 +560,36 @@ class InsertAudioCommand(MovieCommand):
         modified_clip, duration_change = insert_audio(
             clip, start_sec, audio_path, target_size)
         return modified_clip, duration_change
+
+class ChangeVideoCommand(MovieCommand):
+    def get_label(self) -> str:
+        return "Change Video"
+
+    def is_enabled(self, has_selection: bool, has_text: bool, media_type: Optional[str]) -> bool:
+        return media_type == "video"
+
+    def get_default_command(self, start_time: str, end_time: Optional[str],
+                          text: Optional[str], media_path: Optional[str]) -> str:
+        if not media_path:
+            raise ValueError("Media path required for CHANGE_VIDEO")
+        video_name = os.path.basename(media_path)
+        return f"CHANGE_VIDEO {video_name}"
+
+    def execute(self, clip: VideoFileClip, command_line: str,
+                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+        parts = command_line.split(maxsplit=1)
+        if len(parts) < 2:
+            raise ValueError(f"Invalid CHANGE_VIDEO command: {command_line}")
+
+        video_name = parts[1]
+        new_video_path = os.path.join(kwargs.get("working_dir", ""), video_name)
+        if not os.path.exists(new_video_path):
+            raise ValueError(f"Video file not found: {new_video_path}")
+
+        # Charger le nouveau clip
+        new_clip = VideoFileClip(new_video_path)
+        new_clip = new_clip.resized(target_size)
+        new_clip = concatenate_videoclips([new_clip.subclipped(0, new_clip.duration)]) # BUG correction
+
+        # Le clip retourné devient le nouveau clip, avec une durée de 0 pour l'offset
+        return new_clip, 0
