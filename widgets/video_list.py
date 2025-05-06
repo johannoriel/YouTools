@@ -8,6 +8,7 @@ from datetime import datetime
 translations["en"].update({
     "video_list_title": "Video List (video_list.csv -> filtered_video_list.csv)",
     "no_file_error": "No valid CSV file found. Please check the directory.",
+    "select_files": "Select CSV files to process",
     "language_filter": "Filter by Language",
     "days_old_filter": "Maximum Age (Days)",
     "subscribers_filter": "Minimum Subscribers",
@@ -19,6 +20,7 @@ translations["en"].update({
 translations["fr"].update({
     "video_list_title": "Liste des vidéos (video_list.csv -> filtered_video_list.csv)",
     "no_file_error": "Aucun fichier CSV valide trouvé. Vérifiez le répertoire.",
+    "select_files": "Sélectionnez les fichiers CSV à traiter",
     "language_filter": "Filtrer par langue",
     "days_old_filter": "Âge maximum (jours)",
     "subscribers_filter": "Abonnés minimum",
@@ -43,14 +45,26 @@ class VideoListWidget(Widget):
             st.error(t("no_file_error"))
             return None
 
+        # Afficher la sélection des fichiers
+        selected_files = st.multiselect(
+            t("select_files"),
+            options=csv_files,
+            default=csv_files,
+            key=f"{self.prefix}_file_selection"
+        )
+
+        if not selected_files:
+            st.warning("Please select at least one file to process")
+            return None
+
         # Colonnes attendues pour un CSV valide
         required_columns = {'keyword', 'url', 'video_id', 'title', 'view_count', 'language',
-                            'published_at', 'channel_id', 'channel_title',
-                            'subscriber_count', 'comment_count', 'relevance_score'}
+                           'published_at', 'channel_id', 'channel_title',
+                           'subscriber_count', 'comment_count', 'relevance_score'}
 
-        # Charger et concaténer les fichiers CSV valides
+        # Charger et concaténer les fichiers CSV valides sélectionnés
         dfs = []
-        for csv_file in csv_files:
+        for csv_file in selected_files:
             file_path = os.path.join(work_directory, csv_file)
             try:
                 df = pd.read_csv(file_path)
@@ -74,7 +88,7 @@ class VideoListWidget(Widget):
         current_date = datetime.now()
         combined_df['days_old'] = combined_df['published_at'].apply(
             lambda x: (current_date - pd.to_datetime(x,
-                       utc=True).tz_localize(None)).days if pd.notnull(x) else None
+                      utc=True).tz_localize(None)).days if pd.notnull(x) else None
         ).astype('Int64')
 
         # Créer une URL pour la chaîne
@@ -155,7 +169,7 @@ class VideoListWidget(Widget):
 
         # Checkbox pour écraser ou renommer
         overwrite = st.checkbox(t("overwrite_checkbox"),
-                                key=f"{self.prefix}_overwrite_checkbox")
+                               key=f"{self.prefix}_overwrite_checkbox")
 
         # Bouton pour exporter la liste filtrée
         if st.button(t("export_button"), key=f"{self.prefix}_export_button"):

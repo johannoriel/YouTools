@@ -526,11 +526,12 @@ class TrendwatcherPlugin(Plugin):
 
         try:
             all_results = []
+            found_results = False
             for query, keyword in queries:
-                video_results = search_videos(
-                    query, keyword, useragents, valid_video_domains, debug=debug)
-                text_results = search_texts(
-                    query, keyword, useragents, debug=debug)
+                video_results = search_videos(query, keyword, useragents, valid_video_domains, debug=debug)
+                text_results = search_texts(query, keyword, useragents, debug=debug)
+                if video_results or text_results:
+                    found_results = True
                 all_results.extend(video_results + text_results)
 
             if debug:
@@ -544,7 +545,7 @@ class TrendwatcherPlugin(Plugin):
                     texts=text_count
                 ))
 
-            return all_results
+            return all_results, found_results
         except Exception as e:
             return str(e)
 
@@ -592,6 +593,25 @@ class TrendwatcherPlugin(Plugin):
                 step=1
             )
 
+        # Parse keywords into structured format
+        parsed_keywords = []
+        for line in keywords_input.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(":")
+            if len(parts) >= 2:
+                theme = parts[0].strip()
+                main_keyword = parts[1].strip()
+                synonyms = []
+                if len(parts) > 2:
+                    synonyms = [s.strip() for s in parts[2].split(",") if s.strip()]
+                parsed_keywords.append({
+                    "theme": theme,
+                    "main": main_keyword,
+                    "synonyms": synonyms
+                })
+
         search_engine_options = {
             engine_id: engine["name"] for engine_id, engine in self.SEARCH_ENGINES.items()}
         search_engine_name = st.selectbox(
@@ -613,8 +633,6 @@ class TrendwatcherPlugin(Plugin):
         search_mode_value = "or" if search_mode == t(
             "trendwatcher_search_mode_or") else "subsearches"
 
-        overwrite = st.checkbox(t("overwrite_checkbox"), value=True)
-
         if "trendwatcher_results" not in st.session_state:
             st.session_state.trendwatcher_results = []
         if "debug_mode" not in st.session_state:
@@ -624,20 +642,21 @@ class TrendwatcherPlugin(Plugin):
 
         if st.button(t("trendwatcher_search_button"), key="search_trends"):
             with st.spinner(t("trendwatcher_processing")):
-                # Filter keyword_configs by selected themes
-                filtered_keyword_configs = [
-                    kc for kc in keyword_configs if kc["theme"] in selected_themes
+                no_results_keywords = []
+                # Filter keywords by selected themes
+                filtered_keywords_config = [
+                    kc for kc in parsed_keywords if kc["theme"] in selected_themes
                 ]
 
-                if debug_mode and len(filtered_keyword_configs) > max_keywords_debug:
+                if debug_mode and len(filtered_keywords_config) > max_keywords_debug:
                     st.warning(
-                        f"Debug mode: Limiting to first {max_keywords_debug} keywords: {', '.join(k['main'] for k in filtered_keyword_configs[:max_keywords_debug])}"
+                        f"Debug mode: Limiting to first {max_keywords_debug} keywords: {', '.join(k['main'] for k in filtered_keywords_config[:max_keywords_debug])}"
                     )
-                    filtered_keyword_configs = filtered_keyword_configs[:max_keywords_debug]
+                    filtered_keywords_config = filtered_keywords_config[:max_keywords_debug]
 
                 all_results = []
-                for config in filtered_keyword_configs:
-                    results = self.search_trends(
+                for config in filtered_keywords_config:
+                    results, has_results = self.search_trends(
                         config["main"],
                         config["synonyms"],
                         useragents,
@@ -646,6 +665,8 @@ class TrendwatcherPlugin(Plugin):
                         debug=debug_mode
                     )
                     if isinstance(results, list):
+                        if not has_results:
+                            no_results_keywords.append(config["main"])
                         all_results.extend(results)
                     else:
                         st.error(t("trendwatcher_error").format(error=results))
@@ -653,6 +674,11 @@ class TrendwatcherPlugin(Plugin):
 
                 st.session_state.trendwatcher_results = all_results
                 st.session_state.debug_mode = debug_mode
+
+                if no_results_keywords:
+                    st.warning("Aucun résultat trouvé pour les mots-clés/thèmes suivants :")
+                    st.write(", ".join(set(no_results_keywords)))  # Utilisation de set() pour éviter les doublons
+
 
         if st.session_state.trendwatcher_results:
             video_results = [
