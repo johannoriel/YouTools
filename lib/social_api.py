@@ -617,7 +617,7 @@ class GhostAPI:
         self.ghost_url = config['common']['ghost_url']
         self.ghost_api_key = config['common']['ghost_api_key']
 
-    def post(self, title: str, content: str) -> Optional[Dict[str, Any]]:
+    def post(self, title: str, content: str, publish_immediately: bool = True) -> Optional[Dict[str, Any]]:
         try:
             if not self.ghost_url or not self.ghost_api_key:
                 st.error("Ghost URL or API Key is missing in configuration.")
@@ -625,37 +625,28 @@ class GhostAPI:
 
             id, secret = self.ghost_api_key.split(':')
             iat = int(datetime.now().timestamp())
-
             header = {'alg': 'HS256', 'typ': 'JWT', 'kid': id}
             payload = {
                 'iat': iat,
                 'exp': iat + 5 * 60,
                 'aud': '/admin/'
             }
-
-            token = jwt.encode(payload, bytes.fromhex(
-                secret), algorithm='HS256', headers=header)
+            token = jwt.encode(payload, bytes.fromhex(secret), algorithm='HS256', headers=header)
             headers = {'Authorization': f'Ghost {token}'}
             body = {
                 'posts': [{
                     'title': title,
                     'html': content,
-                    'status': 'published'
+                    'status': 'published' if publish_immediately else 'draft'
                 }]
             }
-
             response = requests.post(
                 f"{self.ghost_url}/ghost/api/admin/posts/?source=html",
                 headers=headers,
                 json=body
             )
-
-            if response.status_code == 201:
-                return response.json()
-            else:
-                st.error(
-                    f"Ghost API Error: {response.status_code} - {response.text}")
-                return None
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             st.error(f"Ghost: {str(e)}")
             return None

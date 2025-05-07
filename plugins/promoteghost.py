@@ -7,6 +7,7 @@ from datetime import datetime as date
 import requests
 import jwt
 import markdown2
+from lib.social_api import GhostAPI
 
 translations["en"].update({
     "ghost_tab": "Ghost Publisher",
@@ -43,6 +44,7 @@ translations["fr"].update({
 class PromoteghostPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
+        self.ghost_api = GhostAPI(plugin_manager.config)
 
     def get_config_fields(self):
         return {
@@ -55,50 +57,42 @@ class PromoteghostPlugin(Plugin):
                 "type": "text",
                 "label": t("ghost_config_url"),
                 "default": t("ghost_config_url_default")
-            }
+            },
+            "randompost_prompt": {
+                        "type": "textarea",
+                        "label": t("randompost_prompt"),
+                        "default": """Génère un article de blog en Markdown basé sur le produit suivant :
+            Titre : {title}
+            Contenu : {content}
+            Mots-clés : {keywords}
+
+            L'article doit être structuré avec une introduction, 3 sections principales et une conclusion. Utilise un ton professionnel et intègre les mots-clés naturellement."""
+                    }
         }
 
     def get_tabs(self):
         return [{"name": t("ghost_tab"), "plugin": "ghostplugin"}]
 
     def run(self, config):
-        st.header(t("ghost_header"))
-        post_title = st.text_input(t("ghost_title_label"), value="New Post")
-        markdown_content = st.text_area(t("ghost_input_label"), height=300)
-        publish_immediately = st.checkbox(t("ghost_publish_checkbox"))
+        tab1, tab2 = st.tabs([t("ghost_tab"), t("randompost_tab")])
+        with tab1:
+            st.header(t("ghost_header"))
+            post_title = st.text_input(t("ghost_title_label"), value="New Post")
+            markdown_content = st.text_area(t("ghost_input_label"), height=300)
+            publish_immediately = st.checkbox(t("ghost_publish_checkbox"))
 
-        if st.button(t("ghost_publish_button")):
-            with st.spinner(t("ghost_processing")):
-                try:
-                    api_key = config.get(self.name, {}).get("ghost_api_key", "")
-                    url = config.get(self.name, {}).get("ghost_url", "")
-                    if not api_key or not url:
-                        raise ValueError("API key or URL not configured")
-
-                    id, secret = api_key.split(':')
-                    iat = int(date.now().timestamp())
-                    header = {'alg': 'HS256', 'typ': 'JWT', 'kid': id}
-                    payload = {
-                        'iat': iat,
-                        'exp': iat + 5 * 60,
-                        'aud': '/admin/'
-                    }
-                    token = jwt.encode(payload, bytes.fromhex(secret), algorithm='HS256', headers=header)
-
-                    headers = {'Authorization': f'Ghost {token}'}
-                    html_content = markdown2.markdown(markdown_content)
-                    body = {
-                        'posts': [{
-                            'title': post_title,
-                            'html': html_content,
-                            'status': 'published' if publish_immediately else 'draft',
-                        }]
-                    }
-                    response = requests.post(f"{url}posts/", json=body, headers=headers)
-                    response.raise_for_status()
-
-                    post_id = response.json().get('posts', [{}])[0].get('id', 'N/A')
-                    st.success(t("ghost_success").format(result=post_id))
-
-                except Exception as e:
-                    st.error(t("ghost_error").format(error=str(e)))
+            if st.button(t("ghost_publish_button")):
+                with st.spinner(t("ghost_processing")):
+                    try:
+                        html_content = markdown2.markdown(markdown_content)
+                        response = self.ghost_api.post(post_title, html_content, publish_immediately)
+                        if response:
+                            post_id = response.get('posts', [{}])[0].get('id', 'N/A')
+                            st.success(t("ghost_success").format(result=post_id))
+                        else:
+                            st.error(t("ghost_error").format(error="Unknown error"))
+                    except Exception as e:
+                        st.error(t("ghost_error").format(error=str(e)))
+        with tab2:
+            from widgets.random_ghost import RandomGhostPostWidget
+            RandomGhostPostWidget("randompost", "randompost", self.plugin_manager).display(config)
