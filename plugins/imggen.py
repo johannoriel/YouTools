@@ -48,6 +48,8 @@ translations["en"].update({
     "user_description": "Describe what you want to draw",
     "generate_prompt": "Generate Prompt",
     "generated_prompt": "Generated Prompt",
+    "image_generator_title": "Image Generator",
+
 })
 
 translations["fr"].update({
@@ -82,6 +84,8 @@ translations["fr"].update({
     "user_description": "Décrivez ce que vous voulez dessiner",
     "generate_prompt": "Générer le Prompt",
     "generated_prompt": "Prompt Généré",
+    "image_generator_title": "Générateur d'Image",
+
 })
 
 
@@ -121,7 +125,8 @@ class ImggenPlugin(Plugin):
         return [
             {"name": t("generate_image"), "plugin": "imggen"},
             {"name": t("backremove_tab"), "plugin": "imggen"},
-            {"name": t("prompt_generator_tab"), "plugin": "imggen"}  # Nouvel onglet
+            {"name": t("prompt_generator_tab"), "plugin": "imggen"},
+            {"name": t("image_generator_title"), "plugin": "imggen"}
         ]
 
     def load_prompt_history(self):
@@ -461,21 +466,22 @@ class ImggenPlugin(Plugin):
                 except Exception as e:
                     st.error(f"An error occurred: {str(e)}")
 
+    def run_image_generator_widget(self, config):
+        from widgets.image_generator import ImageGeneratorWidget
+        ImageGeneratorWidget("image_generator", "imggen_widget", plugin_manager=self.plugin_manager).display()
+
     def run(self, config):
         # Sélection de l'onglet actif via Streamlit
-        tab1, tab2, tab3 = st.tabs([t("generate_image"), t("backremove_tab"), t("prompt_generator_tab")])
+        tab1, tab2, tab3, tab4 = st.tabs([t("generate_image"), t("backremove_tab"), t("prompt_generator_tab"), t("image_generator_title")])
 
-        # Onglet 3 : Génération de prompt
         with tab3:
             self.run_prompt_generator(config)
-
-        # Onglet 1 : Génération d'image
         with tab1:
             self.run_generate_image(config)
-
-        # Onglet 2 : Suppression d'arrière-plan
         with tab2:
             self.run_background_removal(config)
+        with tab4:
+            self.run_image_generator_widget(config)
 
 
 def main():
