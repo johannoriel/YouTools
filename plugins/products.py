@@ -4,6 +4,8 @@ import streamlit as st
 from lib.products_db import ProductsDB
 import os
 from widgets.product_db import ProductGridWidget
+import pandas as pd
+
 
 # Translations
 translations["en"].update({
@@ -42,6 +44,10 @@ translations["en"].update({
     "products_db_path_label": "Products Database Path",
     "markdown_root_label": "Markdown Root Directory",
     "excluded_directorys_label": "Excluded Directories (comma-separated)",
+    "products_tab_edit_grid": "Edit Products in Grid",
+    "products_header_edit_grid": "Edit Products Directly in Grid",
+    "products_save_grid_button": "Save Grid Changes",
+    "products_type_filter_label": "Filter by Type Keywords",
 })
 
 translations["fr"].update({
@@ -80,6 +86,10 @@ translations["fr"].update({
     "products_db_path_label": "Chemin de la base de données des produits",
     "markdown_root_label": "Répertoire racine Markdown",
     "excluded_directorys_label": "Répertoires exclus (séparés par des virgules)",
+    "products_tab_edit_grid": "Éditer les produits dans la grille",
+    "products_header_edit_grid": "Éditer les produits directement dans la grille",
+    "products_save_grid_button": "Enregistrer les modifications de la grille",
+    "products_type_filter_label": "Filtrer par mots-clés de type",
 })
 
 class ProductsPlugin(Plugin):
@@ -122,37 +132,72 @@ class ProductsPlugin(Plugin):
             {"name": t("products_tab_add"), "plugin": "productsplugin"},
             {"name": t("products_tab_import"), "plugin": "productsplugin"},
             {"name": t("products_tab_import_markdown"), "plugin": "productsplugin"},
-            {"name": t("products_tab_prompts"), "plugin": "productsplugin"}
+            {"name": t("products_tab_prompts"), "plugin": "productsplugin"},
+            {"name": t("products_tab_edit_grid"), "plugin": "productsplugin"}
         ]
 
-    def run(self, config):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            t("products_tab_list"),
-            t("products_tab_add"),
-            t("products_tab_import"),
-            t("products_tab_import_markdown"),
-            t("products_tab_prompts")
-        ])
-        with tab1:
-            self._run_list_tab(config)
-        with tab2:
-            self._run_add_tab(config)
-        with tab3:
-            self._run_import_tab(config)
-        with tab4:
-            self._run_import_markdown_tab(config)
-        with tab5:
-            self._run_prompts_tab(config)
+    def _get_type_keywords(self):
+        products = self.db.get_all_products()
+        type_keywords = set()
+        for product in products:
+            if product.get('type'):
+                keywords = [kw.strip() for kw in product['type'].split(',')]
+                type_keywords.update(keywords)
+        return sorted(list(type_keywords))
+
+    def _run_edit_grid_tab(self, config):
+        from widgets.product_db import ProductGridWidget
+        st.header(t("products_header_edit_grid"))
+
+        # Type filter multiselect
+        type_keywords = self._get_type_keywords()
+        selected_types = st.multiselect(
+            t("products_type_filter_label"),
+            type_keywords,
+            key=f"{self.name}_edit_type_filter"
+        )
+
+        grid_widget = ProductGridWidget("productgrid", "edit_grid", self.plugin_manager)
+        grid_data = grid_widget.display_editable(selected_types)
+
+        if st.button(t("products_save_grid_button")):
+            with st.spinner(t("products_processing")):
+                try:
+                    for _, row in grid_data.iterrows():
+                        self.db.update_or_add_product(
+                            int(row['id']) if pd.notnull(row['id']) else None,
+                            row['title'],
+                            row['url'],
+                            row['keywords'],
+                            row['type'],
+                            row['source'],
+                            row['goal'],
+                            row['related'],
+                            row['description'],
+                            row['content']
+                        )
+                    st.success(t("products_success"))
+                    st.rerun()
+                except Exception as e:
+                    st.error(t("products_error").format(error=str(e)))
 
     def _run_list_tab(self, config):
         from widgets.product_editor import ProductEditorWidget
         st.header(t("products_header_list"))
 
-        coll, colr= st.columns([2,1])
+        # Type filter multiselect
+        type_keywords = self._get_type_keywords()
+        selected_types = st.multiselect(
+            t("products_type_filter_label"),
+            type_keywords,
+            key=f"{self.name}_list_type_filter"
+        )
+
+        coll, colr = st.columns([2,1])
 
         with coll:
             grid_widget = ProductGridWidget("productgrid", "grid", self.plugin_manager)
-            selected_rows = grid_widget.display()
+            selected_rows = grid_widget.display(selected_types)
 
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -294,3 +339,26 @@ class ProductsPlugin(Plugin):
                     st.rerun()
                 except Exception as e:
                     st.error(t("products_error").format(error=str(e)))
+
+    def run(self, config):
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            t("products_tab_list"),
+            t("products_tab_edit_grid"),
+            t("products_tab_add"),
+            t("products_tab_import"),
+            t("products_tab_import_markdown"),
+            t("products_tab_prompts"),
+        ])
+        with tab1:
+            self._run_list_tab(config)
+        with tab2:
+            self._run_edit_grid_tab(config)
+
+        with tab3:
+            self._run_add_tab(config)
+        with tab4:
+            self._run_import_tab(config)
+        with tab5:
+            self._run_import_markdown_tab(config)
+        with tab6:
+            self._run_prompts_tab(config)

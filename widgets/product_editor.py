@@ -6,6 +6,7 @@ from streamlit_lexical import streamlit_lexical
 from lib.products_db import ProductsDB
 import os
 
+
 class ProductEditorWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)

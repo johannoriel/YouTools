@@ -9,8 +9,18 @@ class ProductGridWidget(Widget):
         super().__init__(name, prefix, plugin_manager)
         self.db = ProductsDB()
 
-    def display(self):
+    def display(self, type_filters=None):
         products = self.db.get_all_products()
+
+        # Filter products by type keywords if filters are provided
+        if type_filters:
+            filtered_products = []
+            for product in products:
+                product_types = [t.strip() for t in product.get('type', '').split(',') if t.strip()]
+                if any(t in product_types for t in type_filters):
+                    filtered_products.append(product)
+            products = filtered_products
+
         df = pd.DataFrame(products)
 
         gb = GridOptionsBuilder.from_dataframe(df)
@@ -40,3 +50,44 @@ class ProductGridWidget(Widget):
             key=f"{self.prefix}_products_grid"
         )
         return response['selected_rows']
+
+    def display_editable(self, type_filters=None):
+        products = self.db.get_all_products()
+
+        # Filter products by type keywords if filters are provided
+        if type_filters:
+            filtered_products = []
+            for product in products:
+                product_types = [t.strip() for t in product.get('type', '').split(',') if t.strip()]
+                if any(t in product_types for t in type_filters):
+                    filtered_products.append(product)
+            products = filtered_products
+
+        df = pd.DataFrame(products)
+
+        gb = GridOptionsBuilder.from_dataframe(df)
+        gb.configure_default_column(editable=True, flex=1)
+        gb.configure_column("id", width=80, editable=False)
+        gb.configure_column("title", width=200)
+        gb.configure_column("url", width=200)
+        gb.configure_column("keywords", width=200)
+        gb.configure_column("type", width=150, filter=True)
+        gb.configure_column("source", width=150)
+        gb.configure_column("goal", width=150)
+        gb.configure_column("related", width=150)
+        gb.configure_column("description", width=200,
+            cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '50000'})
+        gb.configure_column("content", width=200,
+            cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '50000'})
+        grid_options = gb.build()
+
+        response = AgGrid(
+            df,
+            gridOptions=grid_options,
+            height=400,
+            fit_columns_on_grid_load=True,
+            data_return_mode='AS_INPUT',
+            update_mode=GridUpdateMode.MODEL_CHANGED,
+            key=f"{self.prefix}_editable_products_grid"
+        )
+        return response['data']
