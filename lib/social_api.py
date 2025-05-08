@@ -617,7 +617,7 @@ class GhostAPI:
         self.ghost_url = config['common']['ghost_url']
         self.ghost_api_key = config['common']['ghost_api_key']
 
-    def post(self, title: str, content: str, publish_immediately: bool = True) -> Optional[Dict[str, Any]]:
+    def post(self, title: str, content: str, publish_immediately: bool = True, feature_image: Optional[str] = None) -> Optional[Dict[str, Any]]:
         try:
             if not self.ghost_url or not self.ghost_api_key:
                 st.error("Ghost URL or API Key is missing in configuration.")
@@ -633,6 +633,24 @@ class GhostAPI:
             }
             token = jwt.encode(payload, bytes.fromhex(secret), algorithm='HS256', headers=header)
             headers = {'Authorization': f'Ghost {token}'}
+
+            # Upload image if provided
+            feature_image_url = None
+            if feature_image and os.path.exists(feature_image):
+                with open(feature_image, 'rb') as f:
+                    files = {
+                        'file': (os.path.basename(feature_image), f, 'image/png'),
+                        'ref': (None, feature_image)
+                    }
+                    image_response = requests.post(
+                        f"{self.ghost_url}/ghost/api/admin/images/upload/",
+                        headers=headers,
+                        files=files
+                    )
+                    image_response.raise_for_status()
+                    feature_image_url = image_response.json().get('images', [{}])[0].get('url')
+
+            # Prepare post data
             body = {
                 'posts': [{
                     'title': title,
@@ -640,6 +658,9 @@ class GhostAPI:
                     'status': 'published' if publish_immediately else 'draft'
                 }]
             }
+            if feature_image_url:
+                body['posts'][0]['feature_image'] = feature_image_url
+
             response = requests.post(
                 f"{self.ghost_url}/ghost/api/admin/posts/?source=html",
                 headers=headers,
