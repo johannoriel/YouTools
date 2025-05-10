@@ -5,7 +5,7 @@ from lib.products_db import ProductsDB
 from lib.youtube_db import get_video_transcript
 from widgets.yt_videos import VideoDatabaseWidget
 import pandas as pd
-import os
+import os, re
 
 translations["en"].update({
     "product_importer_title": "Import Products from Videos",
@@ -133,8 +133,45 @@ class ProductImporterWidget(Widget):
         # Créer un DataFrame pour les fichiers Markdown
         df = pd.DataFrame({
             "filename": markdown_files,
-            "path": [os.path.join(selected_dir_path, f) for f in markdown_files]
+            "path": [os.path.join(selected_dir_path, f) for f in markdown_files],
+            "content": [""] * len(markdown_files)  # Initialiser avec des chaînes vides
         })
+
+        # Charger le contenu des fichiers
+        for idx, row in df.iterrows():
+            try:
+                with open(row["path"], "r", encoding="utf-8") as f:
+                    df.at[idx, "content"] = f.read()
+            except Exception as e:
+                st.error(f"Error reading file {row['filename']}: {str(e)}")
+                df.at[idx, "content"] = ""
+
+        # Ajouter le champ de recherche et les cases à cocher
+        search_term = st.text_input("Rechercher (insensible à la casse)")
+
+        # Cases à cocher pour choisir où chercher
+        col1, col2 = st.columns(2)
+        with col1:
+            search_title = st.checkbox("Chercher dans les titres", value=True)
+        with col2:
+            search_content = st.checkbox("Chercher dans les contenus", value=True)
+
+        # Filtrer le DataFrame en fonction du terme de recherche
+        if search_term:
+            search_lower = search_term.lower()
+            mask = pd.Series([False] * len(df))
+
+            if search_title:
+                mask = mask | df["filename"].str.lower().str.contains(search_lower)
+            if search_content:
+                mask = mask | df["content"].str.lower().str.contains(search_lower)
+
+            filtered_df = df[mask]
+        else:
+            filtered_df = df.copy()
+
+        # Afficher le nombre de fichiers trouvés
+        st.write(f"Fichiers trouvés : {len(filtered_df)} / {len(df)}")
 
         # Configurer les colonnes pour l'affichage
         column_config = {
@@ -144,7 +181,7 @@ class ProductImporterWidget(Widget):
 
         # Afficher le DataFrame avec sélection multi-lignes
         selected_rows = st.dataframe(
-            df,
+            filtered_df[["filename", "path"]],  # Ne montrer que le nom et le chemin
             column_config=column_config,
             use_container_width=True,
             height=400,
@@ -164,13 +201,10 @@ class ProductImporterWidget(Widget):
                 try:
                     import_count = 0
                     for idx in selected_indices:
-                        file_info = df.iloc[idx]
+                        file_info = filtered_df.iloc[idx]
                         file_path = file_info["path"]
                         filename = file_info["filename"]
-
-                        # Lire le contenu du fichier
-                        with open(file_path, "r", encoding="utf-8") as f:
-                            content = f.read()
+                        content = file_info["content"]
 
                         # Préparer les données du produit
                         product_data = {
