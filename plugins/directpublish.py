@@ -295,9 +295,17 @@ class DirectpublishPlugin(Plugin):
                         st.error(result)
                         return
                     else:
-                        # Afficher le pourcentage de réduction, durée initiale et finale
+                        def format_duration(seconds):
+                            seconds = float(seconds)  # Convertir en float pour gérer les chaînes
+                            hours = int(seconds // 3600)
+                            minutes = int((seconds % 3600) // 60)
+                            secs = int(seconds % 60)
+                            if hours > 0:
+                                return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+                            return f"{minutes:02d}:{secs:02d}"
+
                         st.info(
-                            f"Reduction: {reduction} | Initial duration: {original_duration:.1f}s | Final duration: {final_duration:.1f}s")
+                            f"Reduction: {reduction} | Initial duration: {format_duration(original_duration)} | Final duration: {format_duration(final_duration)}")
                     video_to_process = result
                     st.text(video_to_process)
 
