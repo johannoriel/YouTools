@@ -58,7 +58,7 @@ class PostResponseWidget(Widget):
                             comment_id=comment_id,
                             response_id=response_id,
                             channel_id=response['channel_id'],
-                            keyword=response['keyword'],
+                            keyword=response['keywords'],
                             response_text=response['response'],
                             moderation_status=moderation_status
                         )
@@ -161,7 +161,7 @@ class PostResponseWidget(Widget):
                 'response': row['response_text'],
                 'target_video_id': row['video_id'],
                 'channel_id': row['channel_id'],
-                'keyword': row.get('keywords', ''),
+                'keywords': row.get('keywords', ''),
                 'comment_text': row['comment_text'],
                 'author': row['author'],
                 'video_title': row['video_title'],
@@ -175,7 +175,7 @@ class PostResponseWidget(Widget):
                 'response': row['response_text'],
                 'target_video_id': row['video_id'],
                 'channel_id': row['channel_id'],
-                'keyword': row.get('keywords', ''),
+                'keywords': row.get('keywords', ''),
                 'comment_text': row['comment_text'],
                 'author': row['author'],
                 'video_title': row['video_title'],

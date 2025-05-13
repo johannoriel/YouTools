@@ -39,9 +39,47 @@ translations["fr"].update({
 class GenerateResponseWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
-        from widgets.video_product_promotion import VideoProductPromotionWidget
-        self.promoter = VideoProductPromotionWidget(name, prefix+"_product_promoter", plugin_manager)
         self.work_dir = self.plugin_manager.config["common"]["work_directory"]
+
+    def generate_responses(self, config, selected_comments, transcript, url, keywords):
+        responses = []
+        total_comments = len(selected_comments)
+        progress_bar = st.progress(0)
+        progress_text = st.empty()
+
+        for idx, comment in enumerate(selected_comments):
+            progress = (idx + 1) / total_comments
+            progress_bar.progress(progress)
+            progress_text.text(
+                f"Processing comment {idx + 1} of {total_comments}")
+
+            comment_with_context = f"Comment by {comment['author']} on video {comment['video_title']} from channel {comment['channel_title']}:\n{comment['comment_text']}"
+            prompt = config['promoteyoutube']['response_prompt'].format(
+                url=url, transcript=transcript)
+            try:
+                llm_response = self.process_with_llm(
+                    prompt,
+                    config.get('llm', {}).get('llm_sys_prompt', ''),
+                    comment_with_context
+                )
+                clean_response = remove_quotes(llm_response.strip())
+            except Exception as e:
+                clean_response = f"Error: {str(e)}"
+            responses.append({
+                'comment_id': comment['comment_id'],
+                'response': clean_response,
+                'target_video_id': comment['video_id'],
+                'channel_id': comment['channel_id'],
+                'keywords': keywords,
+                'comment_text': comment['comment_text'],
+                'author': comment['author'],
+                'video_title': comment['video_title'],
+                'channel_title': comment['channel_title']
+            })
+
+        progress_bar.empty()
+        progress_text.empty()
+        return responses
 
     def display(self):
         st.title(t("generate_response_title"))
@@ -131,19 +169,12 @@ class GenerateResponseWidget(Widget):
                         'video_title': row['video_title'],
                         'channel_title': row['channel_title'],
                         'author': row['author'],
-                        'keyword': row.get('keyword', '')
+                        'keywords': row.get('keywords', '')
                     }
                     for i, row in combined_df.iloc[selected_comment_rows['selection']['rows']].iterrows()
                 ]
-                responses = self.promoter.generate_responses_for_list(
-                    widget=self,
-                    config=self.plugin_manager.config,
-                    content_list=selected_comments,
-                    prompt_template=self.plugin_manager.config['promoteyoutube']['response_prompt'],
-                    context=transcript,
-                    universitairesurl=url,
-                    keyword=selected_comments[0]['keyword']
-                )
+                responses = self.generate_responses(
+                                   self.plugin_manager.config, selected_comments, transcript, url, selected_comments[0]['keywords'])
 
                 # Sauvegarde dans la base de données
                 campaign_id = datetime.now().isoformat()
@@ -162,31 +193,32 @@ class GenerateResponseWidget(Widget):
                 st.session_state['generated_responses'] = responses
 
         # Affichage des réponses avec AgGrid
-        if 'generated_responses' in st.sessionโปรgramme_state and st.session_state['generated_responses']:
+        if 'generated_responses' in st.session_state and st.session_state['generated_responses']:
             st.subheader(t("responses"))
             responses_df = pd.DataFrame([
                 {
-                    'content_text': resp['content_text'],
                     'response_text': resp['response'],
+                    'comment_text': resp['comment_text'],
                     'author': resp['author'],
                     'video_title': resp['video_title'],
                     'channel_title': resp['channel_title'],
                     'comment_id': resp['comment_id'],
                     'video_id': resp['target_video_id'],
                     'channel_id': resp['channel_id'],
-                    'keyword': resp['keyword']
+                    'keywords': resp['keywords']
                 }
                 for resp in st.session_state['generated_responses']
             ])
 
             # Réorganiser les colonnes
             column_order = ['comment_text', 'response_text', 'author', 'video_title',
-                            'channel_title', 'comment_id', 'video_id', 'channel_id', 'keyword']
+                            'channel_title', 'comment_id', 'video_id', 'channel_id', 'keywords']
             responses_df = responses_df[column_order].reset_index(drop=True)
 
             # Configuration de la grille AgGrid
             gb = GridOptionsBuilder.from_dataframe(responses_df)
-            gb.configure_column("content_text", headerName="Comment", width=300, editable=False)
+            gb.configure_column("comment_text", headerName="Response", width=300, editable=True,
+                               cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '500'})
             gb.configure_column("response_text", headerName="Response", width=300, editable=True,
                                cellEditor='agLargeTextCellEditor', cellEditorPopup=True, cellEditorParams={'maxLength': '500'})
             gb.configure_column("author", headerName="Author", width=150, editable=False)
@@ -195,7 +227,7 @@ class GenerateResponseWidget(Widget):
             gb.configure_column("comment_id", headerName="Comment ID", hide=True)
             gb.configure_column("video_id", headerName="Video ID", hide=True)
             gb.configure_column("channel_id", headerName="Channel ID", hide=True)
-            gb.configure_column("keyword", headerName="keyword", hide=True)
+            gb.configure_column("keywords", headerName="keywords", hide=True)
             gb.configure_selection(selection_mode="multiple", use_checkbox=True, header_checkbox=True)
             gb.configure_default_column(editable=False, resizable=True)
             grid_options = gb.build()
@@ -220,7 +252,7 @@ class GenerateResponseWidget(Widget):
                     'response': row['response_text'],
                     'target_video_id': row['video_id'],
                     'channel_id': row['channel_id'],
-                    'keyword': row['keyword'],
+                    'keywords': row['keywords'],
                     'comment_text': row['comment_text'],
                     'author': row['author'],
                     'video_title': row['video_title'],

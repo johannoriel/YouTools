@@ -52,7 +52,7 @@ class GetCommentsWidget(Widget):
                 comment['channel_title'] = video['channel_title']
                 comment['video_id'] = video['video_id']
                 comment['channel_id'] = video.get('channel_id', 'unknown')
-                comment['keyword'] = video.get('keyword', 'unknown')
+                comment['keywords'] = video.get('keywords', 'unknown')
             comments.extend(video_comments)
         return comments
 
@@ -83,7 +83,7 @@ class GetCommentsWidget(Widget):
                     'channel_id': comment.get('channel_id', ''),
                     'channel_title': comment.get('channel_title', ''),
                     'comment_url': f"https://www.youtube.com/watch?v={comment.get('video_id', '')}&lc={comment.get('id', '')}",
-                    'keyword': comment.get('keyword', ''),
+                    'keywords': comment.get('keywords', ''),
                 }
                 for comment in comments
             ]
@@ -210,6 +210,7 @@ class GetCommentsWidget(Widget):
                     'like_count': comment.get('like_count', 0),
                     'published_at': comment.get('published_at', ''),
                     'comment_url': f"https://www.youtube.com/watch?v={comment.get('video_id', '')}&lc={comment.get('id', '')}",
+                    'keywords': comment.get('keywords', 'not found')
                 }
                 for comment in st.session_state['found_comments']
             ])

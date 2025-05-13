@@ -40,7 +40,7 @@ def export_responses(responses, work_dir, base_filename, overwrite):
                 'author': resp['author'],
                 'video_title': resp['video_title'],
                 'channel_title': resp['channel_title'],
-                'keyword': resp['keyword']
+                'keywords': resp['keywords']
             }
             for resp in responses
         ]
