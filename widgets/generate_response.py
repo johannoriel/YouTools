@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from lib.youtube_db import cache_campaign_response
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-from widgets.utils import generate_responses_for_list, export_responses, remove_quotes
+from widgets.utils import export_responses, remove_quotes
 
 translations["en"].update({
     "generate_response_title": "Generate Responses to Comments (comment_list.csv -> response_list.csv)",
@@ -39,6 +39,8 @@ translations["fr"].update({
 class GenerateResponseWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
+        from widgets.video_product_promotion import VideoProductPromotionWidget
+        self.promoter = VideoProductPromotionWidget(name, prefix+"_product_promoter", plugin_manager)
         self.work_dir = self.plugin_manager.config["common"]["work_directory"]
 
     def display(self):
@@ -133,7 +135,7 @@ class GenerateResponseWidget(Widget):
                     }
                     for i, row in combined_df.iloc[selected_comment_rows['selection']['rows']].iterrows()
                 ]
-                responses = generate_responses_for_list(
+                responses = self.promoter.generate_responses_for_list(
                     widget=self,
                     config=self.plugin_manager.config,
                     content_list=selected_comments,
