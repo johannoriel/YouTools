@@ -2,7 +2,7 @@ from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 from plugins.common import remove_quotes
-import os
+import os, re
 from datetime import datetime as date
 import requests
 import jwt
@@ -98,6 +98,20 @@ class PromoteghostPlugin(Plugin):
             {"name": t("linkedin_tab"), "plugin": "linkedinplugin"}
         ]
 
+    def _markdown_to_text(self, markdown_content: str) -> str:
+        """
+        Converts markdown content to plain text, stripping formatting and headers.
+        :param markdown_content: Markdown string.
+        :return: Plain text string.
+        """
+        # Convert markdown to HTML using markdown2
+        html = markdown2.markdown(markdown_content)
+        # Strip HTML tags and clean up
+        text = re.sub(r'<[^>]+>', '', html)  # Remove HTML tags
+        text = re.sub(r'\n\s*\n', '\n', text)  # Remove extra newlines
+        text = text.strip()  # Remove leading/trailing whitespace
+        return text
+
     def run(self, config):
         tab1, tab2, tab3 = st.tabs([t("ghost_tab"), t("randomarticle_tab"), t("linkedin_tab")])
 
@@ -185,6 +199,7 @@ class PromoteghostPlugin(Plugin):
 
         # Random Article Tab
         with tab2:
+            from widgets.random_article import RandomArticleWidget
             RandomArticleWidget("randomarticle", "randomarticle", self.plugin_manager).display(config)
 
         # LinkedIn Publisher Tab
@@ -196,6 +211,9 @@ class PromoteghostPlugin(Plugin):
             default_image_path = None
             default_url = ""
 
+            article_path = os.path.join(self.work_dir, "article.md")
+            image_path = os.path.join(self.work_dir, "image.png")
+            url_path = os.path.join(self.work_dir, "url.txt")
             if os.path.exists(article_path):
                 with open(article_path, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -231,7 +249,7 @@ class PromoteghostPlugin(Plugin):
             )
 
             st.subheader(t("ghost_image_label"))
-            uploaded_image = st.file_uploader("Upload an image (LinkedIn)", type=["png", "jpg", "jpeg"], key="linkedin_image_upload")
+            uploaded_image = st.file_uploader("Upload an image (LinkedIn)", type=["png", "jpg", "jpeg", "gif"], key="linkedin_image_upload")
             selected_image_path = st.session_state.get("linkedin_image_path", default_image_path)
 
             if uploaded_image:
@@ -243,14 +261,22 @@ class PromoteghostPlugin(Plugin):
             if selected_image_path:
                 st.image(selected_image_path, caption="Selected Image (LinkedIn)", use_container_width=True)
 
+            include_image = st.checkbox("Include Image in Post", value=True if selected_image_path else False, key="linkedin_include_image")
+            source_url = st.session_state.get('linkedin_url', default_url)
+            st.write(source_url)
+
             if st.button(t("linkedin_publish_button"), key="linkedin_publish"):
                 with st.spinner(t("linkedin_processing")):
                     try:
+                        # Convert markdown to plain text
+                        plain_content = self._markdown_to_text(markdown_content)
+
+                        feature_image = selected_image_path if include_image and selected_image_path else None
                         response = self.linkedin_api.post_article(
                             post_title,
-                            markdown_content,
-                            source_url=default_url,
-                            feature_image=selected_image_path
+                            plain_content,
+                            source_url=source_url,
+                            feature_image=feature_image
                         )
                         if response:
                             post_id = response.get('id', 'N/A')
@@ -262,4 +288,3 @@ class PromoteghostPlugin(Plugin):
                             st.error(t("linkedin_error").format(error="Unknown error"))
                     except Exception as e:
                         st.error(t("linkedin_error").format(error=str(e)))
-                        raise e
