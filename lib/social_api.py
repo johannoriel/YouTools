@@ -677,29 +677,131 @@ class LinkedinAPI:
     def __init__(self, config):
         self.client_id = config['common']['linkedin_client_id']
         self.client_secret = config['common']['linkedin_client_secret']
-        self.base_url = "https://api.linkedin.com/v2"
-        # self._get_access_token()
+        self.base_url = "https://api.linkedin.com"
         self.access_token = config['common']['linkedin_access_token']
+        self.redirect_uri = config['common'].get('linkedin_redirect_uri', 'https://your-app.com/callback')
+        self.api_version = config['common'].get('linkedin_api_version', '202504')  # Default to 202504
+        self.person_urn = None
 
-    def _get_access_token(self) -> Optional[str]:
+    def _get_access_token(self, code: Optional[str] = None, refresh_token: Optional[str] = None) -> Optional[str]:
         """
-        Récupère le token d'accès LinkedIn via OAuth2.
+        Retrieves an access token using authorization code or refresh token.
+        :param code: Authorization code from OAuth2 redirect (optional).
+        :param refresh_token: Refresh token to obtain a new access token (optional).
+        :return: Access token or None if the request fails.
         """
         try:
             auth_url = "https://www.linkedin.com/oauth/v2/accessToken"
-            payload = {
-                'grant_type': 'client_credentials',
-                'client_id': self.client_id,
-                'client_secret': self.client_secret
-            }
-            headers = {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
+            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+            if code:
+                payload = {
+                    'grant_type': 'authorization_code',
+                    'code': code,
+                    'client_id': self.client_id,
+                    'client_secret': self.client_secret,
+                    'redirect_uri': self.redirect_uri
+                }
+            elif refresh_token:
+                payload = {
+                    'grant_type': 'refresh_token',
+                    'refresh_token': refresh_token,
+                    'client_id': self.client_id,
+                    'client_secret': self.client_secret
+                }
+            else:
+                st.error("No authorization code or refresh token provided.")
+                return None
+
             response = requests.post(auth_url, data=payload, headers=headers)
-            response.raise_for_status()  # Lève une exception si le statut n'est pas 200
-            return response.json().get('access_token')
+            response.raise_for_status()
+            token_data = response.json()
+            self.access_token = token_data.get('access_token')
+            return self.access_token
         except Exception as e:
-            print(f"LinkedIn API Error (get_access_token): {str(e)}")
+            st.error(f"LinkedIn API Error (get_access_token): {str(e)}")
+            return None
+
+    def _get_person_urn(self) -> Optional[str]:
+        """
+        Retrieves the authenticated user's person_urn using the /v2/userinfo endpoint.
+        :return: Person URN (e.g., urn:li:person:{id}) or None if the request fails.
+        """
+        try:
+            api_url_me = f"{self.base_url}/v2/userinfo"
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': self.api_version
+            }
+            response = requests.get(api_url_me, headers=headers)
+            response.raise_for_status()
+            user_data = response.json()
+            self.person_urn = f"urn:li:person:{user_data['sub']}"
+            return self.person_urn
+        except Exception as e:
+            st.error(f"LinkedIn API Error (get_person_urn): {str(e)}")
+            return None
+
+    def post_article(self, title: str, content: str, source_url: Optional[str] = None, feature_image=None) -> Optional[Dict[str, Any]]:
+        """
+        Publishes an article using the Posts API without images.
+        :param title: Article title.
+        :param content: Article content (plain text or markdown, max 3000 characters).
+        :param source_url: URL of the article source (optional, defaults to empty string).
+        :return: API response or None if the request fails.
+        """
+        try:
+            # Ensure person_urn is set
+            if not self.person_urn:
+                self.person_urn = self._get_person_urn()
+                if not self.person_urn:
+                    return None
+
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': self.api_version,
+                'Content-Type': 'application/json',
+                'X-Li-Pem-Metadata': 'w_member_social'
+            }
+
+            # Truncate content to 3000 characters (LinkedIn limit)
+            content = content[:3000]
+            # Use source_url if provided, otherwise empty string
+            source_url = source_url or ""
+
+            # Prepare article post body
+            body = {
+                'author': self.person_urn,
+                'commentary': content,
+                'visibility': 'PUBLIC',
+                'distribution': {
+                    'feedDistribution': 'MAIN_FEED',
+                    'targetEntities': [],
+                    'thirdPartyDistributionChannels': []
+                },
+                'content': {
+                    'article': {
+                        'source': source_url,
+                        'title': title,
+                        'description': content[:125]  # Truncate to 125 chars for description
+                    }
+                },
+                'lifecycleState': 'PUBLISHED',
+                'isReshareDisabledByAuthor': False
+            }
+
+            # Create post
+            response = requests.post(
+                f"{self.base_url}/rest/posts",
+                headers=headers,
+                json=body
+            )
+            response.raise_for_status()
+            post_id = response.headers.get('x-restli-id', 'N/A')
+            return {'id': post_id}
+        except Exception as e:
+            st.error(f"LinkedIn API Error (post_article): {str(e)}")
             return None
 
     def search_posts(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:

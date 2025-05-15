@@ -7,7 +7,7 @@ from datetime import datetime as date
 import requests
 import jwt
 import markdown2
-from lib.social_api import GhostAPI
+from lib.social_api import GhostAPI, LinkedinAPI
 from widgets.random_article import RandomArticleWidget
 
 translations["en"].update({
@@ -26,7 +26,13 @@ translations["en"].update({
     "ghost_config_url_default": "https://your-site.com/ghost/api/admin/",
     "ghost_image_label": "Feature Image",
     "ghost_load_generated": "Load Generated Article",
-    "ghost_include_url": "Include Source URL"
+    "ghost_include_url": "Include Source URL",
+    "linkedin_tab": "LinkedIn Publisher",
+    "linkedin_header": "Publish to LinkedIn",
+    "linkedin_publish_button": "Publish to LinkedIn",
+    "linkedin_processing": "Publishing to LinkedIn...",
+    "linkedin_success": "Published successfully! Post ID: {result}",
+    "linkedin_error": "Publishing failed: {error}"
 })
 
 translations["fr"].update({
@@ -45,13 +51,20 @@ translations["fr"].update({
     "ghost_config_url_default": "https://votre-site.com/ghost/api/admin/",
     "ghost_image_label": "Image de mise en avant",
     "ghost_load_generated": "Charger l'Article Généré",
-    "ghost_include_url": "Inclure l'URL Source"
+    "ghost_include_url": "Inclure l'URL Source",
+    "linkedin_tab": "Publicateur LinkedIn",
+    "linkedin_header": "Publier sur LinkedIn",
+    "linkedin_publish_button": "Publier sur LinkedIn",
+    "linkedin_processing": "Publication sur LinkedIn...",
+    "linkedin_success": "Publié avec succès ! ID du post : {result}",
+    "linkedin_error": "Échec de la publication : {error}"
 })
 
 class PromoteghostPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.ghost_api = GhostAPI(plugin_manager.config)
+        self.linkedin_api = LinkedinAPI(plugin_manager.config)
         self.work_dir = self.work_dir()
 
     def get_config_fields(self):
@@ -79,20 +92,24 @@ class PromoteghostPlugin(Plugin):
         }
 
     def get_tabs(self):
-        return [{"name": t("ghost_tab"), "plugin": "ghostplugin"}, {"name": t("randomarticle_tab"), "plugin": "randomarticle"}]
+        return [
+            {"name": t("ghost_tab"), "plugin": "ghostplugin"},
+            {"name": t("randomarticle_tab"), "plugin": "randomarticle"},
+            {"name": t("linkedin_tab"), "plugin": "linkedinplugin"}
+        ]
 
     def run(self, config):
-        tab1, tab2 = st.tabs([t("ghost_tab"), t("randomarticle_tab")])
+        tab1, tab2, tab3 = st.tabs([t("ghost_tab"), t("randomarticle_tab"), t("linkedin_tab")])
+
+        # Ghost Publisher Tab
         with tab1:
             st.header(t("ghost_header"))
 
-            # Initialize default values
             default_title = "New Post"
             default_content = ""
             default_image_path = None
             default_url = ""
 
-            # Check for generated article
             article_path = os.path.join(self.work_dir, "article.md")
             image_path = os.path.join(self.work_dir, "image.png")
             url_path = os.path.join(self.work_dir, "url.txt")
@@ -111,14 +128,12 @@ class PromoteghostPlugin(Plugin):
                     with open(url_path, "r", encoding="utf-8") as f:
                         default_url = f.read().strip()
 
-            # Load generated article button
-            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="load_generated"):
+            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="ghost_load_generated"):
                 st.session_state["ghost_title"] = default_title
                 st.session_state["ghost_content"] = default_content
                 st.session_state["ghost_image_path"] = default_image_path
                 st.session_state["ghost_url"] = default_url
 
-            # Input fields with session state
             post_title = st.text_input(
                 t("ghost_title_label"),
                 value=st.session_state.get("ghost_title", default_title),
@@ -132,19 +147,18 @@ class PromoteghostPlugin(Plugin):
                 key="ghost_content"
             )
 
-            # Image display and upload
             st.subheader(t("ghost_image_label"))
-            uploaded_image = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"], key="ghost_image_upload")
+            uploaded_image = st.file_uploader("Upload an image (Ghost)", type=["png", "jpg", "jpeg"], key="ghost_image_upload")
             selected_image_path = st.session_state.get("ghost_image_path", default_image_path)
 
             if uploaded_image:
-                selected_image_path = os.path.join(self.work_dir, "uploaded_image.png")
+                selected_image_path = os.path.join(self.work_dir, "ghost_uploaded_image.png")
                 with open(selected_image_path, "wb") as f:
                     f.write(uploaded_image.getbuffer())
                 st.session_state["ghost_image_path"] = selected_image_path
 
             if selected_image_path:
-                st.image(selected_image_path, caption="Selected Image", use_container_width=True)
+                st.image(selected_image_path, caption="Selected Image (Ghost)", use_container_width=True)
 
             publish_immediately = st.checkbox(t("ghost_publish_checkbox"), key="ghost_publish_immediately")
 
@@ -161,7 +175,6 @@ class PromoteghostPlugin(Plugin):
                         if response:
                             post_id = response.get('posts', [{}])[0].get('id', 'N/A')
                             st.success(t("ghost_success").format(result=post_id))
-                            # Clear session state after successful publish
                             for key in ["ghost_title", "ghost_content", "ghost_image_path", "ghost_url"]:
                                 if key in st.session_state:
                                     del st.session_state[key]
@@ -169,5 +182,84 @@ class PromoteghostPlugin(Plugin):
                             st.error(t("ghost_error").format(error="Unknown error"))
                     except Exception as e:
                         st.error(t("ghost_error").format(error=str(e)))
+
+        # Random Article Tab
         with tab2:
             RandomArticleWidget("randomarticle", "randomarticle", self.plugin_manager).display(config)
+
+        # LinkedIn Publisher Tab
+        with tab3:
+            st.header(t("linkedin_header"))
+
+            default_title = "New Post"
+            default_content = ""
+            default_image_path = None
+            default_url = ""
+
+            if os.path.exists(article_path):
+                with open(article_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    lines = content.split("\n", 1)
+                    if lines[0].startswith("# "):
+                        default_title = lines[0][2:].strip()
+                        default_content = lines[1] if len(lines) > 1 else ""
+                    else:
+                        default_content = content
+                if os.path.exists(image_path):
+                    default_image_path = image_path
+                if os.path.exists(url_path):
+                    with open(url_path, "r", encoding="utf-8") as f:
+                        default_url = f.read().strip()
+
+            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="linkedin_load_generated"):
+                st.session_state["linkedin_title"] = default_title
+                st.session_state["linkedin_content"] = default_content
+                st.session_state["linkedin_image_path"] = default_image_path
+                st.session_state["linkedin_url"] = default_url
+
+            post_title = st.text_input(
+                t("ghost_title_label"),
+                value=st.session_state.get("linkedin_title", default_title),
+                key="linkedin_title"
+            )
+            include_url = st.checkbox(t("ghost_include_url"), value=False, key="linkedin_include_url")
+            markdown_content = st.text_area(
+                t("ghost_input_label"),
+                value=st.session_state.get("linkedin_content", default_content) + (f"\n\nSource: {st.session_state.get('linkedin_url', default_url)}" if include_url and st.session_state.get('linkedin_url', default_url) else ""),
+                height=300,
+                key="linkedin_content"
+            )
+
+            st.subheader(t("ghost_image_label"))
+            uploaded_image = st.file_uploader("Upload an image (LinkedIn)", type=["png", "jpg", "jpeg"], key="linkedin_image_upload")
+            selected_image_path = st.session_state.get("linkedin_image_path", default_image_path)
+
+            if uploaded_image:
+                selected_image_path = os.path.join(self.work_dir, "linkedin_uploaded_image.png")
+                with open(selected_image_path, "wb") as f:
+                    f.write(uploaded_image.getbuffer())
+                st.session_state["linkedin_image_path"] = selected_image_path
+
+            if selected_image_path:
+                st.image(selected_image_path, caption="Selected Image (LinkedIn)", use_container_width=True)
+
+            if st.button(t("linkedin_publish_button"), key="linkedin_publish"):
+                with st.spinner(t("linkedin_processing")):
+                    try:
+                        response = self.linkedin_api.post_article(
+                            post_title,
+                            markdown_content,
+                            source_url=default_url,
+                            feature_image=selected_image_path
+                        )
+                        if response:
+                            post_id = response.get('id', 'N/A')
+                            st.success(t("linkedin_success").format(result=post_id))
+                            for key in ["linkedin_title", "linkedin_content", "linkedin_image_path", "linkedin_url"]:
+                                if key in st.session_state:
+                                    del st.session_state[key]
+                        else:
+                            st.error(t("linkedin_error").format(error="Unknown error"))
+                    except Exception as e:
+                        st.error(t("linkedin_error").format(error=str(e)))
+                        raise e
