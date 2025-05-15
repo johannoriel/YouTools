@@ -25,7 +25,8 @@ translations["en"].update({
     "ghost_config_api_key_default": "your_api_key",
     "ghost_config_url_default": "https://your-site.com/ghost/api/admin/",
     "ghost_image_label": "Feature Image",
-    "ghost_load_generated": "Load Generated Article"
+    "ghost_load_generated": "Load Generated Article",
+    "ghost_include_url": "Include Source URL"
 })
 
 translations["fr"].update({
@@ -43,7 +44,8 @@ translations["fr"].update({
     "ghost_config_api_key_default": "votre_clé_api",
     "ghost_config_url_default": "https://votre-site.com/ghost/api/admin/",
     "ghost_image_label": "Image de mise en avant",
-    "ghost_load_generated": "Charger l'Article Généré"
+    "ghost_load_generated": "Charger l'Article Généré",
+    "ghost_include_url": "Inclure l'URL Source"
 })
 
 class PromoteghostPlugin(Plugin):
@@ -88,14 +90,15 @@ class PromoteghostPlugin(Plugin):
             default_title = "New Post"
             default_content = ""
             default_image_path = None
+            default_url = ""
 
             # Check for generated article
             article_path = os.path.join(self.work_dir, "article.md")
             image_path = os.path.join(self.work_dir, "image.png")
+            url_path = os.path.join(self.work_dir, "url.txt")
             if os.path.exists(article_path):
                 with open(article_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                    # Extract title (assuming first line is # Title)
                     lines = content.split("\n", 1)
                     if lines[0].startswith("# "):
                         default_title = lines[0][2:].strip()
@@ -104,22 +107,27 @@ class PromoteghostPlugin(Plugin):
                         default_content = content
                 if os.path.exists(image_path):
                     default_image_path = image_path
+                if os.path.exists(url_path):
+                    with open(url_path, "r", encoding="utf-8") as f:
+                        default_url = f.read().strip()
 
             # Load generated article button
             if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="load_generated"):
                 st.session_state["ghost_title"] = default_title
                 st.session_state["ghost_content"] = default_content
                 st.session_state["ghost_image_path"] = default_image_path
+                st.session_state["ghost_url"] = default_url
 
-            # Input fields with session state to persist edits
+            # Input fields with session state
             post_title = st.text_input(
                 t("ghost_title_label"),
                 value=st.session_state.get("ghost_title", default_title),
                 key="ghost_title"
             )
+            include_url = st.checkbox(t("ghost_include_url"), value=False, key="ghost_include_url")
             markdown_content = st.text_area(
                 t("ghost_input_label"),
-                value=st.session_state.get("ghost_content", default_content),
+                value=st.session_state.get("ghost_content", default_content) + (f"\n\nSource: {st.session_state.get('ghost_url', default_url)}" if include_url and st.session_state.get('ghost_url', default_url) else ""),
                 height=300,
                 key="ghost_content"
             )
@@ -141,7 +149,7 @@ class PromoteghostPlugin(Plugin):
             publish_immediately = st.checkbox(t("ghost_publish_checkbox"), key="ghost_publish_immediately")
 
             if st.button(t("ghost_publish_button"), key="ghost_publish"):
-                with burners:
+                with st.spinner(t("ghost_processing")):
                     try:
                         html_content = markdown2.markdown(markdown_content)
                         response = self.ghost_api.post(
@@ -154,7 +162,7 @@ class PromoteghostPlugin(Plugin):
                             post_id = response.get('posts', [{}])[0].get('id', 'N/A')
                             st.success(t("ghost_success").format(result=post_id))
                             # Clear session state after successful publish
-                            for key in ["ghost_title", "ghost_content", "ghost_image_path"]:
+                            for key in ["ghost_title", "ghost_content", "ghost_image_path", "ghost_url"]:
                                 if key in st.session_state:
                                     del st.session_state[key]
                         else:

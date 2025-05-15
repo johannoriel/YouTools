@@ -2,7 +2,7 @@ from lib.global_vars import translations, t
 from app import Widget
 import streamlit as st
 from typing import Dict, Any
-from widgets.subject_selector import SubjectSelectorWidget  # Updated to use SubjectSelectorWidget
+from widgets.subject_selector import SubjectSelectorWidget
 from widgets.image_generator import ImageGeneratorWidget
 import os
 
@@ -53,7 +53,8 @@ class RandomArticleWidget(Widget):
             'title': product['title'],
             'content': llm_response,
             'image_prompt': '',
-            'image_path': ''
+            'image_path': '',
+            'url': product.get('url', '')
         }
 
         # Generate image if enabled
@@ -79,10 +80,15 @@ class RandomArticleWidget(Widget):
 
         # Save article
         work_dir = self.work_dir()
-        output_article_path = os.path.join(work_dir, "article.md")
         os.makedirs(work_dir, exist_ok=True)
+        output_article_path = os.path.join(work_dir, "article.md")
         with open(output_article_path, "w", encoding="utf-8") as f:
             f.write(f"# {product['title']}\n\n{llm_response}")
+
+        # Save URL
+        output_url_path = os.path.join(work_dir, "url.txt")
+        with open(output_url_path, "w", encoding="utf-8") as f:
+            f.write(product.get('url', ''))
 
         return result
 
@@ -98,7 +104,7 @@ class RandomArticleWidget(Widget):
 
         st.write(f"**{t('randomarticle_selected_product')}**: {selected_product['title']}")
         st.write(f"**{t('randomarticle_keywords')}**: {selected_product['keywords']}")
-        st.markdown(f"**{t('randomarticle_content')}**: {selected_product['content'][:1000]}{'...' if len(selected_product['content']) > 1000 else ''}")
+        #st.markdown(f"**{t('randomarticle_content')}**: {selected_product['content'][:1000]}{'...' if len(selected_product['content']) > 1000 else ''}")
 
         prompt = st.text_area(
             t("randomarticle_prompt"),
