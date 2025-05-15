@@ -24,7 +24,9 @@ translations["en"].update({
     "subjectselector_use_whole": "Use Entire Selection",
     "subjectselector_extract_subject": "Extract Random Subject",
     "subjectselector_extracting": "Extracting subject...",
-    "subjectselector_no_content": "No content available for subject extraction."
+    "subjectselector_no_content": "No content available for subject extraction.",
+    "subjectselector_show_all": "Show Full Content",
+    "subjectselector_final_content": "Final Selected Content"
 })
 
 translations["fr"].update({
@@ -43,7 +45,9 @@ translations["fr"].update({
     "subjectselector_use_whole": "Utiliser la Sélection Entière",
     "subjectselector_extract_subject": "Extraire un Sujet Aléatoire",
     "subjectselector_extracting": "Extraction du sujet...",
-    "subjectselector_no_content": "Aucun contenu disponible pour l'extraction de sujet."
+    "subjectselector_no_content": "Aucun contenu disponible pour l'extraction de sujet.",
+    "subjectselector_show_all": "Afficher le Contenu Complet",
+    "subjectselector_final_content": "Contenu Final Sélectionné"
 })
 
 class SubjectSelectorWidget(Widget):
@@ -58,7 +62,8 @@ class SubjectSelectorWidget(Widget):
             f'{self.prefix}_selected_product',
             f'{self.prefix}_selected_chapter',
             f'{self.prefix}_selected_subchapter',
-            f'{self.prefix}_selected_content'
+            f'{self.prefix}_selected_content',
+            f'{self.prefix}_final_content'
         ]
         for key in state_keys:
             if key not in st.session_state:
@@ -67,9 +72,8 @@ class SubjectSelectorWidget(Widget):
     def _extract_chapters(self, content: str) -> List[Dict[str, Any]]:
         """Extract chapters from content based on markdown headers (##)."""
         chapters = []
-        # Split content by ## headers
         sections = re.split(r'(^##\s+.*$)', content, flags=re.MULTILINE)
-        for i in range(1, len(sections), 2):  # Start from 1 to get headers
+        for i in range(1, len(sections), 2):
             title = sections[i].replace('##', '').strip()
             chapter_content = sections[i + 1].strip() if i + 1 < len(sections) else ""
             chapters.append({
@@ -97,7 +101,6 @@ class SubjectSelectorWidget(Widget):
         """Extract keywords from content (simple word frequency-based approach)."""
         words = re.findall(r'\b\w+\b', content.lower())
         word_counts = Counter(words)
-        # Filter out common stop words (simplified list)
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
         keywords = [word for word, count in word_counts.most_common(10) if word not in stop_words and len(word) > 3]
         return ', '.join(keywords)
@@ -123,10 +126,9 @@ class SubjectSelectorWidget(Widget):
             "Format the response as: Title: <title>\nSummary: <summary>\nKeywords: <keywords>"
         )
         response = self.process_with_llm(
-            f"Title: {title}\nContent: {content[:2000]}",  # Limit content to avoid LLM token limits
+            f"Title: {title}\nContent: {content[:2000]}",
             sysprompt=prompt
         )
-        # Parse response
         lines = response.split('\n')
         subject_title = title
         subject_content = ""
@@ -160,6 +162,7 @@ class SubjectSelectorWidget(Widget):
             st.session_state[f'{self.prefix}_selected_chapter'] = None
             st.session_state[f'{self.prefix}_selected_subchapter'] = None
             st.session_state[f'{self.prefix}_selected_content'] = None
+            st.session_state[f'{self.prefix}_final_content'] = None
 
         # Step 2: Display product stats and excerpt
         product_stats = self._get_content_stats(selected_product['content'])
@@ -171,121 +174,148 @@ class SubjectSelectorWidget(Widget):
             subchapters=product_stats['subchapters']
         ))
         with st.expander("Product Excerpt"):
-            st.markdown(selected_product['content'][:1000] + ('...' if len(selected_product['content']) > 1000 else ''))
+            show_all_product = st.checkbox(t("subjectselector_show_all"), key=f"{self.prefix}_show_all_product")
+            excerpt_length = None if show_all_product else 3000
+            st.markdown(selected_product['content'][:excerpt_length] + ('...' if excerpt_length and len(selected_product['content']) > excerpt_length else ''))
 
         col1, col2 = st.columns([3, 1])
         with col1:
             if st.button(t("subjectselector_use_whole"), key=f"{self.prefix}_use_product"):
                 st.session_state[f'{self.prefix}_selected_content'] = selected_product
-                return selected_product
+                st.session_state[f'{self.prefix}_final_content'] = f"# {selected_product['title']}\n\n{selected_product['content']}"
         with col2:
             if st.button(t("subjectselector_extract_subject"), key=f"{self.prefix}_extract_product_subject"):
                 with st.spinner(t("subjectselector_extracting")):
                     subject = self._extract_random_subject(selected_product['content'], selected_product['title'])
                     st.session_state[f'{self.prefix}_selected_content'] = subject
-                    return subject
+                    st.session_state[f'{self.prefix}_final_content'] = f"# {subject['title']}\n\n{subject['content']}"
 
         # Step 3: Chapter selection (if chapters exist)
         chapters = self._extract_chapters(selected_product['content'])
-        if not chapters:
-            st.info(t("subjectselector_no_chapters"))
-            return selected_product if st.session_state.get(f'{self.prefix}_selected_content') == selected_product else None
+        if chapters:
+            chapter_titles = [ch['title'] for ch in chapters]
+            default_chapter = st.session_state.get(f'{self.prefix}_selected_chapter')
+            default_index = chapter_titles.index(default_chapter['title']) if default_chapter and default_chapter['title'] in chapter_titles else 0
 
-        chapter_titles = [ch['title'] for ch in chapters]
-        default_chapter = st.session_state.get(f'{self.prefix}_selected_chapter')
-        default_index = chapter_titles.index(default_chapter['title']) if default_chapter and default_chapter['title'] in chapter_titles else 0
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                selected_chapter_title = st.selectbox(
+                    t("subjectselector_select_chapter"),
+                    options=chapter_titles,
+                    index=default_index,
+                    key=f"{self.prefix}_chapter_select"
+                )
+            with col2:
+                if st.button(t("subjectselector_random_chapter"), key=f"{self.prefix}_random_chapter"):
+                    selected_chapter = random.choice(chapters)
+                    st.session_state[f'{self.prefix}_selected_chapter'] = selected_chapter
+                    st.session_state[f'{self.prefix}_selected_subchapter'] = None
+                    st.rerun()
 
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            selected_chapter_title = st.selectbox(
-                t("subjectselector_select_chapter"),
-                options=chapter_titles,
-                index=default_index,
-                key=f"{self.prefix}_chapter_select"
-            )
-        with col2:
-            if st.button(t("subjectselector_random_chapter"), key=f"{self.prefix}_random_chapter"):
-                selected_chapter = random.choice(chapters)
+            selected_chapter = next((ch for ch in chapters if ch['title'] == selected_chapter_title), chapters[0])
+            if selected_chapter != st.session_state.get(f'{self.prefix}_selected_chapter'):
                 st.session_state[f'{self.prefix}_selected_chapter'] = selected_chapter
                 st.session_state[f'{self.prefix}_selected_subchapter'] = None
-                st.rerun()
 
-        selected_chapter = next((ch for ch in chapters if ch['title'] == selected_chapter_title), chapters[0])
-        if selected_chapter != st.session_state.get(f'{self.prefix}_selected_chapter'):
-            st.session_state[f'{self.prefix}_selected_chapter'] = selected_chapter
-            st.session_state[f'{self.prefix}_selected_subchapter'] = None
+            # Display chapter stats and excerpt
+            chapter_stats = self._get_content_stats(selected_chapter['content'])
+            st.subheader(t("subjectselector_chapter_stats").format(
+                title=selected_chapter['title'],
+                chars=chapter_stats['chars'],
+                words=chapter_stats['words'],
+                subchapters=chapter_stats['subchapters']
+            ))
+            with st.expander("Chapter Excerpt"):
+                show_all_chapter = st.checkbox(t("subjectselector_show_all"), key=f"{self.prefix}_show_all_chapter")
+                excerpt_length = None if show_all_chapter else 3000
+                st.markdown(selected_chapter['content'][:excerpt_length] + ('...' if excerpt_length and len(selected_chapter['content']) > excerpt_length else ''))
 
-        # Display chapter stats and excerpt
-        chapter_stats = self._get_content_stats(selected_chapter['content'])
-        st.subheader(t("subjectselector_chapter_stats").format(
-            title=selected_chapter['title'],
-            chars=chapter_stats['chars'],
-            words=chapter_stats['words'],
-            subchapters=chapter_stats['subchapters']
-        ))
-        with st.expander("Chapter Excerpt"):
-            st.markdown(selected_chapter['content'][:1000] + ('...' if len(selected_chapter['content']) > 1000 else ''))
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if st.button(t("subjectselector_use_whole"), key=f"{self.prefix}_use_chapter"):
+                    st.session_state[f'{self.prefix}_selected_content'] = selected_chapter
+                    st.session_state[f'{self.prefix}_final_content'] = f"# {selected_chapter['title']}\n\n{selected_chapter['content']}"
+            with col2:
+                if st.button(t("subjectselector_extract_subject"), key=f"{self.prefix}_extract_chapter_subject"):
+                    with st.spinner(t("subjectselector_extracting")):
+                        subject = self._extract_random_subject(selected_chapter['content'], selected_chapter['title'])
+                        st.session_state[f'{self.prefix}_selected_content'] = subject
+                        st.session_state[f'{self.prefix}_final_content'] = f"# {subject['title']}\n\n{subject['content']}"
 
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            if st.button(t("subjectselector_use_whole"), key=f"{self.prefix}_use_chapter"):
-                st.session_state[f'{self.prefix}_selected_content'] = selected_chapter
-                return selected_chapter
-        with col2:
-            if st.button(t("subjectselector_extract_subject"), key=f"{self.prefix}_extract_chapter_subject"):
-                with st.spinner(t("subjectselector_extracting")):
-                    subject = self._extract_random_subject(selected_chapter['content'], selected_chapter['title'])
-                    st.session_state[f'{self.prefix}_selected_content'] = subject
-                    return subject
+            # Step 4: Subchapter selection (if subchapters exist)
+            subchapters = self._extract_subchapters(selected_chapter['content'])
+            if subchapters:
+                subchapter_titles = [sc['title'] for sc in subchapters]
+                default_subchapter = st.session_state.get(f'{self.prefix}_selected_subchapter')
+                default_index = subchapter_titles.index(default_subchapter['title']) if default_subchapter and default_subchapter['title'] in subchapter_titles else 0
 
-        # Step 4: Subchapter selection (if subchapters exist)
-        subchapters = self._extract_subchapters(selected_chapter['content'])
-        if not subchapters:
-            st.info(t("subjectselector_no_subchapters"))
-            return selected_chapter if st.session_state.get(f'{self.prefix}_selected_content') == selected_chapter else None
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    selected_subchapter_title = st.selectbox(
+                        t("subjectselector_select_subchapter"),
+                        options=subchapter_titles,
+                        index=default_index,
+                        key=f"{self.prefix}_subchapter_select"
+                    )
+                with col2:
+                    if st.button(t("subjectselector_random_subchapter"), key=f"{self.prefix}_random_subchapter"):
+                        selected_subchapter = random.choice(subchapters)
+                        st.session_state[f'{self.prefix}_selected_subchapter'] = selected_subchapter
+                        st.rerun()
 
-        subchapter_titles = [sc['title'] for sc in subchapters]
-        default_subchapter = st.session_state.get(f'{self.prefix}_selected_subchapter')
-        default_index = subchapter_titles.index(default_subchapter['title']) if default_subchapter and default_subchapter['title'] in subchapter_titles else 0
+                selected_subchapter = next((sc for sc in subchapters if sc['title'] == selected_subchapter_title), subchapters[0])
+                if selected_subchapter != st.session_state.get(f'{self.prefix}_selected_subchapter'):
+                    st.session_state[f'{self.prefix}_selected_subchapter'] = selected_subchapter
 
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            selected_subchapter_title = st.selectbox(
-                t("subjectselector_select_subchapter"),
-                options=subchapter_titles,
-                index=default_index,
-                key=f"{self.prefix}_subchapter_select"
+                # Display subchapter stats and excerpt
+                subchapter_stats = self._get_content_stats(selected_subchapter['content'])
+                st.subheader(t("subjectselector_subchapter_stats").format(
+                    title=selected_subchapter['title'],
+                    chars=subchapter_stats['chars'],
+                    words=subchapter_stats['words']
+                ))
+                with st.expander("Subchapter Excerpt"):
+                    show_all_subchapter = st.checkbox(t("subjectselector_show_all"), key=f"{self.prefix}_show_all_subchapter")
+                    excerpt_length = None if show_all_subchapter else 3000
+                    st.markdown(selected_subchapter['content'][:excerpt_length] + ('...' if excerpt_length and len(selected_subchapter['content']) > excerpt_length else ''))
+
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    if st.button(t("subjectselector_use_whole"), key=f"{self.prefix}_use_subchapter"):
+                        st.session_state[f'{self.prefix}_selected_content'] = selected_subchapter
+                        st.session_state[f'{self.prefix}_final_content'] = f"# {selected_subchapter['title']}\n\n{selected_subchapter['content']}"
+                with col2:
+                    if st.button(t("subjectselector_extract_subject"), key=f"{self.prefix}_extract_subchapter_subject"):
+                        with st.spinner(t("subjectselector_extracting")):
+                            subject = self._extract_random_subject(selected_subchapter['content'], selected_subchapter['title'])
+                            st.session_state[f'{self.prefix}_selected_content'] = subject
+                            st.session_state[f'{self.prefix}_final_content'] = f"# {subject['title']}\n\n{subject['content']}"
+
+        else:
+            st.info(t("subjectselector_no_chapters"))
+
+        # Display final editable content
+        if st.session_state.get(f'{self.prefix}_selected_content'):
+            st.subheader(t("subjectselector_final_content"))
+            final_content = st.text_area(
+                t("subjectselector_final_content"),
+                value=st.session_state[f'{self.prefix}_final_content'] or "",
+                height=300,
+                key=f"{self.prefix}_final_content_area"
             )
-        with col2:
-            if st.button(t("subjectselector_random_subchapter"), key=f"{self.prefix}_random_subchapter"):
-                selected_subchapter = random.choice(subchapters)
-                st.session_state[f'{self.prefix}_selected_subchapter'] = selected_subchapter
-                st.rerun()
+            # Update session state with edited content
+            if final_content != st.session_state[f'{self.prefix}_final_content']:
+                st.session_state[f'{self.prefix}_final_content'] = final_content
+                # Parse edited content to update selected_content
+                lines = final_content.split('\n', 1)
+                title = lines[0].replace('#', '').strip() if lines[0].startswith('#') else st.session_state[f'{self.prefix}_selected_content']['title']
+                content = lines[1].strip() if len(lines) > 1 else final_content
+                st.session_state[f'{self.prefix}_selected_content'] = {
+                    'title': title,
+                    'content': content,
+                    'keywords': st.session_state[f'{self.prefix}_selected_content']['keywords']
+                }
 
-        selected_subchapter = next((sc for sc in subchapters if sc['title'] == selected_subchapter_title), subchapters[0])
-        if selected_subchapter != st.session_state.get(f'{self.prefix}_selected_subchapter'):
-            st.session_state[f'{self.prefix}_selected_subchapter'] = selected_subchapter
+            return st.session_state[f'{self.prefix}_selected_content']
 
-        # Display subchapter stats and excerpt
-        subchapter_stats = self._get_content_stats(selected_subchapter['content'])
-        st.subheader(t("subjectselector_subchapter_stats").format(
-            title=selected_subchapter['title'],
-            chars=subchapter_stats['chars'],
-            words=subchapter_stats['words']
-        ))
-        with st.expander("Subchapter Excerpt"):
-            st.markdown(selected_subchapter['content'][:1000] + ('...' if len(selected_subchapter['content']) > 1000 else ''))
-
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            if st.button(t("subjectselector_use_whole"), key=f"{self.prefix}_use_subchapter"):
-                st.session_state[f'{self.prefix}_selected_content'] = selected_subchapter
-                return selected_subchapter
-        with col2:
-            if st.button(t("subjectselector_extract_subject"), key=f"{self.prefix}_extract_subchapter_subject"):
-                with st.spinner(t("subjectselector_extracting")):
-                    subject = self._extract_random_subject(selected_subchapter['content'], selected_subchapter['title'])
-                    st.session_state[f'{self.prefix}_selected_content'] = subject
-                    return subject
-
-        return st.session_state.get(f'{self.prefix}_selected_content')
+        return None
