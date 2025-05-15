@@ -672,7 +672,6 @@ class GhostAPI:
             st.error(f"Ghost: {str(e)}")
             return None
 
-
 class LinkedinAPI:
     def __init__(self, config):
         self.client_id = config['common']['linkedin_client_id']
@@ -681,7 +680,7 @@ class LinkedinAPI:
         self.access_token = config['common']['linkedin_access_token']
         self.redirect_uri = config['common'].get('linkedin_redirect_uri', 'https://your-app.com/callback')
         self.api_version = config['common'].get('linkedin_api_version', '202504')  # Default to 202504
-        self.person_urn = None
+        self.person_urn = None  # Will be set by _get_person_urn
 
     def _get_access_token(self, code: Optional[str] = None, refresh_token: Optional[str] = None) -> Optional[str]:
         """
@@ -742,12 +741,13 @@ class LinkedinAPI:
             st.error(f"LinkedIn API Error (get_person_urn): {str(e)}")
             return None
 
-    def post_article(self, title: str, content: str, source_url: Optional[str] = None, feature_image=None) -> Optional[Dict[str, Any]]:
+    def post_article(self, title: str, content: str, source_url: Optional[str] = None, feature_image: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Publishes an article using the Posts API without images.
+        Publishes an article using the Posts API, with optional image upload.
         :param title: Article title.
         :param content: Article content (plain text or markdown, max 3000 characters).
         :param source_url: URL of the article source (optional, defaults to empty string).
+        :param feature_image: Path to the image file (optional).
         :return: API response or None if the request fails.
         """
         try:
@@ -764,6 +764,37 @@ class LinkedinAPI:
                 'Content-Type': 'application/json',
                 'X-Li-Pem-Metadata': 'w_member_social'
             }
+
+            # Upload image if provided
+            image_urn = None
+            if feature_image and os.path.exists(feature_image):
+                # Validate image file type
+                ext = os.path.splitext(feature_image)[1].lower()
+                if ext not in ['.png', '.jpg', '.jpeg', '.gif']:
+                    st.error("Unsupported image format. Use PNG, JPEG, or GIF.")
+                    return None
+
+                # Initialize image upload
+                init_url = f"{self.base_url}/rest/images?action=initializeUpload"
+                init_body = {
+                    'initializeUploadRequest': {
+                        'owner': self.person_urn
+                    }
+                }
+                init_response = requests.post(init_url, headers=headers, json=init_body)
+                init_response.raise_for_status()
+                init_data = init_response.json()['value']
+                upload_url = init_data['uploadUrl']
+                image_urn = init_data['image']
+
+                # Upload image file
+                with open(feature_image, 'rb') as f:
+                    upload_headers = {
+                        'Authorization': f'Bearer {self.access_token}',
+                        'Content-Type': f"image/{ext.lstrip('.')}"
+                    }
+                    upload_response = requests.put(upload_url, headers=upload_headers, data=f)
+                    upload_response.raise_for_status()
 
             # Truncate content to 3000 characters (LinkedIn limit)
             content = content[:3000]
@@ -791,6 +822,10 @@ class LinkedinAPI:
                 'isReshareDisabledByAuthor': False
             }
 
+            # Add thumbnail if image was uploaded
+            if image_urn:
+                body['content']['article']['thumbnail'] = image_urn
+
             # Create post
             response = requests.post(
                 f"{self.base_url}/rest/posts",
@@ -802,20 +837,23 @@ class LinkedinAPI:
             return {'id': post_id}
         except Exception as e:
             st.error(f"LinkedIn API Error (post_article): {str(e)}")
+            if isinstance(e, requests.exceptions.HTTPError):
+                st.error(f"Response: {e.response.json()}")
             return None
 
     def search_posts(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
         """
-        Recherche des posts sur LinkedIn en fonction des mots-clés.
-        :param query: Mots-clés de recherche
-        :param max_results: Nombre maximum de posts à récupérer
-        :param language: Langue des posts à rechercher (par défaut "fr")
-        :return: Liste des posts trouvés
+        Searches for posts on LinkedIn based on keywords.
+        :param query: Search keywords.
+        :param max_results: Maximum number of posts to retrieve.
+        :param language: Language of posts to search (default "fr").
+        :return: List of found posts.
         """
         try:
             headers = {
                 'Authorization': f'Bearer {self.access_token}',
-                'X-Restli-Protocol-Version': '2.0.0'
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': self.api_version
             }
             params = {
                 'q': query,
@@ -824,7 +862,7 @@ class LinkedinAPI:
                 'locale.language': language
             }
             response = requests.get(
-                f"{self.base_url}/search", headers=headers, params=params)
+                f"{self.base_url}/v2/search", headers=headers, params=params)
             response.raise_for_status()
             posts = response.json().get('elements', [])
 
@@ -840,23 +878,24 @@ class LinkedinAPI:
 
             return formatted_posts
         except Exception as e:
-            print(f"LinkedIn API Error (search_posts): {str(e)}")
+            st.error(f"LinkedIn API Error (search_posts): {str(e)}")
             return []
 
     def get_post_comments(self, post_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
         """
-        Récupère les commentaires d'un post LinkedIn.
-        :param post_id: ID du post
-        :param max_results: Nombre maximum de commentaires à récupérer
-        :return: Liste des commentaires
+        Retrieves comments for a LinkedIn post.
+        :param post_id: ID of the post.
+        :param max_results: Maximum number of comments to retrieve.
+        :return: List of comments.
         """
         try:
             headers = {
                 'Authorization': f'Bearer {self.access_token}',
-                'X-Restli-Protocol-Version': '2.0.0'
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': self.api_version
             }
             response = requests.get(
-                f"{self.base_url}/socialActions/{post_id}/comments", headers=headers)
+                f"{self.base_url}/v2/socialActions/{post_id}/comments", headers=headers)
             response.raise_for_status()
             comments = response.json().get('elements', [])
 
@@ -871,32 +910,40 @@ class LinkedinAPI:
 
             return formatted_comments[:max_results]
         except Exception as e:
-            print(f"LinkedIn API Error (get_post_comments): {str(e)}")
+            st.error(f"LinkedIn API Error (get_post_comments): {str(e)}")
             return []
 
     def post_comment(self, post_id: str, text: str) -> Optional[Dict[str, Any]]:
         """
-        Poste un commentaire sur un post LinkedIn.
-        :param post_id: ID du post
-        :param text: Texte du commentaire
-        :return: Réponse de l'API
+        Posts a comment on a LinkedIn post.
+        :param post_id: ID of the post.
+        :param text: Comment text.
+        :return: API response or None if the request fails.
         """
         try:
+            if not self.person_urn:
+                self.person_urn = self._get_person_urn()
+                if not self.person_urn:
+                    return None
+
             headers = {
                 'Authorization': f'Bearer {self.access_token}',
-                'X-Restli-Protocol-Version': '2.0.0'
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': self.api_version,
+                'Content-Type': 'application/json',
+                'X-Li-Pem-Metadata': 'w_member_social'
             }
             body = {
-                'actor': f"urn:li:person:{self.client_id}",
+                'actor': self.person_urn,
                 'message': {
                     'text': text
                 },
                 'object': f"urn:li:share:{post_id}"
             }
             response = requests.post(
-                f"{self.base_url}/socialActions/{post_id}/comments", headers=headers, json=body)
+                f"{self.base_url}/v2/socialActions/{post_id}/comments", headers=headers, json=body)
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(f"LinkedIn API Error (post_comment): {str(e)}")
+            st.error(f"LinkedIn API Error (post_comment): {str(e)}")
             return None
