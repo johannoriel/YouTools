@@ -191,7 +191,7 @@ class YoutubeTranscriptWidget(Widget):
                 if st.button(t("transcript_summary_button"), key=f"{self.prefix}_summary"):
                     with st.spinner("Generating summary..."):
                         summary = self.summarize_transcript(transcript)
-                        st.session_state[f"{self.prefix}_summary"] = summary
+                        st.session_state[f"{self.prefix}_summary_result"] = summary
 
             # Question button and input
             with col2:
@@ -210,7 +210,7 @@ class YoutubeTranscriptWidget(Widget):
             # Display summary if available
             if f"{self.prefix}_summary" in st.session_state:
                 st.subheader(t("transcript_summary_title"))
-                st.write(st.session_state[f"{self.prefix}_summary"])
+                st.write(st.session_state[f"{self.prefix}_summary_result"])
 
             # Display answer if available
             if f"{self.prefix}_answer" in st.session_state:
