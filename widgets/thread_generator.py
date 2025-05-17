@@ -18,7 +18,10 @@ translations["en"].update({
     "meme_text1_label": "Bottom Text",
     "meme_generating": "Generating meme...",
     "meme_success": "Meme generated successfully at {path}",
-    "meme_generation_error": "Failed to generate meme: {error}"
+    "meme_generation_error": "Failed to generate meme: {error}",
+    "manual_meme_generation": "Manual Meme Generation",
+    "generate_meme_manually": "Generate Meme Manually",
+    "select_meme_template": "Select Meme Template"
 })
 
 translations["fr"].update({
@@ -35,7 +38,10 @@ translations["fr"].update({
     "meme_text1_label": "Texte du bas",
     "meme_generating": "Génération du mème...",
     "meme_success": "Mème généré avec succès à {path}",
-    "meme_generation_error": "Échec de la génération du mème : {error}"
+    "meme_generation_error": "Échec de la génération du mème : {error}",
+    "manual_meme_generation": "Génération manuelle de mème",
+    "generate_meme_manually": "Générer le mème manuellement",
+    "select_meme_template": "Sélectionner le modèle de mème"
 })
 
 class ThreadGeneratorWidget(Widget):
@@ -115,7 +121,37 @@ class ThreadGeneratorWidget(Widget):
                     elif error:
                         st.error(f"Failed to generate meme: {error}")
 
-        # Meme preview
+        # Manual meme generation
+        if self.memegen_plugin:
+            with st.expander(t("manual_meme_generation"), expanded=False):
+                st.subheader(t("manual_meme_generation"))
+                meme_titles = [meme["name"] for meme in self.memegen_plugin.memes]
+                selected_meme_name = st.selectbox(
+                    t("select_meme_template"),
+                    options=meme_titles,
+                    key=f"{self.prefix}_manual_meme_selectbox"
+                )
+                template_id = next(
+                    (m["id"] for m in self.memegen_plugin.memes if m["name"] == selected_meme_name),
+                    self.memegen_plugin.memes[0]["id"]
+                )
+                manual_text0 = st.text_input(
+                    t("meme_text0_label"), "", key=f"{self.prefix}_manual_text0")
+                manual_text1 = st.text_input(
+                    t("meme_text1_label"), "", key=f"{self.prefix}_manual_text1")
+                if st.button(t("generate_meme_manually"), key=f"{self.prefix}_generate_manual_meme"):
+                    with st.spinner(t("meme_generating")):
+                        meme_path, error = self.memegen_plugin.generate_meme(
+                            config, template_id, manual_text0, manual_text1, "impact", 50
+                        )
+                        if meme_path:
+                            st.session_state[f"{self.prefix}_manual_meme_path"] = meme_path
+                            st.image(meme_path, caption="Manually Generated Meme")
+                            st.success(t("meme_success").format(path=meme_path))
+                        elif error:
+                            st.error(t("meme_generation_error").format(error=error))
+
+        # Meme preview for automatic generation
         if f"{self.prefix}_auto_meme_suggestion" in st.session_state and generate_meme_with_posts:
             st.subheader(t("meme_preview"))
             suggestion = st.session_state[f"{self.prefix}_auto_meme_suggestion"]
