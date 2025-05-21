@@ -45,19 +45,7 @@ class ImageGeneratorWidget(Widget):
                 if image_filename:
                     st.image(image_filename, caption="Generated Image", use_container_width=True)
 
-    def generate_image(self, pre_prompt, dimension):
-        # Génération du prompt à partir du pré-prompt
-        sys_prompt = (
-            "You are an expert in generating detailed and vivid prompts for image generation models. "
-            "Based on the user's description, create a concise, descriptive, and creative prompt optimized for an image generation model. "
-            "Include specific details about style, colors, lighting, and composition where relevant. "
-            "Return only the generated prompt without additional explanations."
-        )
-        generated_prompt = self.process_with_llm(pre_prompt, sysprompt=sys_prompt)
-
-        # Affichage discret du prompt généré pour debug
-        st.write(t("generated_prompt") + ": " + generated_prompt)
-
+    def generate_image_direct(self, prompt, dimension):
         # Initialisation du pipeline si nécessaire
         if self.pipe is None:
             ckpt_id = "black-forest-labs/FLUX.1-schnell"
@@ -78,7 +66,7 @@ class ImageGeneratorWidget(Widget):
         seed = random.randint(0, 2**32 - 1)
         generator = torch.Generator().manual_seed(int(seed))
         image = self.pipe(
-            generated_prompt,
+            prompt,
             num_inference_steps=2,
             guidance_scale=0.0,
             height=height,
@@ -94,3 +82,19 @@ class ImageGeneratorWidget(Widget):
         image.save(filepath)
 
         return filepath
+
+    def generate_image(self, pre_prompt, dimension):
+        # Génération du prompt à partir du pré-prompt
+        sys_prompt = (
+            "You are an expert in generating detailed and vivid prompts for image generation models. "
+            "Based on the user's description, create a concise, descriptive, and creative prompt optimized for an image generation model. "
+            "Include specific details about style, colors, lighting, and composition where relevant. "
+            "Return only the generated prompt without additional explanations."
+        )
+        generated_prompt = self.process_with_llm(pre_prompt, sysprompt=sys_prompt)
+
+        # Affichage discret du prompt généré pour debug
+        st.write(t("generated_prompt") + ": " + generated_prompt)
+
+        # Appel à generate_image_direct pour générer l'image
+        return self.generate_image_direct(generated_prompt, dimension)

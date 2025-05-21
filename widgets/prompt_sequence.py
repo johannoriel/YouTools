@@ -3,8 +3,9 @@ from lib.global_vars import translations, t, alert
 from app import Widget
 import streamlit as st
 import json
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import SentenceTransformer
 import numpy as np
+import torch
 from widgets.product_matcher import get_sentence_model
 import re
 
@@ -296,7 +297,10 @@ class PromptSequenceWidget(Widget):
         chunk_embeddings = model.encode(chunks, convert_to_tensor=True)
 
         # Compute cosine similarities
-        similarities = util.cos_sim(query_embedding, chunk_embeddings)[0].cpu().numpy()
+        #similarities = util.cos_sim(query_embedding, chunk_embeddings)[0].cpu().numpy()
+        #import util fail so fallback :
+        cos_sim = torch.nn.CosineSimilarity(dim=1, eps=1e-8)
+        similarities = cos_sim(query_embedding, chunk_embeddings).cpu().numpy()
 
         # Get relevant chunks based on parameters
         top_k = rag_params["top_k"]
