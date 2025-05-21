@@ -45,7 +45,7 @@ class ImageGeneratorWidget(Widget):
                 if image_filename:
                     st.image(image_filename, caption="Generated Image", use_container_width=True)
 
-    def generate_image_direct(self, prompt, dimension):
+    def generate_image_direct(self, prompt, dimension, output_path, overwrite=True):
         # Initialisation du pipeline si nécessaire
         if self.pipe is None:
             ckpt_id = "black-forest-labs/FLUX.1-schnell"
@@ -67,6 +67,7 @@ class ImageGeneratorWidget(Widget):
         generator = torch.Generator().manual_seed(int(seed))
         image = self.pipe(
             prompt,
+            negative_prompt="text, words, phrase, ugly, messy, blurry, low quality",
             num_inference_steps=2,
             guidance_scale=0.0,
             height=height,
@@ -74,11 +75,22 @@ class ImageGeneratorWidget(Widget):
             generator=generator
         ).images[0]
 
-        # Sauvegarde de l'image
-        output_dir = os.path.expanduser("~/Images")
-        os.makedirs(output_dir, exist_ok=True)
-        filename = f"generated_image_{seed}.png"
-        filepath = os.path.join(output_dir, filename)
+        # Vérifier si output_path est un fichier ou un répertoire
+        if os.path.splitext(output_path)[1]:  # Si output_path a une extension (c'est un fichier)
+            filepath = output_path
+            output_dir = os.path.dirname(output_path) or "."  # Dossier parent, ou "." si aucun
+        else:  # Si output_path est un répertoire
+            output_dir = output_path
+            filename = f"generated_image_{seed}.png"
+            filepath = os.path.join(output_dir, filename)
+
+        # Créer le répertoire si nécessaire
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        # Vérification si le fichier existe et gestion de l'écrasement
+        if not overwrite and os.path.exists(filepath):
+            raise FileExistsError(f"File already exists: {filepath}")
         image.save(filepath)
 
         return filepath
@@ -96,5 +108,5 @@ class ImageGeneratorWidget(Widget):
         # Affichage discret du prompt généré pour debug
         st.write(t("generated_prompt") + ": " + generated_prompt)
 
-        # Appel à generate_image_direct pour générer l'image
-        return self.generate_image_direct(generated_prompt, dimension)
+        # Appel à generate_image_direct pour générer l'image dans self.work_dir()
+        return self.generate_image_direct(generated_prompt, dimension, self.work_dir(), overwrite=True)
