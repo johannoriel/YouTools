@@ -194,7 +194,7 @@ class AudioSplitterWidget(Widget):
 
     def display(self, config):
         st.header(t("audio_splitter"))
-        uploaded_file = st.file_uploader(t("select_podcast"), type=["mp3", "wav", "mp4", "avi", "mov", "mkv"], key=f"{self.prefix}_uploader")
+        uploaded_file = st.file_uploader(t("select_podcast"), type=["mp3", "wav", "mp4", "avi", "mov", "mkv", "ogg"], key=f"{self.prefix}_uploader")
         split_method = st.selectbox(
             t("split_method"),
             ["whisper", "silence", "phrase"],

@@ -9,6 +9,7 @@ from PIL import Image
 import base64
 from io import BytesIO
 from widgets.image_generator import ImageGeneratorWidget
+from pydub import AudioSegment
 
 translations["en"].update({
     "chunk_editor": "Chunk Editor",
@@ -25,7 +26,9 @@ translations["en"].update({
     "apply_operation": "Apply Operation",
     "chunks_deleted": "Deleted {0} chunks and renumbered remaining files.",
     "prompts_generated": "Generated image prompts for {0} chunks.",
-    "images_generated": "Generated images for {0} chunks."
+    "images_generated": "Generated images for {0} chunks.",
+    "duration": "Duration",
+    "prompt": "Image Prompt",
 })
 
 translations["fr"].update({
@@ -43,7 +46,9 @@ translations["fr"].update({
     "apply_operation": "Appliquer l'Opération",
     "chunks_deleted": "Supprimé {0} chunks et renommé les fichiers restants.",
     "prompts_generated": "Prompts d'image générés pour {0} chunks.",
-    "images_generated": "Images générées pour {0} chunks."
+    "images_generated": "Images générées pour {0} chunks.",
+    "duration": "Durée",
+    "prompt": "Prompt d'Image",
 })
 
 class ChunkEditorWidget(Widget):
@@ -75,8 +80,10 @@ class ChunkEditorWidget(Widget):
                 'image': os.path.join(self.output_dir, image_files[i]) if i < len(image_files) else None,
                 'video': os.path.join(self.output_dir, video_files[i]) if i < len(video_files) else None,
                 'video_filename': video_files[i] if i < len(video_files) else None,
-                'prompt': os.path.join(self.output_dir, prompt_files[i]) if i < len(prompt_files) else None,
-                'image_base64': None
+                'prompt': None,
+                'prompt_path': os.path.join(self.output_dir, prompt_files[i]) if i < len(prompt_files) else None,
+                'image_base64': None,
+                'duration': None
             }
             if chunk_data['text_path']:
                 try:
@@ -84,6 +91,12 @@ class ChunkEditorWidget(Widget):
                         chunk_data['text'] = f.read()
                 except Exception as e:
                     st.warning(f"Erreur lors de la lecture du fichier texte {chunk_data['text_path']}: {str(e)}")
+            if chunk_data['prompt_path']:
+                try:
+                    with open(chunk_data['prompt_path'], 'r', encoding='utf-8') as f:
+                        chunk_data['prompt'] = f.read()
+                except Exception as e:
+                    st.warning(f"Erreur lors de la lecture du fichier prompt {chunk_data['prompt_path']}: {str(e)}")
             if chunk_data['image']:
                 try:
                     with Image.open(chunk_data['image']) as img:
@@ -93,6 +106,12 @@ class ChunkEditorWidget(Widget):
                         chunk_data['image_base64'] = f"data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
                 except Exception as e:
                     st.warning(f"Erreur lors du chargement de l'image {chunk_data['image']}: {str(e)}")
+            if chunk_data['audio']:
+                try:
+                    audio = AudioSegment.from_wav(chunk_data['audio'])
+                    chunk_data['duration'] = f"{audio.duration_seconds:.1f}s"
+                except Exception as e:
+                    st.warning(f"Erreur lors du calcul de la durée de l'audio {chunk_data['audio']}: {str(e)}")
             data.append(chunk_data)
 
         df = pd.DataFrame(data)
@@ -218,17 +237,19 @@ class ChunkEditorWidget(Widget):
 
         # Configurer la grille
         gd = GridOptionsBuilder.from_dataframe(df)
+        gd.configure_column("filename", t("filename"), headerCheckboxSelection=True,width=100)
         gd.configure_column("image_base64", t("image"), width=thumbnail_size + 20,
                             cellRenderer=image_renderer)
-        gd.configure_column("text", t("text"), flex=2)
+        gd.configure_column("text", t("text"), width=600)
+        gd.configure_column("duration", t("duration"), width=100)
+        gd.configure_column("prompt", t("prompt"), width=300)
         gd.configure_column("audio_filename", t("audio_filename"), width=150, hide=True)
         gd.configure_column("video_filename", t("video_filename"), width=150, hide=True)
-        gd.configure_column("filename", hide=False)
         gd.configure_column("audio", hide=True)
         gd.configure_column("text_path", hide=True)
         gd.configure_column("video", hide=True)
         gd.configure_column("image", hide=True)
-        gd.configure_column("prompt", hide=True)
+        gd.configure_column("prompt_path", hide=True)
         gd.configure_selection('multiple', use_checkbox=True)
         gd.configure_grid_options(rowHeight=row_height)
         gridOptions = gd.build()
