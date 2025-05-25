@@ -225,8 +225,11 @@ class DirectpublishPlugin(Plugin):
         thumbnail_path = None
         if use_custom_thumbnail:
             thumbnail_dir = work_directory
-            thumbnail_files = [f for f in os.listdir(thumbnail_dir)
-                               if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            thumbnail_files = sorted(
+                [f for f in os.listdir(thumbnail_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))],
+                key=lambda x: os.path.getmtime(os.path.join(thumbnail_dir, x)),
+                reverse=True  # Pour avoir les plus récentes en premier
+            )
             if thumbnail_files:
                 selected_thumbnail = st.selectbox(
                     t("directpublish_select_thumbnail"),
