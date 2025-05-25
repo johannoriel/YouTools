@@ -278,10 +278,7 @@ class RagllmPlugin(Plugin):
 
     def free_llm(self, model=None):
         try:
-            if model is not None:
-                llm_model = "ollama/"+model
-            else:
-                llm_model = st.session_state.ragllm_llm_model
+            llm_model = "ollama/qwen2:1.5b"
             print("freeing :"+llm_model)
             if llm_model.startswith("ollama/"):
                 ollama_model = llm_model.split("/")[1]
