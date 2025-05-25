@@ -62,56 +62,78 @@ class ChunkEditorWidget(Widget):
         if self.chunks_key in st.session_state:
             return st.session_state[self.chunks_key]
 
-        audio_files = sorted([f for f in os.listdir(self.output_dir) if f.endswith('.wav')])
-        text_files = sorted([f for f in os.listdir(self.output_dir) if f.endswith('.txt') and not f.endswith('.img_prompt')])
-        image_files = sorted([f for f in os.listdir(self.output_dir) if f.endswith('.png') and f.startswith('chunk_')])
-        video_files = sorted([f for f in os.listdir(self.output_dir) if f.endswith('.mp4') and f.startswith('chunk_')])
-        prompt_files = sorted([f for f in os.listdir(self.output_dir) if f.endswith('.img_prompt')])
+        # Récupérer tous les fichiers avec leur numéro
+        files_by_number = {}
+        for f in os.listdir(self.output_dir):
+            if f.startswith('chunk_'):
+                parts = f.split('_')
+                if len(parts) > 1:
+                    try:
+                        number = int(parts[1].split('.')[0])
+                        ext = '.' + f.split('.')[-1]
+                        if ext == '.txt' and f.endswith('.img_prompt'):
+                            ext = '.img_prompt'
+                        if number not in files_by_number:
+                            files_by_number[number] = {}
+                        files_by_number[number][ext] = f
+                    except ValueError:
+                        continue
 
+        # Créer les données des chunks
         data = []
-        max_files = max(len(audio_files), len(text_files), len(image_files), len(video_files), len(prompt_files))
-        for i in range(max_files):
+        max_number = max(files_by_number.keys()) + 1 if files_by_number else 0
+        for i in range(max_number):
             chunk_data = {
                 'filename': f'chunk_{i}',
-                'audio': os.path.join(self.output_dir, audio_files[i]) if i < len(audio_files) else None,
-                'audio_filename': audio_files[i] if i < len(audio_files) else None,
+                'audio': None,
+                'audio_filename': None,
                 'text': None,
-                'text_path': os.path.join(self.output_dir, text_files[i]) if i < len(text_files) else None,
-                'image': os.path.join(self.output_dir, image_files[i]) if i < len(image_files) else None,
-                'video': os.path.join(self.output_dir, video_files[i]) if i < len(video_files) else None,
-                'video_filename': video_files[i] if i < len(video_files) else None,
+                'text_path': None,
+                'image': None,
+                'video': None,
+                'video_filename': None,
                 'prompt': None,
-                'prompt_path': os.path.join(self.output_dir, prompt_files[i]) if i < len(prompt_files) else None,
+                'prompt_path': None,
                 'image_base64': None,
                 'duration': None
             }
-            if chunk_data['text_path']:
-                try:
-                    with open(chunk_data['text_path'], 'r', encoding='utf-8') as f:
-                        chunk_data['text'] = f.read()
-                except Exception as e:
-                    st.warning(f"Erreur lors de la lecture du fichier texte {chunk_data['text_path']}: {str(e)}")
-            if chunk_data['prompt_path']:
-                try:
-                    with open(chunk_data['prompt_path'], 'r', encoding='utf-8') as f:
-                        chunk_data['prompt'] = f.read()
-                except Exception as e:
-                    st.warning(f"Erreur lors de la lecture du fichier prompt {chunk_data['prompt_path']}: {str(e)}")
-            if chunk_data['image']:
-                try:
-                    with Image.open(chunk_data['image']) as img:
-                        img.thumbnail((100, 100))
-                        buffered = BytesIO()
-                        img.save(buffered, format="PNG")
-                        chunk_data['image_base64'] = f"data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
-                except Exception as e:
-                    st.warning(f"Erreur lors du chargement de l'image {chunk_data['image']}: {str(e)}")
-            if chunk_data['audio']:
-                try:
-                    audio = AudioSegment.from_wav(chunk_data['audio'])
-                    chunk_data['duration'] = f"{audio.duration_seconds:.1f}s"
-                except Exception as e:
-                    st.warning(f"Erreur lors du calcul de la durée de l'audio {chunk_data['audio']}: {str(e)}")
+            if i in files_by_number:
+                files = files_by_number[i]
+                if '.wav' in files:
+                    chunk_data['audio'] = os.path.join(self.output_dir, files['.wav'])
+                    chunk_data['audio_filename'] = files['.wav']
+                    try:
+                        audio = AudioSegment.from_wav(chunk_data['audio'])
+                        chunk_data['duration'] = f"{audio.duration_seconds:.1f}s"
+                    except Exception as e:
+                        st.warning(f"Erreur lors du calcul de la durée de l'audio {chunk_data['audio']}: {str(e)}")
+                if '.txt' in files:
+                    chunk_data['text_path'] = os.path.join(self.output_dir, files['.txt'])
+                    try:
+                        with open(chunk_data['text_path'], 'r', encoding='utf-8') as f:
+                            chunk_data['text'] = f.read()
+                    except Exception as e:
+                        st.warning(f"Erreur lors de la lecture du fichier texte {chunk_data['text_path']}: {str(e)}")
+                if '.png' in files:
+                    chunk_data['image'] = os.path.join(self.output_dir, files['.png'])
+                    try:
+                        with Image.open(chunk_data['image']) as img:
+                            img.thumbnail((100, 100))
+                            buffered = BytesIO()
+                            img.save(buffered, format="PNG")
+                            chunk_data['image_base64'] = f"data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
+                    except Exception as e:
+                        st.warning(f"Erreur lors du chargement de l'image {chunk_data['image']}: {str(e)}")
+                if '.mp4' in files:
+                    chunk_data['video'] = os.path.join(self.output_dir, files['.mp4'])
+                    chunk_data['video_filename'] = files['.mp4']
+                if '.img_prompt' in files:
+                    chunk_data['prompt_path'] = os.path.join(self.output_dir, files['.img_prompt'])
+                    try:
+                        with open(chunk_data['prompt_path'], 'r', encoding='utf-8') as f:
+                            chunk_data['prompt'] = f.read()
+                    except Exception as e:
+                        st.warning(f"Erreur lors de la lecture du fichier prompt {chunk_data['prompt_path']}: {str(e)}")
             data.append(chunk_data)
 
         df = pd.DataFrame(data)
