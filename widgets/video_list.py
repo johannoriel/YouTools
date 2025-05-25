@@ -162,10 +162,13 @@ class VideoListWidget(Widget):
     def display(self):
         st.title(t("video_list_title"))
 
-        selected_rows, filtered_df = self.select_video_list()
+        result = self.select_video_list()
 
-        if selected_rows is None:
+        # Early return if no valid data
+        if result is None:
             return
+
+        selected_rows, filtered_df = result
 
         # Checkbox pour écraser ou renommer
         overwrite = st.checkbox(t("overwrite_checkbox"),
@@ -182,8 +185,7 @@ class VideoListWidget(Widget):
                 i = 1
                 while True:
                     new_filename = f"filtered_video_list_{i:03d}.csv"
-                    new_export_path = os.path.join(
-                        work_directory, new_filename)
+                    new_export_path = os.path.join(work_directory, new_filename)
                     if not os.path.exists(new_export_path):
                         export_path = new_export_path
                         break
