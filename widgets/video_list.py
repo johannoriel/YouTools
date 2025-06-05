@@ -43,7 +43,7 @@ class VideoListWidget(Widget):
 
         if not csv_files:
             st.error(t("no_file_error"))
-            return None
+            return [], pd.DataFrame()
 
         # Afficher la sélection des fichiers
         selected_files = st.multiselect(
@@ -55,7 +55,7 @@ class VideoListWidget(Widget):
 
         if not selected_files:
             st.warning("Please select at least one file to process")
-            return None
+            return [], pd.DataFrame()
 
         # Colonnes attendues pour un CSV valide
         required_columns = {'keyword', 'url', 'video_id', 'title', 'view_count', 'language',
@@ -76,7 +76,7 @@ class VideoListWidget(Widget):
 
         if not dfs:
             st.error(t("no_file_error"))
-            return None
+            return [], pd.DataFrame()
 
         combined_df = pd.concat(dfs, ignore_index=True)
 
