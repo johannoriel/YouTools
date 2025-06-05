@@ -174,7 +174,7 @@ class VideoProductPromotionWidget(Widget):
         video_list_widget = VideoListWidget("video_list", f"{self.prefix}_video_list", self.plugin_manager)
         selected_rows, filtered_df = video_list_widget.select_video_list()
 
-        if not selected_rows:
+        if not selected_rows or filtered_df.empty:
             st.warning(t("no_videos_selected"))
             return
 
