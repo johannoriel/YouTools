@@ -142,8 +142,28 @@ class MovieCommand(ABC):
             raise ValueError(f"Invalid timecode format: {timecode}")
 
 
+
 class CommandOrchestrator:
     """Orchestre l'exécution des commandes de montage vidéo."""
+
+    def _is_valid_timecode(self, timecode: str) -> bool:
+        try:
+            # Remplacer la virgule par un point si nécessaire
+            normalized = timecode.replace(",", ".")
+            hh, mm, ss = normalized.split(":")
+
+            # Vérifier la longueur de chaque partie
+            if len(hh) != 2 or len(mm) != 2 or len(ss) != 6:  # "SS.mmm" = 6 caractères
+                return False
+
+            # Convertir en nombres et vérifier les plages
+            h = int(hh)
+            m = int(mm)
+            s = float(ss)
+
+            return (0 <= h <= 23 and 0 <= m <= 59 and 0 <= s < 60.0)
+        except (ValueError, AttributeError):
+            return False
 
     def __init__(self):
         self.commands: Dict[str, MovieCommand] = {}
@@ -218,7 +238,6 @@ class CommandOrchestrator:
                     # Exécuter la commande
                     current_clip, duration_change = command.execute(
                         current_clip, op_cleaned, target_size, **kwargs)
-                    duration_offset += duration_change
 
                     # Calculer les timecodes réels
                     start_time = parts[1].split()[0] if len(parts) > 1 else ""
@@ -228,12 +247,14 @@ class CommandOrchestrator:
                     real_start = self._format_timecode(start_sec + global_time_offset)
 
                     # Extraire end_time si pertinent
-                    end_sec = None
+                    end_sec = start_sec
                     if len(parts) > 1 and len(parts[1].split()) > 1 and cmd != "CHANGE_VIDEO":
                         end_time = parts[1].split()[1]
-                        end_sec = self._parse_timecode(end_time) + duration_offset
+                        if self._is_valid_timecode(end_time):
+                            end_sec = self._parse_timecode(end_time) + duration_offset
                     real_end = self._format_timecode(end_sec + global_time_offset) if end_sec else None
                     duration_str = f"{(end_sec - start_sec):.3f}s" if end_sec else ""
+                    duration_offset += duration_change
 
                     operation_log.append({
                         "Nature": cmd,
@@ -243,6 +264,7 @@ class CommandOrchestrator:
                         "Duration": duration_str
                     })
                 except Exception as e:
+                    raise e
                     raise ValueError(f"Error executing command {cmd}: {str(e)}")
             else:
                 raise ValueError(f"Unknown command: {cmd}")
@@ -261,10 +283,21 @@ class CommandOrchestrator:
     def _parse_timecode(self, timecode: str) -> float:
         """Parse un timecode HH:MM:SS.mmm en secondes."""
         try:
-            h, m, s = map(float, timecode.replace(",", ".").split(":"))
+            # Remplacer les virgules par des points pour les décimales
+            timecode = timecode.replace(",", ".")
+
+            # Séparer les composants
+            parts = timecode.split(":")
+            if len(parts) != 3:
+                raise ValueError("Le timecode doit avoir le format HH:MM:SS.mmm :"+timecode)
+
+            h = float(parts[0])
+            m = float(parts[1])
+            s = float(parts[2])
+
             return h * 3600 + m * 60 + s
-        except ValueError:
-            raise ValueError(f"Invalid timecode format: {timecode}")
+        except ValueError as e:
+            raise ValueError(f"Invalid timecode format: {timecode} - {str(e)}")
 
     def _format_timecode(self, seconds: float) -> str:
         """Formate les secondes en timecode HH:MM:SS.mmm."""
@@ -319,11 +352,19 @@ class InsertVideoCommand(MovieCommand):
     def execute(self, clip: VideoFileClip, command_line: str,
                 target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=2)
-        if len(parts) < 3:
+        if len(parts) < 2:
             raise ValueError(f"Invalid insert_video command: {command_line}")
 
-        start_time, video_path = parts[1], parts[2]
-        start_sec = self._parse_timecode(start_time)
+        start_time = parts[1]
+        # Vérifier si start_time est un timecode valide
+        try:
+            start_sec = self._parse_timecode(start_time)
+        except ValueError:
+            raise ValueError(f"Invalid timecode format: {start_time}")
+
+        if len(parts) < 3:
+            raise ValueError(f"No video path provided in insert_video command: {command_line}")
+        video_path = parts[2]
 
         modified_clip, duration_change = insert_video(
             clip, start_sec, video_path, target_size)

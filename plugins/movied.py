@@ -7,7 +7,7 @@ from app import Plugin
 import streamlit as st
 import pandas as pd
 import os
-from lib.video_utils import load_subtitles_and_chapters
+from lib.video_utils import load_subtitles_and_chapters, generate_subtitles, save_vtt
 import json
 from moviepy import VideoFileClip, concatenate_videoclips
 from widgets.media_selector import media_selector, remote_media_selector, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
@@ -1389,6 +1389,9 @@ class MoviedPlugin(Plugin):
 
                 def get_start_time(op):
                     parts = op.split()
+                    # Vérifier si l'opération commence par "CHANGE_VIDEO"
+                    if parts[0] == "CHANGE_VIDEO":
+                        return float('inf')  # Placer CHANGE_VIDEO à la fin
                     return time_to_milliseconds(parts[1]) if len(parts) > 1 else float('inf')
                 ops_list.sort(key=get_start_time)
                 # Rejoindre les opérations triées
@@ -1427,16 +1430,25 @@ class MoviedPlugin(Plugin):
 
             if selected_operation["selection"]["rows"]:
                 selected_row = selected_operation["selection"]["rows"][0]
-                start_time_seconds = time_to_milliseconds(
-                    st.session_state["operations_log"].iloc[selected_row]["Start"])/1000
+                start_time = st.session_state["operations_log"].iloc[selected_row]["Start"]
+                st.write(start_time)
+                # Vérifier si le timecode est valide avant conversion
+                if isinstance(start_time, str) and ":" in start_time:
+                    start_time_seconds = time_to_milliseconds(start_time) / 1000
+                else:
+                    st.error(f"Invalid start time format: {start_time}")
+                    start_time_seconds = 0
+                st.write(start_time_seconds)
+
+                end_time = st.session_state["operations_log"].iloc[selected_row]["End"]
                 end_time_seconds = None
-                if pd.notna(st.session_state["operations_log"].iloc[selected_row]["End"]):
-                    end_time_seconds = time_to_milliseconds(
-                        st.session_state["operations_log"].iloc[selected_row]["End"])/1000
+                if pd.notna(end_time) and isinstance(end_time, str) and ":" in end_time:
+                    end_time_seconds = time_to_milliseconds(end_time) / 1000
 
                 if st.session_state.preview_mode and video_path:
                     main_clip = st.session_state.previewclip
                     clip_duration = main_clip.duration
+                    preview_buffer = st.session_state.get("preview_buffer", 3.0)
                     start_preview = max(0, start_time_seconds - preview_buffer)
                     if end_time_seconds is not None:
                         end_preview = min(
@@ -1445,14 +1457,17 @@ class MoviedPlugin(Plugin):
                         end_preview = min(
                             clip_duration, start_time_seconds + preview_buffer)
                     try:
+                        st.write(start_preview)
+                        st.write(end_preview)
                         preview_clip = main_clip.subclipped(
                             start_preview, end_preview)
                         preview_clip.preview()
                         preview_clip.close()
                     except Exception as e:
                         st.error(f"Error generating preview clip: {str(e)}")
-                    finally:
-                        main_clip.close()
+                        raise e
+                    #finally:
+                    #main_clip.close()
                 elif "generated_video_path" in st.session_state:
                     st.write("Generated Video:")
                     _, col, _ = st.columns(3)
