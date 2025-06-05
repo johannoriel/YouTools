@@ -235,24 +235,27 @@ class CommandOrchestrator:
                     elif current_clip is None:
                         raise ValueError("No video loaded. A CHANGE_VIDEO command must be executed first.")
 
-                    # Exécuter la commande
+                    # Calculer l'offset total
+                    total_offset = global_time_offset + duration_offset
+
+                    # Exécuter la commande avec l'offset
                     current_clip, duration_change = command.execute(
-                        current_clip, op_cleaned, target_size, **kwargs)
+                        current_clip, op_cleaned, target_size, offset=total_offset, **kwargs)
 
                     # Calculer les timecodes réels
                     start_time = parts[1].split()[0] if len(parts) > 1 else ""
                     start_sec = 0
                     if cmd != "CHANGE_VIDEO" and start_time:
-                        start_sec = self._parse_timecode(start_time) + duration_offset
-                    real_start = self._format_timecode(start_sec + global_time_offset)
+                        start_sec = self._parse_timecode(start_time) + total_offset
+                    real_start = self._format_timecode(start_sec)
 
                     # Extraire end_time si pertinent
                     end_sec = start_sec
                     if len(parts) > 1 and len(parts[1].split()) > 1 and cmd != "CHANGE_VIDEO":
                         end_time = parts[1].split()[1]
                         if self._is_valid_timecode(end_time):
-                            end_sec = self._parse_timecode(end_time) + duration_offset
-                    real_end = self._format_timecode(end_sec + global_time_offset) if end_sec else None
+                            end_sec = self._parse_timecode(end_time) + total_offset
+                    real_end = self._format_timecode(end_sec) if end_sec else None
                     duration_str = f"{(end_sec - start_sec):.3f}s" if end_sec else ""
                     duration_offset += duration_change
 
@@ -264,7 +267,6 @@ class CommandOrchestrator:
                         "Duration": duration_str
                     })
                 except Exception as e:
-                    raise e
                     raise ValueError(f"Error executing command {cmd}: {str(e)}")
             else:
                 raise ValueError(f"Unknown command: {cmd}")
@@ -322,14 +324,14 @@ class ReplaceImageCommand(MovieCommand):
         return f"replace_image {start_time} {end_time} {media_path}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=3)
         if len(parts) < 4:
             raise ValueError(f"Invalid replace_image command: {command_line}")
 
         start_time, end_time, image_path = parts[1], parts[2], parts[3]
-        start_sec = self._parse_timecode(start_time)
-        end_sec = self._parse_timecode(end_time)
+        start_sec = self._parse_timecode(start_time) + offset
+        end_sec = self._parse_timecode(end_time) + offset
         background_type = "green" if kwargs.get("use_green_background", False) else "video"
 
         modified_clip = replace_with_image(
@@ -350,7 +352,7 @@ class InsertVideoCommand(MovieCommand):
         return f"insert_video {start_time} {media_path}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=2)
         if len(parts) < 2:
             raise ValueError(f"Invalid insert_video command: {command_line}")
@@ -358,7 +360,7 @@ class InsertVideoCommand(MovieCommand):
         start_time = parts[1]
         # Vérifier si start_time est un timecode valide
         try:
-            start_sec = self._parse_timecode(start_time)
+            start_sec = self._parse_timecode(start_time) + offset
         except ValueError:
             raise ValueError(f"Invalid timecode format: {start_time}")
 
@@ -385,13 +387,13 @@ class InsertVideoWithTextCommand(MovieCommand):
         return f"insertVideoWithText {start_time} {media_path} | {text_command}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         match = re.match(r"insertVideoWithText\s+(\S+)\s+(.+?)\s+\|\s+(.+)", command_line)
         if not match:
             raise ValueError(f"Invalid insertVideoWithText command: {command_line}")
 
-        start_time, video_path, text = match.groups()
-        start_sec = self._parse_timecode(start_time)
+        start_time, video_path, text = match.groups() + offset
+        start_sec = self._parse_timecode(start_time) + offset
 
         modified_clip, duration_change = insert_video_with_text(
             clip, start_sec, video_path, text, target_size,
@@ -414,14 +416,14 @@ class ReplaceVideoCommand(MovieCommand):
         return f"replace_video {start_time} {end_time} {media_path}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=3)
         if len(parts) < 4:
             raise ValueError(f"Invalid replace_video command: {command_line}")
 
         start_time, end_time, video_path = parts[1], parts[2], parts[3]
-        start_sec = self._parse_timecode(start_time)
-        end_sec = self._parse_timecode(end_time)
+        start_sec = self._parse_timecode(start_time) + offset
+        end_sec = self._parse_timecode(end_time) + offset
         background_type = "green" if kwargs.get("use_green_background", False) else "video"
 
         modified_clip, duration_change = replace_with_video(
@@ -442,14 +444,14 @@ class ReplaceVideoKeepAudioCommand(MovieCommand):
         return f"replace_video_keep_audio {start_time} {end_time} {media_path}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=3)
         if len(parts) < 4:
             raise ValueError(f"Invalid replace_video_keep_audio command: {command_line}")
 
         start_time, end_time, video_path = parts[1], parts[2], parts[3]
-        start_sec = self._parse_timecode(start_time)
-        end_sec = self._parse_timecode(end_time)
+        start_sec = self._parse_timecode(start_time) + offset
+        end_sec = self._parse_timecode(end_time) + offset
         background_type = "green" if kwargs.get("use_green_background", False) else "video"
 
         modified_clip = replace_video_keep_audio(
@@ -471,14 +473,14 @@ class AddTextCommand(MovieCommand):
         return f"addtext {start_time} {end_time} fromLeft 1s {text_command}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=5)
         if len(parts) < 6:
             raise ValueError(f"Invalid addtext command: {command_line}")
 
         start_time, end_time, animation_type, anim_duration, text = parts[1], parts[2], parts[3], parts[4], parts[5]
-        start_sec = self._parse_timecode(start_time)
-        end_sec = self._parse_timecode(end_time)
+        start_sec = self._parse_timecode(start_time) + offset
+        end_sec = self._parse_timecode(end_time) + offset
         anim_duration_sec = float(anim_duration[:-1])
 
         modified_clip = add_animated_text(
@@ -503,14 +505,14 @@ class AddBottomTextCommand(MovieCommand):
         return f"addBottomText {start_time} {end_time} fromLeft 1s {text_command}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=5)
         if len(parts) < 6:
             raise ValueError(f"Invalid addBottomText command: {command_line}")
 
         start_time, end_time, animation_type, anim_duration, text = parts[1], parts[2], parts[3], parts[4], parts[5]
-        start_sec = self._parse_timecode(start_time)
-        end_sec = self._parse_timecode(end_time)
+        start_sec = self._parse_timecode(start_time) + offset
+        end_sec = self._parse_timecode(end_time) + offset
         anim_duration_sec = float(anim_duration[:-1])
 
         modified_clip = add_animated_text(
@@ -534,14 +536,14 @@ class RemoveSectionCommand(MovieCommand):
         return f"remove_section {start_time} {end_time}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=2)
         if len(parts) < 3:
             raise ValueError(f"Invalid remove_section command: {command_line}")
 
         start_time, end_time = parts[1], parts[2]
-        start_sec = self._parse_timecode(start_time)
-        end_sec = self._parse_timecode(end_time)
+        start_sec = self._parse_timecode(start_time) + offset
+        end_sec = self._parse_timecode(end_time) + offset
 
         modified_clip, duration_change = remove_section(clip, start_sec, end_sec)
         if modified_clip.audio is None:
@@ -563,14 +565,14 @@ class ReplaceAudioCommand(MovieCommand):
         return f"replace_audio {start_time} {end_time} {media_path}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=3)
         if len(parts) < 4:
             raise ValueError(f"Invalid replace_audio command: {command_line}")
 
         start_time, end_time, audio_path = parts[1], parts[2], parts[3]
-        start_sec = self._parse_timecode(start_time)
-        end_sec = self._parse_timecode(end_time)
+        start_sec = self._parse_timecode(start_time) + offset
+        end_sec = self._parse_timecode(end_time) + offset
 
         modified_clip, duration_change = replace_audio(
             clip, start_sec, end_sec, audio_path, target_size)
@@ -590,13 +592,13 @@ class InsertAudioCommand(MovieCommand):
         return f"insert_audio {start_time} {media_path}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=2)
         if len(parts) < 3:
             raise ValueError(f"Invalid insert_audio command: {command_line}")
 
         start_time, audio_path = parts[1], parts[2]
-        start_sec = self._parse_timecode(start_time)
+        start_sec = self._parse_timecode(start_time) + offset
 
         modified_clip, duration_change = insert_audio(
             clip, start_sec, audio_path, target_size)
@@ -617,7 +619,7 @@ class ChangeVideoCommand(MovieCommand):
         return f"CHANGE_VIDEO {video_name}"
 
     def execute(self, clip: VideoFileClip, command_line: str,
-                target_size: Tuple[int, int], **kwargs) -> Tuple[VideoFileClip, float]:
+                target_size: Tuple[int, int], offset: float = 0, **kwargs) -> Tuple[VideoFileClip, float]:
         parts = command_line.split(maxsplit=1)
         if len(parts) < 2:
             raise ValueError(f"Invalid CHANGE_VIDEO command: {command_line}")
