@@ -6,6 +6,7 @@ from lib.global_vars import translations, t
 from plugins.common import list_all_video_files
 from moviepy import VideoFileClip, concatenate_videoclips
 from typing import List
+from lib.video_utils import normalize_audio
 
 # Add translations
 translations["en"].update({
@@ -117,6 +118,8 @@ class BatchsilencesPlugin(Plugin):
         else:
             ordered_video_paths = []
 
+        normalize_audio_option = st.checkbox("Normalize audio after merging", value=True)
+
         # Process button
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -159,7 +162,7 @@ class BatchsilencesPlugin(Plugin):
                 with st.spinner(t("batchsilences_processing")):
                     processed_count = 0
                     processed_videos = []
-                    for video_name in selected_videos:
+                    for video_name in ordered_video_names:
                         # Find the full path of the selected video
                         video_path = next(
                             v[1] for v in video_files if v[0] == video_name)
@@ -187,6 +190,10 @@ class BatchsilencesPlugin(Plugin):
                         merge_result = self.merge_videos(
                             processed_videos, output_path)
                         if not merge_result.startswith(t("batchsilences_merge_error")):
+                            if normalize_audio_option:
+                                reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
+                                with st.spinner("Normalizing audio..."):
+                                    normalize_audio(merge_result, reference_audio_path, make_backup=False)
                             st.success(t("batchsilences_merge_success").format(
                                 count=processed_count))
                             st.success(
@@ -209,8 +216,12 @@ class BatchsilencesPlugin(Plugin):
                     merge_result = self.merge_videos(
                         ordered_video_paths, output_path)
                     if not merge_result.startswith(t("batchsilences_merge_error")):
+                        if normalize_audio_option:
+                            reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
+                            with st.spinner("Normalizing audio..."):
+                                normalize_audio(merge_result, reference_audio_path, make_backup=False)
                         st.success(t("batchsilences_merge_success").format(
-                            count=len(selected_videos)))
+                            count=len(ordered_video_paths)))
                         st.success(f"Merged video saved at: {merge_result}")
                     else:
                         st.error(merge_result)
