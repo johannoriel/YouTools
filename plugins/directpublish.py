@@ -11,6 +11,8 @@ from plugins.common import yt_categories
 from lib.youtube_api import YoutubeAPI
 import glob
 import json
+from lib.video_utils import normalize_full_audio
+
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
@@ -58,6 +60,8 @@ translations["en"].update({
     "directpublish_run_editing": "Run editing operations",
     "directpublish_edit_operations": "Edit Operations",
     "directpublish_performing_editing": "Performing editing operations...",
+    "directpublish_normalize_audio": "Normalize audio before publishing",
+    "directpublish_normalizing_audio": "Normalizing audio...",
 })
 
 translations["fr"].update({
@@ -105,6 +109,8 @@ translations["fr"].update({
     "directpublish_run_editing": "Lancer les opérations d'édition",
     "directpublish_edit_operations": "Opérations d'édition",
     "directpublish_performing_editing": "Exécution des opérations d'édition...",
+    "directpublish_normalize_audio": "Normaliser le son avant publication",
+    "directpublish_normalizing_audio": "Normalisation du son en cours...",
 })
 
 
@@ -201,6 +207,7 @@ class DirectpublishPlugin(Plugin):
             )
 
         remove_silences = st.checkbox(t("directpublish_remove_silences"))
+        normalize_audio = st.checkbox(t("directpublish_normalize_audio"))
         replace_green_screen = st.checkbox(
             t("directpublish_replace_green_screen"))
 
@@ -311,6 +318,15 @@ class DirectpublishPlugin(Plugin):
                             f"Reduction: {reduction} | Initial duration: {format_duration(original_duration)} | Final duration: {format_duration(final_duration)}")
                     video_to_process = result
                     st.text(video_to_process)
+
+                if normalize_audio:
+                    st.text(t("directpublish_normalizing_audio"))
+                    reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
+                    try:
+                        normalize_full_audio(video_to_process, reference_audio_path, make_backup=True)
+                        st.info("Audio normalized successfully")
+                    except Exception as e:
+                        st.error(t("directpublish_error").format(error=f"Audio normalization failed: {str(e)}"))
 
                 # 2. Remplacer le fond vert si demandé
                 if replace_green_screen and background_video:

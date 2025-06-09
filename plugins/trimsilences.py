@@ -6,6 +6,7 @@ import streamlit as st
 from app import Plugin
 from plugins.common import list_video_files
 from moviepy import VideoFileClip, concatenate_videoclips
+from lib.video_utils import normalize_full_audio
 
 # Ajout des nouvelles traductions
 translations["en"].update({
@@ -363,8 +364,8 @@ class TrimsilencesPlugin(Plugin):
         st.session_state['list_video_files'] = all_videos
 
         st.subheader(t("trim_silences_original_videos"))
-        for file, full_path, _ in video_files:
-            col1, col2 = st.columns([2, 1])
+        for file, full_path, _ in video_files+outfile_videos:
+            col1, col2, col3 = st.columns([2, 1, 1])
             with col1:
                 st.write(file)
             with col2:
@@ -399,3 +400,8 @@ class TrimsilencesPlugin(Plugin):
                             f" - Reduction: {reduction}"
                         )
                         st.rerun()
+            with col3:
+                if st.button("Normalize", key=f"normalize_{file}"):
+                    reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
+                    with st.spinner("Normalizing audio..."):
+                        normalize_full_audio(full_path, reference_audio_path, make_backup=True)

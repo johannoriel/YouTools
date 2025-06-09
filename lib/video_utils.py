@@ -912,6 +912,63 @@ def normalize_audio(video_path, reference_audio_path, make_backup=True):
         st.error(
             f"Audio normalization failed for {os.path.basename(video_path)}: {str(e)}")
 
+def normalize_full_audio(video_path, reference_audio_path, make_backup=True):
+    """Normalise dynamiquement le son d'une vidéo avec un compresseur en utilisant un fichier audio de référence."""
+    import os
+    import streamlit as st
+    from pydub import AudioSegment
+
+    # Configurer le chemin vers ffmpeg
+    AudioSegment.converter = "/usr/bin/ffmpeg"
+
+    try:
+        # Charger le fichier de référence pour obtenir le niveau cible
+        reference_audio = AudioSegment.from_file(reference_audio_path)
+        target_dBFS = reference_audio.dBFS  # Niveau sonore cible
+
+        # Extraire l'audio de la vidéo
+        temp_audio_path = os.path.splitext(video_path)[0] + "_temp_audio.mp3"
+        os.system(f'ffmpeg -y -i "{video_path}" -vn -acodec mp3 "{temp_audio_path}"')
+
+        # Charger l'audio extrait pour analyser son niveau
+        audio = AudioSegment.from_file(temp_audio_path)
+        input_dBFS = audio.dBFS
+
+        # Calculer le makeup gain pour aligner sur le niveau cible
+        makeup_gain = target_dBFS - input_dBFS
+
+        # Appliquer le compresseur avec ffmpeg
+        compressed_audio_path = os.path.splitext(video_path)[0] + "_compressed_audio.mp3"
+        ffmpeg_cmd = (
+            f'ffmpeg -y -i "{temp_audio_path}" '
+            f'-filter:a "acompressor=threshold=-30dB:ratio=4:attack=20:release=200:makeup={makeup_gain}" '
+            f'-c:a mp3 "{compressed_audio_path}"'
+        )
+        os.system(ffmpeg_cmd)
+
+        # Renommer l'ancienne vidéo en backup
+        backup_path = os.path.splitext(video_path)[0] + "_backup.mp4"
+        if os.path.exists(backup_path):
+            os.remove(backup_path)  # Supprimer un ancien backup s'il existe
+        os.rename(video_path, backup_path)
+
+        # Recomposer la vidéo avec l'audio compressé
+        ffmpeg_cmd = (
+            f'ffmpeg -y -i "{backup_path}" -i "{compressed_audio_path}" '
+            f'-c:v copy -map 0:v:0 -map 1:a:0 "{video_path}"'
+        )
+        os.system(ffmpeg_cmd)
+
+        # Supprimer les fichiers temporaires
+        os.remove(temp_audio_path)
+        os.remove(compressed_audio_path)
+        if not make_backup:
+            os.remove(backup_path)
+
+        st.success(f"Audio dynamically normalized for {os.path.basename(video_path)}!")
+    except Exception as e:
+        st.error(
+            f"Dynamic audio normalization failed for {os.path.basename(video_path)}: {str(e)}")
 
 def replace_audio(main_clip, start_sec, end_sec, audio_path, target_size):
     """Remplace l'audio d'une section par un nouvel audio, ajustant la vitesse de la vidéo si nécessaire.
