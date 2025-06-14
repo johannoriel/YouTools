@@ -22,7 +22,9 @@ translations["en"].update({
     "batchsilences_merge_success": "Successfully merged {count} videos",
     "batchsilences_merge_error": "Error merging videos: {error}",
     "batchsilences_reorder_videos": "Reorder Videos",
-    "batchsilences_reorder_instructions": "Drag and drop to reorder the videos for merging."
+    "batchsilences_reorder_instructions": "Drag and drop to reorder the videos for merging.",
+    "batchsilences_normalize_audio": "Normalize audio",
+    "batchsilences_normalizing_audio": "Normalizing audio..."
 })
 
 translations["fr"].update({
@@ -38,7 +40,9 @@ translations["fr"].update({
     "batchsilences_merge_success": "{count} vidéos fusionnées avec succès",
     "batchsilences_merge_error": "Erreur lors de la fusion des vidéos : {error}",
     "batchsilences_reorder_videos": "Réorganiser les Vidéos",
-    "batchsilences_reorder_instructions": "Glissez-déposez pour réorganiser l'ordre des vidéos avant la fusion."
+    "batchsilences_reorder_instructions": "Glissez-déposez pour réorganiser l'ordre des vidéos avant la fusion.",
+    "batchsilences_normalize_audio": "Normaliser l'audio",
+    "batchsilences_normalizing_audio": "Normalisation de l'audio en cours..."
 })
 
 
@@ -72,6 +76,13 @@ class BatchsilencesPlugin(Plugin):
             return output_path
         except Exception as e:
             return t("batchsilences_merge_error").format(error=str(e))
+
+    def normalize_audio_if_needed(self, video_path: str, config: dict):
+        """Normalize audio if the option is enabled"""
+        if st.session_state.get("normalize_audio", False):
+            reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
+            with st.spinner(t("batchsilences_normalizing_audio")):
+                normalize_audio(video_path, reference_audio_path, make_backup=True)
 
     def run(self, config):
         st.header(t("batchsilences_header"))
@@ -118,7 +129,12 @@ class BatchsilencesPlugin(Plugin):
         else:
             ordered_video_paths = []
 
-        normalize_audio_option = st.checkbox("Normalize audio after merging", value=True)
+        # Audio normalization option (stored in session state)
+        st.checkbox(
+            t("batchsilences_normalize_audio"),
+            value=True,
+            key="normalize_audio"
+        )
 
         # Process button
         col1, col2, col3 = st.columns(3)
@@ -149,6 +165,8 @@ class BatchsilencesPlugin(Plugin):
                             processed_count += 1
                             st.text(f"Processed: {video_name}")
                             st.info(f"Reduction : {reduction}")
+                            # Normalize audio if needed
+                            self.normalize_audio_if_needed(result, config)
 
                     st.success(t("batchsilences_success").format(
                         count=processed_count))
@@ -190,10 +208,8 @@ class BatchsilencesPlugin(Plugin):
                         merge_result = self.merge_videos(
                             processed_videos, output_path)
                         if not merge_result.startswith(t("batchsilences_merge_error")):
-                            if normalize_audio_option:
-                                reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
-                                with st.spinner("Normalizing audio..."):
-                                    normalize_audio(merge_result, reference_audio_path, make_backup=False)
+                            # Normalize audio if needed
+                            self.normalize_audio_if_needed(merge_result, config)
                             st.success(t("batchsilences_merge_success").format(
                                 count=processed_count))
                             st.success(
@@ -216,10 +232,8 @@ class BatchsilencesPlugin(Plugin):
                     merge_result = self.merge_videos(
                         ordered_video_paths, output_path)
                     if not merge_result.startswith(t("batchsilences_merge_error")):
-                        if normalize_audio_option:
-                            reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
-                            with st.spinner("Normalizing audio..."):
-                                normalize_audio(merge_result, reference_audio_path, make_backup=False)
+                        # Normalize audio if needed
+                        self.normalize_audio_if_needed(merge_result, config)
                         st.success(t("batchsilences_merge_success").format(
                             count=len(ordered_video_paths)))
                         st.success(f"Merged video saved at: {merge_result}")
