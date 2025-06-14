@@ -208,7 +208,7 @@ class YoutubeTranscriptWidget(Widget):
                         st.warning("Please enter a question")
 
             # Display summary if available
-            if f"{self.prefix}_summary" in st.session_state:
+            if f"{self.prefix}_summary_result" in st.session_state:
                 st.subheader(t("transcript_summary_title"))
                 st.write(st.session_state[f"{self.prefix}_summary_result"])
 
