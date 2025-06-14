@@ -35,6 +35,67 @@ translations["fr"].update({
 })
 
 
+def fetch_transcript(video_url: str, youtube_api: YoutubeAPI, plugin_manager, prefix: str) -> str:
+    """Fetch transcript from DB, YouTube API, or Whisper transcription in that order."""
+    video_id = YoutubeTranscriptWidget.get_video_id_from_url(None, video_url)
+    if not video_id:
+        st.error(t("transcript_error").format(error="Invalid YouTube URL"))
+        return ""
+
+    # Check database first
+    transcript = get_video_transcript(video_id)
+    if transcript:
+        return transcript
+
+    # Try YouTube API transcript
+    try:
+        transcript, _ = youtube_api.get_transcript(video_id, plugin_manager.config["common"]["language"])
+        if transcript and not transcript.startswith("get_transcript error"):
+            save_transcript(video_id, transcript)
+            return transcript
+    except Exception as e:
+        st.error(t("transcript_error").format(error=str(e)))
+
+    # Fallback to Whisper transcription
+    video_path = None
+    try:
+        from yt_dlp import YoutubeDL
+        work_directory = plugin_manager.config['common']['work_directory']
+        ydl_opts_audio = {
+            'format': 'bestaudio',
+            'outtmpl': os.path.join(work_directory, f'{video_id}.%(ext)s'),
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }],
+        }
+        with YoutubeDL(ydl_opts_audio) as ydl:
+            ydl.download([video_url])
+            video_path = os.path.join(work_directory, f'{video_id}.mp3')
+
+        transcript = YoutubeTranscriptWidget.transcribe_video(
+            None, video_path, "txt",
+            whisper_path=os.path.expanduser(plugin_manager.config['transcript']["whisper_path"]),
+            ffmpeg_path=os.path.expanduser(plugin_manager.config['transcript']["ffmpeg_path"]),
+            whisper_model=plugin_manager.config['transcript']["whisper_model"],
+            lang=plugin_manager.config["common"]["language"]
+        )
+
+        if transcript:
+            save_transcript(video_id, transcript)
+            return transcript
+        return ""
+
+    except Exception as e:
+        st.error(t("transcript_error").format(error=str(e)))
+        return ""
+    finally:
+        if video_path and os.path.exists(video_path):
+            try:
+                os.remove(video_path)
+            except Exception as e:
+                st.error(t("transcript_error").format(error=str(e)))
+
 class YoutubeTranscriptWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
@@ -71,67 +132,8 @@ class YoutubeTranscriptWidget(Widget):
         )
 
     def generate_transcript(self, video_id: str, video_url: str) -> str:
-        """Generate transcript by downloading video and processing it with transcript plugin."""
-        video_path = None
-        try:
-            from yt_dlp import YoutubeDL
-            ydl_opts = {
-                'skip_download': True,
-                'writesubtitles': True,
-                'writeautomaticsub': True,
-                'subtitleslangs': [self.plugin_manager.config['common']['language']],
-                'subtitlesformat': 'txt',
-                'outtmpl': os.path.join(self.plugin_manager.config['common']['work_directory'], '%(id)s.%(ext)s'),
-            }
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                if 'subtitles' in info and self.plugin_manager.config['common']['language'] in info['subtitles']:
-                    subtitle_file = os.path.join(
-                        self.plugin_manager.config['common']['work_directory'],
-                        f"{video_id}.{self.plugin_manager.config['common']['language']}.txt"
-                    )
-                    ydl.download([video_url])
-                    if os.path.exists(subtitle_file):
-                        with open(subtitle_file, 'r', encoding='utf-8') as f:
-                            transcript = f.read()
-                        if transcript:
-                            save_transcript(video_id, transcript)
-                            os.remove(subtitle_file)
-                            return transcript
-
-            work_directory = self.plugin_manager.config['common']['work_directory']
-            ydl_opts_audio = {
-                'format': 'bestaudio',
-                'outtmpl': os.path.join(work_directory, f'{video_id}.%(ext)s'),
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                }],
-            }
-            with YoutubeDL(ydl_opts_audio) as ydl:
-                ydl.download([video_url])
-                video_path = os.path.join(
-                    work_directory, f'{video_id}.mp3')
-
-            # Transcribe video
-
-            transcript = self.transcribe_video(video_path, "txt")
-
-            if transcript:
-                save_transcript(video_id, transcript)
-                return transcript
-            return ""
-
-        except Exception as e:
-            st.error(t("transcript_error").format(error=str(e)))
-            raise e
-            return ""
-        finally:
-            if video_path and os.path.exists(video_path):
-                try:
-                    os.remove(video_path)
-                except Exception as e:
-                    st.error(t("transcript_error").format(error=str(e)))
+        """Generate transcript using fetch_transcript function."""
+        return fetch_transcript(video_url, self.youtube_api, self.plugin_manager, self.prefix)
 
     def summarize_transcript(self, transcript: str) -> str:
         """Generate summary of transcript using LLM."""
@@ -165,17 +167,13 @@ class YoutubeTranscriptWidget(Widget):
         if st.button(t("transcript_fetch_button"), key=f"{self.prefix}_fetch_transcript"):
             if video_id:
                 with st.spinner(t("transcript_fetching")):
-                    transcript = get_video_transcript(video_id)
-                    if not transcript:
-                        transcript = self.generate_transcript(
-                            video_id, video_url)
+                    transcript = fetch_transcript(video_url, self.youtube_api, self.plugin_manager, self.prefix)
                     if transcript:
                         st.session_state[f"{self.prefix}_transcript"] = transcript
                     else:
                         st.warning(t("transcript_not_available"))
             else:
-                st.error(t("transcript_error").format(
-                    error="Invalid YouTube URL"))
+                st.error(t("transcript_error").format(error="Invalid YouTube URL"))
 
         # Display transcript if available
         if f"{self.prefix}_transcript" in st.session_state:
