@@ -484,47 +484,47 @@ class TrendwatcherPlugin(Plugin):
         search_videos = engine["search_videos"]
         search_texts = engine["search_texts"]
 
-        if search_mode == "or":
-            query_terms = [main_keyword] + synonyms
-            query = " OR ".join(f'"{term}"' for term in query_terms if term)
-            if search_engine == "duckduckgo":
-                query += " site:youtube.com OR -inurl:(signup login)"
-            elif search_engine == "google":
-                query += " site:youtube.com"
-            elif search_engine == "searxng":
-                query += " site:youtube.com"
-            elif search_engine == "bing":
-                query += " site:youtube.com"
-            if debug:
-                st.write(t("trendwatcher_debug_query").format(query=query))
-            queries = [(query, main_keyword)]
-        else:
-            queries = [(f'"{main_keyword}"', main_keyword)]
-            queries.extend((f'"{syn}"', main_keyword) for syn in synonyms)
-            if search_engine == "duckduckgo":
-                queries = [(f"{q} site:youtube.com OR -inurl:(signup login)", k)
-                           for q, k in queries]
-            elif search_engine == "google":
-                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
-            elif search_engine == "searxng":
-                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
-            elif search_engine == "bing":
-                queries = [(f"{q} site:youtube.com", k) for q, k in queries]
-            if debug:
-                st.write(t("trendwatcher_debug_query").format(
-                    query=", ".join(q for q, _ in queries)))
-
-        valid_video_domains = [
-            "youtube.com",
-            "youtu.be",
-            "dailymotion.com",
-            "vimeo.com",
-            "bilibili.com",
-            "twitch.tv",
-            "tiktok.com"
-        ]
-
         try:
+            if search_mode == "or":
+                query_terms = [main_keyword] + synonyms
+                query = " OR ".join(f'"{term}"' for term in query_terms if term)
+                if search_engine == "duckduckgo":
+                    query += " site:youtube.com OR -inurl:(signup login)"
+                elif search_engine == "google":
+                    query += " site:youtube.com"
+                elif search_engine == "searxng":
+                    query += " site:youtube.com"
+                elif search_engine == "bing":
+                    query += " site:youtube.com"
+                if debug:
+                    st.write(t("trendwatcher_debug_query").format(query=query))
+                queries = [(query, main_keyword)]
+            else:
+                queries = [(f'"{main_keyword}"', main_keyword)]
+                queries.extend((f'"{syn}"', main_keyword) for syn in synonyms)
+                if search_engine == "duckduckgo":
+                    queries = [(f"{q} site:youtube.com OR -inurl:(signup login)", k)
+                               for q, k in queries]
+                elif search_engine == "google":
+                    queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+                elif search_engine == "searxng":
+                    queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+                elif search_engine == "bing":
+                    queries = [(f"{q} site:youtube.com", k) for q, k in queries]
+                if debug:
+                    st.write(t("trendwatcher_debug_query").format(
+                        query=", ".join(q for q, _ in queries)))
+
+            valid_video_domains = [
+                "youtube.com",
+                "youtu.be",
+                "dailymotion.com",
+                "vimeo.com",
+                "bilibili.com",
+                "twitch.tv",
+                "tiktok.com"
+            ]
+
             all_results = []
             found_results = False
             for query, keyword in queries:
@@ -546,8 +546,10 @@ class TrendwatcherPlugin(Plugin):
                 ))
 
             return all_results, found_results
+
         except Exception as e:
-            return str(e)
+            raise e
+            return [], False  # Return empty list and False for found_results when error occurs
 
     def trend_watcher(self, config):
         st.header(t("trendwatcher_header"))
@@ -664,12 +666,10 @@ class TrendwatcherPlugin(Plugin):
                         search_engine,
                         debug=debug_mode
                     )
-                    if isinstance(results, list):
-                        if not has_results:
-                            no_results_keywords.append(config["main"])
-                        all_results.extend(results)
-                    else:
-                        st.error(t("trendwatcher_error").format(error=results))
+
+                    if not has_results:
+                        no_results_keywords.append(config["main"])
+                    all_results.extend(results)
                     time.sleep(random.uniform(delay_min, delay_max))
 
                 st.session_state.trendwatcher_results = all_results
