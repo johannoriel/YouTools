@@ -1,13 +1,11 @@
-# transcript.py
-
 from lib.global_vars import translations, t
 from app import Plugin
 from plugins.common import list_all_video_files
 import streamlit as st
 import os
-import ast
 from lib.video_utils import transcribe_video_whisper_cli
 from widgets.yt_transcript import YoutubeTranscriptWidget
+from widgets.prompt_manager import PromptsManagerWidget
 
 translations["en"].update({
     "transcript_tab": "Transcription tools",
@@ -152,52 +150,6 @@ class TranscriptPlugin(Plugin):
             lang=lang
         )
 
-    def manage_prompts(self, config):
-        st.subheader(t("prompt_management"))
-
-        try:
-            if isinstance(config['transcript']['prompts'], str):
-                st.session_state.prompts = ast.literal_eval(config['transcript']['prompts'])
-            else:
-                st.session_state.prompts = config['transcript']['prompts']
-        except (SyntaxError, ValueError):
-            st.error("Erreur lors du décodage des prompts de la configuration. Réinitialisation à un dictionnaire vide.")
-            st.session_state.prompts = {}
-
-        prompt_options = list(st.session_state.prompts.keys()) + ['Custom']
-        selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="prompt_select")
-
-        if selected_prompt == 'Custom':
-            prompt_content = st.text_area(t("custom_prompt"), "", key="custom_prompt")
-        else:
-            prompt_content = st.text_area(t("edit_prompt"), st.session_state.prompts.get(selected_prompt, ""), key="edit_prompt")
-
-        col1, col2, col3 = st.columns([1, 1, 1])
-        new_prompt_name = col1.text_input(t("new_prompt_name"), key="new_prompt_name")
-        if col1.button(t("add_prompt"), key="add_prompt"):
-            if new_prompt_name:
-                st.session_state.prompts[new_prompt_name] = prompt_content
-                config['transcript']['prompts'] = str(st.session_state.prompts)
-                self.plugin_manager.save_config(config)
-                st.success(f"Prompt '{new_prompt_name}' ajouté/mis à jour.")
-                st.rerun()
-
-        if selected_prompt != 'Custom' and col2.button(t("delete_prompt"), key="delete_prompt"):
-            del st.session_state.prompts[selected_prompt]
-            config['transcript']['prompts'] = str(st.session_state.prompts)
-            self.plugin_manager.save_config(config)
-            st.success(f"Prompt '{selected_prompt}' supprimé.")
-            st.rerun()
-
-        if selected_prompt != 'Custom' and col3.button(t("save_prompt"), key="save_prompt"):
-            st.session_state.prompts[selected_prompt] = prompt_content
-            config['transcript']['prompts'] = str(st.session_state.prompts)
-            self.plugin_manager.save_config(config)
-            st.success(f"Prompt '{selected_prompt}' sauvegardé.")
-            st.rerun()
-
-        return selected_prompt, prompt_content
-
     def apply_prompt(self, transcript, prompt, llm_config):
         response = self.process_with_llm(prompt, llm_config.get('llm_sys_prompt', ''), transcript)
         return response
@@ -218,9 +170,6 @@ class TranscriptPlugin(Plugin):
 
     def run_local(self, config):
         st.header(t("transcript_header"))
-
-        with st.expander(t("prompt_management"), expanded=True):
-            selected_prompt, prompt_content = self.manage_prompts(config)
 
         work_directory = os.path.expanduser(config['common']['work_directory'])
         videos = list_all_video_files(work_directory)
@@ -259,28 +208,34 @@ class TranscriptPlugin(Plugin):
                     mime="text/plain"
                 )
 
-            if st.button(t("apply_prompt")):
-                llm_config = config.get('llm', {})
-                final_prompt = prompt_content if selected_prompt == 'Custom' else st.session_state.prompts[selected_prompt] + "\n" + prompt_content
-                result = self.apply_prompt(st.session_state.transcript, final_prompt, llm_config)
-                st.session_state.prompt_result = result
+            col1, col2 = st.columns(2)
+            with col1:
+                question = st.text_input(t("transcript_question_input"), key="local_question_input")
+                if st.button(t("transcript_question_button"), key="local_ask_question"):
+                    if question:
+                        with st.spinner("Processing question..."):
+                            answer = self.answer_question(st.session_state.transcript, question)
+                            st.session_state[f"transcript_answer"] = answer
+                    else:
+                        st.warning("Please enter a question")
 
-            if 'prompt_result' in st.session_state:
+            with col2:
+                prompt_options = list(st.session_state.prompts.keys())
+                if prompt_options:
+                    selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="local_prompt_select")
+                    if st.button(t("apply_prompt"), key="local_apply_prompt"):
+                        with st.spinner("Processing prompt..."):
+                            llm_config = config.get('llm', {})
+                            result = self.apply_prompt(st.session_state.transcript, st.session_state.prompts[selected_prompt], llm_config)
+                            st.session_state[f"transcript_prompt_result"] = result
+
+            if f"transcript_answer" in st.session_state:
+                st.subheader(t("transcript_answer_title"))
+                st.write(st.session_state[f"transcript_answer"])
+
+            if f"transcript_prompt_result" in st.session_state:
                 st.subheader(t("prompt_result"))
-                st.text_area(t("promt_result_display"), st.session_state.prompt_result, height=300)
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(t("copy_result")):
-                        st.code(st.session_state.prompt_result)
-                        st.success(t("result_copied"))
-                with col2:
-                    st.download_button(
-                        label=t("download_result"),
-                        data=st.session_state.prompt_result,
-                        file_name="prompt_result.txt",
-                        mime="text/plain"
-                    )
+                st.write(st.session_state[f"transcript_prompt_result"])
 
     def run_remote(self, config):
         self.yt_transcript_widget.display()
@@ -319,8 +274,10 @@ class TranscriptPlugin(Plugin):
                 st.write(st.session_state[f"transcript_prompt_result"])
 
     def run(self, config):
-        tab1, tab2 = st.tabs(["Local", "Remote"])
+        tab1, tab2, tab3 = st.tabs(["Local", "Remote", t("prompt_management")])
         with tab1:
             self.run_local(config)
         with tab2:
             self.run_remote(config)
+        with tab3:
+            PromptsManagerWidget("prompt_manager", "prompt_manager", self.plugin_manager).display(config)
