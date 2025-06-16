@@ -226,7 +226,7 @@ class DirectpublishPlugin(Plugin):
             )
 
         do_llm = st.checkbox(t("directpublish_do_llm"), value=True)
-        title = st.text_input(t("directpublish_title"))
+        title = st.text_input(t("directpublish_title"), max_chars=99)
         do_publish = st.checkbox(t("directpublish_dopublish"), value=True)
         use_custom_thumbnail = st.checkbox(t("directpublish_custom_thumbnail"))
         thumbnail_path = None
