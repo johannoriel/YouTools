@@ -225,7 +225,12 @@ class DirectpublishPlugin(Plugin):
                     default_background) if default_background in background_files else 0
             )
 
-        do_llm = st.checkbox(t("directpublish_do_llm"), value=True)
+        do_llm = st.checkbox(t("directpublish_do_llm"), value=False)
+        if do_llm:
+            user_prompt = st.text_area(
+                t("directpublish_preprompt"), value=st.session_state.rag_question, key="rag_prompt_key")
+            st.session_state.rag_question = user_prompt
+
         title = st.text_input(t("directpublish_title"), max_chars=99)
         do_publish = st.checkbox(t("directpublish_dopublish"), value=True)
         use_custom_thumbnail = st.checkbox(t("directpublish_custom_thumbnail"))
@@ -259,10 +264,6 @@ class DirectpublishPlugin(Plugin):
 
         if 'rag_question' not in st.session_state:
             st.session_state.rag_question = config['ragllm']['llm_prompt']
-
-        user_prompt = st.text_area(
-            t("directpublish_preprompt"), value=st.session_state.rag_question, key="rag_prompt_key")
-        st.session_state.rag_question = user_prompt
 
         if 'addings' not in st.session_state:
             st.session_state.addings = ""
