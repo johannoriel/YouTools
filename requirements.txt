@@ -20,6 +20,7 @@ beautifulsoup4
 TTS
 pyannote.audio
 pytube
+pytubefix
 tweepy
 atproto
 python-telegram-bot

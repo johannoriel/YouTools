@@ -6,6 +6,8 @@ import os
 from lib.video_utils import transcribe_video_whisper_cli
 from widgets.yt_transcript import YoutubeTranscriptWidget
 from widgets.prompt_manager import PromptsManagerWidget
+from pytubefix import Playlist
+import re
 
 translations["en"].update({
     "transcript_tab": "Transcription tools",
@@ -49,6 +51,18 @@ translations["en"].update({
     "transcript_answer_title": "Answer to Your Question",
     "transcript_free_prompt_input": "Enter a custom prompt for the transcript",
     "transcript_free_prompt_button": "Apply Custom Prompt",
+    "playlist_tab": "Playlist Processing",
+    "playlist_url": "Enter YouTube Playlist URL",
+    "playlist_process_button": "Process Playlist",
+    "playlist_processing": "Processing playlist ({current}/{total})...",
+    "playlist_results": "Playlist Processing Results",
+    "playlist_video_title": "Video Title",
+    "playlist_response": "Response",
+    "playlist_no_results": "No results to display",
+    "playlist_invalid_url": "Invalid YouTube Playlist URL. Please provide a valid playlist URL (e.g., https://www.youtube.com/playlist?list=... or a video URL with a playlist parameter).",
+    "playlist_download_button": "Download Playlist Results",
+    "combined_results_prompt": "Enter a question or prompt about the combined results",
+    "combined_results_title": "Combined Results Response",
 })
 
 translations["fr"].update({
@@ -93,6 +107,18 @@ translations["fr"].update({
     "transcript_answer_title": "Réponse à votre question",
     "transcript_free_prompt_input": "Entrez un prompt personnalisé pour la transcription",
     "transcript_free_prompt_button": "Appliquer le Prompt Personnalisé",
+    "playlist_tab": "Traitement de la playlist",
+    "playlist_url": "Entrez l'URL de la playlist YouTube",
+    "playlist_process_button": "Traiter la playlist",
+    "playlist_processing": "Traitement de la playlist ({current}/{total})...",
+    "playlist_results": "Résultats du traitement de la playlist",
+    "playlist_video_title": "Titre de la vidéo",
+    "playlist_response": "Réponse",
+    "playlist_no_results": "Aucun résultat à afficher",
+    "playlist_invalid_url": "URL de playlist YouTube invalide. Veuillez fournir une URL de playlist valide (par ex., https://www.youtube.com/playlist?list=... ou une URL de vidéo avec un paramètre de playlist).",
+    "playlist_download_button": "Télécharger les résultats de la playlist",
+    "combined_results_prompt": "Entrez une question ou un prompt sur l'ensemble des résultats",
+    "combined_results_title": "Réponse sur l'ensemble des résultats",
 })
 
 class TranscriptPlugin(Plugin):
@@ -129,7 +155,10 @@ class TranscriptPlugin(Plugin):
         return fields
 
     def get_tabs(self):
-        return [{"name": t("transcript_tab"), "plugin": "transcript"}]
+        return [
+            {"name": t("transcript_tab"), "plugin": "transcript"},
+            {"name": t("playlist_tab"), "plugin": "transcript"}
+        ]
 
     def transcribe_video(self, video_path, output_format, whisper_path=None, whisper_model=None, ffmpeg_path=None, lang=None):
         if whisper_path is None:
@@ -167,6 +196,63 @@ class TranscriptPlugin(Plugin):
         Transcript: {transcript}
         """
         return self.process_with_llm(prompt.format(question=question, transcript=transcript), "", transcript)
+
+    def process_transcript(self, transcript, question=None, selected_prompt=None, llm_config=None):
+        if question:
+            return self.answer_question(transcript, question)
+        elif selected_prompt:
+            return self.apply_prompt(transcript, st.session_state.prompts[selected_prompt], llm_config)
+        return None
+
+    def process_combined_results(self, results, question=None, selected_prompt=None, llm_config=None):
+        combined_text = "\n\n".join([f"Video: {r['title']}\nResponse: {r['response']}" for r in results])
+        if question:
+            return self.answer_question(combined_text, question)
+        elif selected_prompt:
+            return self.apply_prompt(combined_text, st.session_state.prompts[selected_prompt], llm_config)
+        return None
+
+    def display_transcript_results(self, transcript_key, answer_key, prompt_result_key, config, mode="remote"):
+        if transcript_key in st.session_state:
+            transcript = st.session_state[transcript_key]
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                question = st.text_input(t("transcript_question_input"), key=f"{mode}_question_input")
+                if st.button(t("transcript_question_button"), key=f"{mode}_ask_question"):
+                    if question:
+                        with st.spinner("Processing question..."):
+                            answer = self.answer_question(transcript, question)
+                            st.session_state[answer_key] = answer
+                    else:
+                        st.warning("Please enter a question")
+
+            with col2:
+                prompt_options = list(st.session_state.prompts.keys())
+                if prompt_options:
+                    selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key=f"{mode}_prompt_select")
+                    if st.button(t("apply_prompt"), key=f"{mode}_apply_prompt"):
+                        with st.spinner("Processing prompt..."):
+                            llm_config = config.get('llm', {})
+                            result = self.apply_prompt(transcript, st.session_state.prompts[selected_prompt], llm_config)
+                            st.session_state[prompt_result_key] = result
+
+            if answer_key in st.session_state:
+                st.subheader(t("transcript_answer_title"))
+                st.write(st.session_state[answer_key])
+
+            if prompt_result_key in st.session_state:
+                st.subheader(t("prompt_result"))
+                st.write(st.session_state[prompt_result_key])
+
+    def extract_playlist_id(self, url):
+        """Extract playlist ID from YouTube URL."""
+        pattern = r"(?:list=)([0-9A-Za-z_-]+)|(?:youtube\.com/playlist\?list=)([0-9A-Za-z_-]+)"
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1) or match.group(2)
+        return None
 
     def run_local(self, config):
         st.header(t("transcript_header"))
@@ -208,76 +294,95 @@ class TranscriptPlugin(Plugin):
                     mime="text/plain"
                 )
 
-            col1, col2 = st.columns(2)
-            with col1:
-                question = st.text_input(t("transcript_question_input"), key="local_question_input")
-                if st.button(t("transcript_question_button"), key="local_ask_question"):
-                    if question:
-                        with st.spinner("Processing question..."):
-                            answer = self.answer_question(st.session_state.transcript, question)
-                            st.session_state[f"transcript_answer"] = answer
-                    else:
-                        st.warning("Please enter a question")
-
-            with col2:
-                prompt_options = list(st.session_state.prompts.keys())
-                if prompt_options:
-                    selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="local_prompt_select")
-                    if st.button(t("apply_prompt"), key="local_apply_prompt"):
-                        with st.spinner("Processing prompt..."):
-                            llm_config = config.get('llm', {})
-                            result = self.apply_prompt(st.session_state.transcript, st.session_state.prompts[selected_prompt], llm_config)
-                            st.session_state[f"transcript_prompt_result"] = result
-
-            if f"transcript_answer" in st.session_state:
-                st.subheader(t("transcript_answer_title"))
-                st.write(st.session_state[f"transcript_answer"])
-
-            if f"transcript_prompt_result" in st.session_state:
-                st.subheader(t("prompt_result"))
-                st.write(st.session_state[f"transcript_prompt_result"])
+            self.display_transcript_results("transcript", "transcript_answer", "transcript_prompt_result", config, mode="local")
 
     def run_remote(self, config):
         self.yt_transcript_widget.display()
+        self.display_transcript_results("transcript_transcript", "transcript_answer", "transcript_prompt_result", config, mode="remote")
 
-        if f"transcript_transcript" in st.session_state:
-            transcript = st.session_state[f"transcript_transcript"]
+    def run_playlist(self, config):
+        st.header(t("playlist_tab"))
+        playlist_url = st.text_input(t("playlist_url"))
+        prompt_options = list(st.session_state.prompts.keys())
+        question = st.text_input(t("transcript_question_input"), key="playlist_question_input")
+        selected_prompt = None
+        if prompt_options:
+            selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="playlist_prompt_select")
 
-            col1, col2 = st.columns(2)
+        if st.button(t("playlist_process_button")) and playlist_url:
+            playlist_id = self.extract_playlist_id(playlist_url)
+            if not playlist_id:
+                st.error(t("playlist_invalid_url"))
+                return
 
-            with col1:
-                question = st.text_input(t("transcript_question_input"), key="remote_question_input")
-                if st.button(t("transcript_question_button"), key="remote_ask_question"):
-                    if question:
-                        with st.spinner("Processing question..."):
-                            answer = self.answer_question(transcript, question)
-                            st.session_state[f"transcript_answer"] = answer
-                    else:
-                        st.warning("Please enter a question")
+            normalized_playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+            with st.spinner(t("playlist_processing").format(current=0, total=0)):
+                try:
+                    playlist = Playlist(normalized_playlist_url)
+                    videos = list(playlist.videos)  # Convert to list to get total count
+                    total_videos = len(videos)
+                    progress_bar = st.progress(0)
+                    results = []
+                    llm_config = config.get('llm', {})
 
-            with col2:
-                prompt_options = list(st.session_state.prompts.keys())
-                if prompt_options:
-                    selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="remote_prompt_select")
-                    if st.button(t("apply_prompt"), key="remote_apply_prompt"):
-                        with st.spinner("Processing prompt..."):
-                            llm_config = config.get('llm', {})
-                            result = self.apply_prompt(transcript, st.session_state.prompts[selected_prompt], llm_config)
-                            st.session_state[f"transcript_prompt_result"] = result
+                    for i, video in enumerate(videos, 1):
+                        progress_bar.progress(i / total_videos, text=t("playlist_processing").format(current=i, total=total_videos))
+                        try:
+                            # Step 1: Get transcript
+                            transcript = self.yt_transcript_widget.fetch_transcript(video.watch_url)
+                            if transcript:
+                                # Step 2: Apply prompt or question
+                                response = self.process_transcript(transcript, question, selected_prompt, llm_config)
+                                if response:
+                                    results.append({"title": video.title, "url": video.watch_url, "response": response})
+                        except Exception as e:
+                            st.error(f"Error processing video {video.title}: {str(e)}")
 
-            if f"transcript_answer" in st.session_state:
-                st.subheader(t("transcript_answer_title"))
-                st.write(st.session_state[f"transcript_answer"])
+                    st.session_state.playlist_results = results
+                    progress_bar.empty()
+                except Exception as e:
+                    st.error(f"{t('playlist_invalid_url')} ({normalized_playlist_url}): {str(e)}")
 
-            if f"transcript_prompt_result" in st.session_state:
-                st.subheader(t("prompt_result"))
-                st.write(st.session_state[f"transcript_prompt_result"])
+        if "playlist_results" in st.session_state and st.session_state.playlist_results:
+            st.subheader(t("playlist_results"))
+            data = [{"Video Title": r["title"], "URL": r["url"], "Response": r["response"]} for r in st.session_state.playlist_results]
+            st.table(data)
+
+            # Export results to a file
+            results_text = "\n\n".join([f"Video: {r['title']}\nURL: {r['url']}\nResponse: {r['response']}" for r in st.session_state.playlist_results])
+            st.download_button(
+                label=t("playlist_download_button"),
+                data=results_text,
+                file_name="playlist_request.txt",
+                mime="text/plain"
+            )
+
+            # Process combined results
+            st.subheader(t("combined_results_title"))
+            new_question = st.text_input(t("combined_results_prompt"), key="playlist_new_question_input")
+            new_prompt = None
+            if prompt_options:
+                new_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="playlist_new_prompt_select")
+
+            if st.button(t("apply_prompt"), key="playlist_new_apply_prompt"):
+                with st.spinner(t("playlist_processing").format(current=0, total=0)):
+                    llm_config = config.get('llm', {})
+                    response = self.process_combined_results(st.session_state.playlist_results, new_question, new_prompt, llm_config)
+                    if response:
+                        st.session_state.combined_results_response = response
+
+            if "combined_results_response" in st.session_state:
+                st.write(st.session_state.combined_results_response)
+        else:
+            st.info(t("playlist_no_results"))
 
     def run(self, config):
-        tab1, tab2, tab3 = st.tabs(["Local", "Remote", t("prompt_management")])
+        tab1, tab2, tab3, tab4 = st.tabs(["Local", "Remote", t("prompt_management"), t("playlist_tab")])
         with tab1:
             self.run_local(config)
         with tab2:
             self.run_remote(config)
         with tab3:
             PromptsManagerWidget("prompt_manager", "prompt_manager", self.plugin_manager).display(config)
+        with tab4:
+            self.run_playlist(config)
