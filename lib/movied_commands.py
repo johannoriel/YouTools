@@ -332,6 +332,8 @@ class ReplaceImageCommand(MovieCommand):
         start_time, end_time, image_path = parts[1], parts[2], parts[3]
         start_sec = self._parse_timecode(start_time) + offset
         end_sec = self._parse_timecode(end_time) + offset
+        if end_sec > clip.duration:
+            end_sec = clip.duration-0.1
         background_type = "green" if kwargs.get("use_green_background", False) else "video"
 
         modified_clip = replace_with_image(
