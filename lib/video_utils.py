@@ -917,34 +917,78 @@ def normalize_full_audio(video_path, reference_audio_path, make_backup=True):
     import os
     import streamlit as st
     from pydub import AudioSegment
+    import subprocess
 
     # Configurer le chemin vers ffmpeg
     AudioSegment.converter = "/usr/bin/ffmpeg"
 
+    # Initialiser les variables pour le nettoyage
+    temp_audio_path = None
+    compressed_audio_path = None
+    backup_path = None
+
     try:
+        # Vérifier si ffmpeg est accessible
+        if not os.path.exists(AudioSegment.converter):
+            raise FileNotFoundError(f"FFmpeg not found at {AudioSegment.converter}")
+
+        # Vérifier si les fichiers d'entrée existent
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+        if not os.path.exists(reference_audio_path):
+            raise FileNotFoundError(f"Reference audio file not found: {reference_audio_path}")
+
         # Charger le fichier de référence pour obtenir le niveau cible
         reference_audio = AudioSegment.from_file(reference_audio_path)
         target_dBFS = reference_audio.dBFS  # Niveau sonore cible
 
         # Extraire l'audio de la vidéo
         temp_audio_path = os.path.splitext(video_path)[0] + "_temp_audio.mp3"
-        os.system(f'ffmpeg -y -i "{video_path}" -vn -acodec mp3 "{temp_audio_path}"')
+        ffmpeg_cmd_extract = [
+            AudioSegment.converter, '-y',
+            '-i', video_path,
+            '-vn', '-acodec', 'mp3',
+            temp_audio_path
+        ]
+        print(f"Executing FFmpeg extract command: {' '.join(ffmpeg_cmd_extract)}")
+        result = subprocess.run(ffmpeg_cmd_extract, capture_output=True, text=True, check=True)
+        print(f"FFmpeg extract stdout: {result.stdout}")
+        print(f"FFmpeg extract stderr: {result.stderr}")
+
+        # Vérifier si le fichier temporaire a été créé
+        if not os.path.exists(temp_audio_path):
+            raise FileNotFoundError(f"Temporary audio file not created: {temp_audio_path}")
 
         # Charger l'audio extrait pour analyser son niveau
         audio = AudioSegment.from_file(temp_audio_path)
         input_dBFS = audio.dBFS
+        print(f"Target dBFS: {target_dBFS}, Input dBFS: {input_dBFS}")
 
         # Calculer le makeup gain pour aligner sur le niveau cible
         makeup_gain = target_dBFS - input_dBFS
+        print(f"Calculated makeup gain (before clamping): {makeup_gain}")
+
+        # Clamper makeup_gain dans la plage valide [1, 64] pour acompressor
+        makeup_gain = max(1, min(64, makeup_gain))
+        print(f"Clamped makeup gain: {makeup_gain}")
 
         # Appliquer le compresseur avec ffmpeg
         compressed_audio_path = os.path.splitext(video_path)[0] + "_compressed_audio.mp3"
-        ffmpeg_cmd = (
-            f'ffmpeg -y -i "{temp_audio_path}" '
-            f'-filter:a "acompressor=threshold=-30dB:ratio=4:attack=20:release=200:makeup={makeup_gain}" '
-            f'-c:a mp3 "{compressed_audio_path}"'
-        )
-        os.system(ffmpeg_cmd)
+        ffmpeg_cmd_compress = [
+            AudioSegment.converter, '-y',
+            '-i', temp_audio_path,
+            '-filter:a', f'acompressor=threshold=-30dB:ratio=4:attack=20:release=200:makeup={makeup_gain}',
+            '-c:a', 'mp3',
+            compressed_audio_path
+        ]
+        print(f"Executing FFmpeg compress command: {' '.join(ffmpeg_cmd_compress)}")
+        result = subprocess.run(ffmpeg_cmd_compress, capture_output=True, text=True, check=True)
+        print(f"FFmpeg compress stdout: {result.stdout}")
+        print(f"FFmpeg compress stderr: {result.stderr}")
+
+        # Vérifier si le fichier compressé a été créé
+        if not os.path.exists(compressed_audio_path):
+            raise FileNotFoundError(f"Compressed audio file not created: {compressed_audio_path}")
 
         # Renommer l'ancienne vidéo en backup
         backup_path = os.path.splitext(video_path)[0] + "_backup.mp4"
@@ -953,22 +997,44 @@ def normalize_full_audio(video_path, reference_audio_path, make_backup=True):
         os.rename(video_path, backup_path)
 
         # Recomposer la vidéo avec l'audio compressé
-        ffmpeg_cmd = (
-            f'ffmpeg -y -i "{backup_path}" -i "{compressed_audio_path}" '
-            f'-c:v copy -map 0:v:0 -map 1:a:0 "{video_path}"'
-        )
-        os.system(ffmpeg_cmd)
+        ffmpeg_cmd_recompose = [
+            AudioSegment.converter, '-y',
+            '-i', backup_path,
+            '-i', compressed_audio_path,
+            '-c:v', 'copy',
+            '-map', '0:v:0', '-map', '1:a:0',
+            video_path
+        ]
+        print(f"Executing FFmpeg recompose command: {' '.join(ffmpeg_cmd_recompose)}")
+        result = subprocess.run(ffmpeg_cmd_recompose, capture_output=True, text=True, check=True)
+        print(f"FFmpeg recompose stdout: {result.stdout}")
+        print(f"FFmpeg recompose stderr: {result.stderr}")
 
-        # Supprimer les fichiers temporaires
-        os.remove(temp_audio_path)
-        os.remove(compressed_audio_path)
-        if not make_backup:
+        # Supprimer les fichiers temporaires (sauf backup_path si make_backup=True)
+        for temp_file in [temp_audio_path, compressed_audio_path]:
+            if temp_file and os.path.exists(temp_file):
+                os.remove(temp_file)
+        if not make_backup and backup_path and os.path.exists(backup_path):
             os.remove(backup_path)
 
         st.success(f"Audio dynamically normalized for {os.path.basename(video_path)}!")
     except Exception as e:
-        st.error(
-            f"Dynamic audio normalization failed for {os.path.basename(video_path)}: {str(e)}")
+        st.error(f"Dynamic audio normalization failed for {os.path.basename(video_path)}: {str(e)}")
+        raise
+    finally:
+        # Nettoyage des fichiers temporaires
+        for temp_file in [temp_audio_path, compressed_audio_path]:
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception as e:
+                    print(f"Failed to remove {temp_file}: {str(e)}")
+        # Supprimer backup_path uniquement si make_backup=False
+        if not make_backup and backup_path and os.path.exists(backup_path):
+            try:
+                os.remove(backup_path)
+            except Exception as e:
+                print(f"Failed to remove {backup_path}: {str(e)}")
 
 def replace_audio(main_clip, start_sec, end_sec, audio_path, target_size):
     """Remplace l'audio d'une section par un nouvel audio, ajustant la vitesse de la vidéo si nécessaire.
