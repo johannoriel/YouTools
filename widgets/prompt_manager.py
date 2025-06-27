@@ -47,14 +47,15 @@ class PromptsManagerWidget(Widget):
         if 'prompts' not in st.session_state:
             st.session_state.prompts = {}
 
-    def display(self, config):
+    def display(self, prompt_varname):
         st.subheader(t("prompt_management"))
+        config = self.plugin_manager.config
 
         try:
-            if isinstance(config['transcript']['prompts'], str):
-                st.session_state.prompts = ast.literal_eval(config['transcript']['prompts'])
+            if isinstance(config[self.name][prompt_varname], str):
+                st.session_state.prompts = ast.literal_eval(config[self.name][prompt_varname])
             else:
-                st.session_state.prompts = config['transcript']['prompts']
+                st.session_state.prompts = config[self.name][prompt_varname]
         except (SyntaxError, ValueError):
             st.error("Erreur lors du décodage des prompts de la configuration. Réinitialisation à un dictionnaire vide.")
             st.session_state.prompts = {}
@@ -72,21 +73,21 @@ class PromptsManagerWidget(Widget):
         if col1.button(t("add_prompt"), key=f"{self.prefix}_add_prompt"):
             if new_prompt_name:
                 st.session_state.prompts[new_prompt_name] = prompt_content
-                config['transcript']['prompts'] = str(st.session_state.prompts)
+                config[self.name][prompt_varname] = str(st.session_state.prompts)
                 self.plugin_manager.save_config(config)
                 st.success(f"Prompt '{new_prompt_name}' ajouté/mis à jour.")
                 st.rerun()
 
         if selected_prompt != 'Custom' and col2.button(t("delete_prompt"), key=f"{self.prefix}_delete_prompt"):
             del st.session_state.prompts[selected_prompt]
-            config['transcript']['prompts'] = str(st.session_state.prompts)
+            config[self.name][prompt_varname] = str(st.session_state.prompts)
             self.plugin_manager.save_config(config)
             st.success(f"Prompt '{selected_prompt}' supprimé.")
             st.rerun()
 
         if selected_prompt != 'Custom' and col3.button(t("save_prompt"), key=f"{self.prefix}_save_prompt"):
             st.session_state.prompts[selected_prompt] = prompt_content
-            config['transcript']['prompts'] = str(st.session_state.prompts)
+            config[self.name][prompt_varname] = str(st.session_state.prompts)
             self.plugin_manager.save_config(config)
             st.success(f"Prompt '{selected_prompt}' sauvegardé.")
             st.rerun()

@@ -383,6 +383,6 @@ class TranscriptPlugin(Plugin):
         with tab2:
             self.run_remote(config)
         with tab3:
-            PromptsManagerWidget("prompt_manager", "prompt_manager", self.plugin_manager).display(config)
+            PromptsManagerWidget("transcript", "prompt_manager", self.plugin_manager).display("prompts")
         with tab4:
             self.run_playlist(config)
