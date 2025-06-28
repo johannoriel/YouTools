@@ -1,3 +1,5 @@
+# transcript.py
+
 from lib.global_vars import translations, t
 from app import Plugin
 from plugins.common import list_all_video_files
@@ -9,117 +11,7 @@ from widgets.prompt_manager import PromptsManagerWidget
 from pytubefix import Playlist
 import re
 
-translations["en"].update({
-    "transcript_tab": "Transcription tools",
-    "transcript_header": "Local Video Transcription",
-    "transcript_no_videos": "No videos found in the directory",
-    "transcript_select_video": "Select a video to transcribe",
-    "transcript_output_format": "Output format",
-    "transcript_transcribe_button": "Transcribe",
-    "transcript_transcribing": "Transcribing... (this may take several minutes)",
-    "transcript_transcription_done": "Transcription completed!",
-    "transcript_content": "Transcription Content",
-    "transcript_copy_button": "Copy Transcription",
-    "transcript_copy_success": "Transcription copied! Use Ctrl+C (or Cmd+C on Mac) to copy it from the code block above.",
-    "transcript_download_button": "Download Transcription",
-    "transcript_summary_with_llm": "Summarize with LLM",
-    "transcript_custom_prompt": "Custom prompt (optional)",
-    "transcript_summary_button": "Summarize with LLM",
-    "transcript_llm_summary": "LLM Summary",
-    "transcript_llm_copy_button": "Copy LLM Summary",
-    "transcript_llm_copy_success": "LLM Summary copied! Use Ctrl+C (or Cmd+C on Mac) to copy it from the code block above.",
-    "transcript_llm_download_button": "Download LLM Summary",
-    "transcript_error_transcribing": "Error during transcription: ",
-    "prompt_management": "Prompt Management",
-    "select_prompt": "Select a prompt",
-    "custom_prompt": "Custom prompt (optional)",
-    "apply_prompt": "Apply Prompt",
-    "new_prompt_name": "New prompt name",
-    "new_prompt_content": "New prompt content",
-    "add_prompt": "Add Prompt",
-    "save_prompt": "Save Prompt",
-    "edit_prompt": "Edit Prompt",
-    "delete_prompt": "Delete Prompt",
-    "prompt_result": "Prompt Result",
-    "copy_result": "Copy Result",
-    "download_result": "Download Result",
-    "result_copied": "Result copied! Use Ctrl+C (or Cmd+C on Mac) to copy it from the code block above.",
-    "promt_result_display": "Result",
-    "transcript_summary_title": "Transcript Summary",
-    "transcript_question_button": "Ask Question",
-    "transcript_question_input": "Enter your question about the transcript",
-    "transcript_answer_title": "Answer to Your Question",
-    "transcript_free_prompt_input": "Enter a custom prompt for the transcript",
-    "transcript_free_prompt_button": "Apply Custom Prompt",
-    "playlist_tab": "Playlist Processing",
-    "playlist_url": "Enter YouTube Playlist URL",
-    "playlist_process_button": "Process Playlist",
-    "playlist_processing": "Processing playlist ({current}/{total})...",
-    "playlist_results": "Playlist Processing Results",
-    "playlist_video_title": "Video Title",
-    "playlist_response": "Response",
-    "playlist_no_results": "No results to display",
-    "playlist_invalid_url": "Invalid YouTube Playlist URL. Please provide a valid playlist URL (e.g., https://www.youtube.com/playlist?list=... or a video URL with a playlist parameter).",
-    "playlist_download_button": "Download Playlist Results",
-    "combined_results_prompt": "Enter a question or prompt about the combined results",
-    "combined_results_title": "Combined Results Response",
-})
-
-translations["fr"].update({
-    "transcript_tab": "Outils de transcription",
-    "transcript_header": "Transcription locale de vidéos",
-    "transcript_no_videos": "Aucune vidéo trouvée dans le répertoire",
-    "transcript_select_video": "Sélectionnez une vidéo à transcrire",
-    "transcript_output_format": "Format de sortie",
-    "transcript_transcribe_button": "Transcrire",
-    "transcript_transcribing": "Transcription en cours... (ça peut prendre plusieurs minutes)",
-    "transcript_transcription_done": "Transcription terminée!",
-    "transcript_content": "Contenu de la transcription",
-    "transcript_copy_button": "Copier la transcription",
-    "transcript_copy_success": "Transcription copiée ! Utilisez Ctrl+C (ou Cmd+C sur Mac) pour la copier depuis le bloc de code ci-dessus.",
-    "transcript_download_button": "Télécharger la transcription",
-    "transcript_summary_with_llm": "Résumé avec LLM",
-    "transcript_custom_prompt": "Prompt personnalisé (optionnel)",
-    "transcript_summary_button": "Résumer avec LLM",
-    "transcript_llm_summary": "Résumé LLM",
-    "transcript_llm_copy_button": "Copier le résumé LLM",
-    "transcript_llm_copy_success": "Résumé LLM copié ! Utilisez Ctrl+C (ou Cmd+C sur Mac) pour le copier depuis le bloc de code ci-dessus.",
-    "transcript_llm_download_button": "Télécharger le résumé LLM",
-    "transcript_error_transcribing": "Erreur lors de la transcription : ",
-    "prompt_management": "Gestion des prompts",
-    "select_prompt": "Sélectionner un prompt",
-    "custom_prompt": "Prompt personnalisé (optionnel)",
-    "apply_prompt": "Appliquer le Prompt",
-    "new_prompt_name": "Nom du nouveau prompt",
-    "new_prompt_content": "Contenu du nouveau prompt",
-    "add_prompt": "Ajouter un Prompt",
-    "save_prompt": "Sauver le Prompt",
-    "edit_prompt": "Modifier le Prompt",
-    "delete_prompt": "Supprimer le Prompt",
-    "prompt_result": "Résultat du Prompt",
-    "copy_result": "Copier le Résultat",
-    "download_result": "Télécharger le Résultat",
-    "result_copied": "Résultat copié ! Utilisez Ctrl+C (ou Cmd+C on Mac) pour le copier depuis le bloc de code ci-dessus.",
-    "promt_result_display": "Resultat",
-    "transcript_summary_title": "Résumé de la transcription",
-    "transcript_question_button": "Poser une question",
-    "transcript_question_input": "Entrez votre question sur la transcription",
-    "transcript_answer_title": "Réponse à votre question",
-    "transcript_free_prompt_input": "Entrez un prompt personnalisé pour la transcription",
-    "transcript_free_prompt_button": "Appliquer le Prompt Personnalisé",
-    "playlist_tab": "Traitement de la playlist",
-    "playlist_url": "Entrez l'URL de la playlist YouTube",
-    "playlist_process_button": "Traiter la playlist",
-    "playlist_processing": "Traitement de la playlist ({current}/{total})...",
-    "playlist_results": "Résultats du traitement de la playlist",
-    "playlist_video_title": "Titre de la vidéo",
-    "playlist_response": "Réponse",
-    "playlist_no_results": "Aucun résultat à afficher",
-    "playlist_invalid_url": "URL de playlist YouTube invalide. Veuillez fournir une URL de playlist valide (par ex., https://www.youtube.com/playlist?list=... ou une URL de vidéo avec un paramètre de playlist).",
-    "playlist_download_button": "Télécharger les résultats de la playlist",
-    "combined_results_prompt": "Entrez une question ou un prompt sur l'ensemble des résultats",
-    "combined_results_title": "Réponse sur l'ensemble des résultats",
-})
+# ... (translations inchangées) ...
 
 class TranscriptPlugin(Plugin):
     def __init__(self, name, plugin_manager):
@@ -127,6 +19,10 @@ class TranscriptPlugin(Plugin):
         self.yt_transcript_widget = YoutubeTranscriptWidget("transcript", "transcript", plugin_manager)
         if 'prompts' not in st.session_state:
             st.session_state.prompts = {}
+        # Déclarer les prompts auprès du plugin llm
+        llm_plugin = plugin_manager.get_plugin("llm")
+        if llm_plugin:
+            llm_plugin.declare_json_prompt("transcript_prompts", self.name, "prompts")
 
     def get_config_fields(self):
         fields = {

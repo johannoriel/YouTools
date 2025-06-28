@@ -4,6 +4,7 @@ from lib.global_vars import translations, t
 from app import Widget
 import streamlit as st
 import ast
+import json
 
 translations["en"].update({
     "prompt_management": "Prompt Management",
@@ -20,7 +21,7 @@ translations["en"].update({
     "copy_result": "Copy Result",
     "download_result": "Download Result",
     "result_copied": "Result copied! Use Ctrl+C (or Cmd+C on Mac) to copy it from the code block above.",
-    "promt_result_display": "Result",
+    "promt_result_display": "Prompt: {0}",  # Placeholder {0} pour le nom du prompt
 })
 
 translations["fr"].update({
@@ -38,7 +39,7 @@ translations["fr"].update({
     "copy_result": "Copier le Résultat",
     "download_result": "Télécharger le Résultat",
     "result_copied": "Résultat copié ! Utilisez Ctrl+C (ou Cmd+C on Mac) pour le copier depuis le bloc de code ci-dessus.",
-    "promt_result_display": "Resultat",
+    "promt_result_display": "Prompt : {0}",  # Placeholder {0} pour le nom du prompt
 })
 
 class PromptsManagerWidget(Widget):
@@ -91,3 +92,32 @@ class PromptsManagerWidget(Widget):
             self.plugin_manager.save_config(config)
             st.success(f"Prompt '{selected_prompt}' sauvegardé.")
             st.rerun()
+
+    def display_prompts(self, plugin_name, field_name, prompt_type="json"):
+        """Affiche les prompts d'un plugin donné à partir du champ de configuration spécifié."""
+        config = self.plugin_manager.config.get(plugin_name, {})
+        prompts_data = config.get(field_name, "{}" if prompt_type == "json" else "")
+
+        if prompt_type == "json":
+            try:
+                if isinstance(prompts_data, str):
+                    prompts = ast.literal_eval(prompts_data)
+                else:
+                    prompts = prompts_data
+            except (SyntaxError, ValueError):
+                st.error(f"Erreur lors du décodage des prompts pour {plugin_name} ({field_name}).")
+                return
+            for prompt_name, prompt_content in prompts.items():
+                st.text_area(
+                    t("promt_result_display").format(prompt_name),
+                    prompt_content,
+                    key=f"{self.prefix}_{plugin_name}_{prompt_name}_display",
+                    disabled=True
+                )
+        else:
+            st.text_area(
+                t("promt_result_display").format(field_name),
+                prompts_data,
+                key=f"{self.prefix}_{plugin_name}_{field_name}_display",
+                disabled=True
+            )

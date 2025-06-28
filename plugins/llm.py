@@ -58,6 +58,8 @@ translations["en"].update({
     "llm_select_persona": "Select Persona",
     "llm_ollama_restart": "Restart Ollama",
     "llm_prompt_sequence_tab": "Prompt Sequence",
+    "llm_prompts_tab": "Prompts",
+    "llm_prompts_header": "Manage Prompts",
 })
 
 translations["fr"].update({
@@ -103,6 +105,8 @@ translations["fr"].update({
     "llm_select_persona": "Sélectionner un Persona",
     "llm_ollama_restart": "Redémarer Ollama",
     "llm_prompt_sequence_tab": "Séquence de Prompts",
+    "llm_prompts_tab": "Prompts",
+    "llm_prompts_header": "Gérer les Prompts",
 })
 
 
@@ -111,6 +115,8 @@ class LlmPlugin(Plugin):
         super().__init__(name, plugin_manager)
         if not plugin_manager.config.get(name):
             plugin_manager.config[name] = self.get_config_fields()
+        if 'registered_prompts' not in st.session_state:
+            st.session_state.registered_prompts = []
 
     def get_config_fields(self):
         models = self.get_config("models")
@@ -184,7 +190,7 @@ class LlmPlugin(Plugin):
                 "label": t("llm_select_persona"),
                 "options": persona_options,
                 "default": "Default"
-            }
+            },
         }
 
     def get_tabs(self):
@@ -858,11 +864,49 @@ class LlmPlugin(Plugin):
     def ollama_restart(self, config):
         self.restart_ollama()
 
+    def declare_json_prompt(self, prompt_name: str, plugin_name: str, config_field: str):
+        """Enregistre un champ de configuration JSON contenant des prompts."""
+        if 'registered_prompts' not in st.session_state:
+            st.session_state.registered_prompts = []
+        st.session_state.registered_prompts.append({
+            "prompt_name": prompt_name,
+            "plugin_name": plugin_name,
+            "config_field": config_field,
+            "type": "json"
+        })
+
+    def declare_text_prompt(self, prompt_name: str, plugin_name: str, config_field: str):
+        """Enregistre un champ de configuration texte contenant un prompt."""
+        if 'registered_prompts' not in st.session_state:
+            st.session_state.registered_prompts = []
+        st.session_state.registered_prompts.append({
+            "prompt_name": prompt_name,
+            "plugin_name": plugin_name,
+            "config_field": config_field,
+            "type": "text"
+        })
+
+    # Ajouter prompts_tab
+    def prompts_tab(self, config):
+        st.header(t("llm_prompts_header"))
+        st.warning("Go to 'Configuration' tab first to load all plugins")
+        if 'registered_prompts' not in st.session_state:
+            st.session_state.registered_prompts = []
+
+        from widgets.prompt_manager import PromptsManagerWidget
+        for prompt_info in st.session_state.registered_prompts:
+            with st.expander(f"Prompts for {prompt_info['plugin_name']} ({prompt_info['config_field']})"):
+                PromptsManagerWidget(prompt_info['plugin_name'], f"prompt_manager_{prompt_info['plugin_name']}", self.plugin_manager).display_prompts(
+                    prompt_info['plugin_name'],
+                    prompt_info['config_field'],
+                    prompt_info['type']
+                )
+
     def run(self, config):
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
             [t("llm_keys_tab"), t("llm_apis_tab"), t("llm_models_tab"),
              t("llm_personas_tab"), t("llm_chat_tab"), t("llm_prompt_sequence_tab"),
-             t("llm_ollama_restart")])
+             t("llm_ollama_restart"), t("llm_prompts_tab")])
         with tab1:
             self.keys_tab(config)
         with tab2:
@@ -878,5 +922,7 @@ class LlmPlugin(Plugin):
             PromptSequenceWidget("prompt_sequence", f"{self.name}_prompt_sequence", self.plugin_manager).display()
         with tab7:
             self.ollama_restart(config)
+        with tab8:
+            self.prompts_tab(config)
 if __name__ == "__main__":
     st.write("LLM Plugin standalone test")
