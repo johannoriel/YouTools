@@ -297,9 +297,6 @@ class DirectpublishPlugin(Plugin):
                     st.text(t("directpublish_silence_trim"))
                     result, reduction, original_duration, final_duration = self.trimsilences_plugin.remove_silence(
                         video_to_process,
-                        config['trimsilences']['silence_threshold'],
-                        config['trimsilences']['silence_duration'],
-                        config['trimsilences']['keep_duration'],
                         work_directory
                     )
                     if isinstance(result, str) and (result.startswith("Erreur") or result.startswith("Une erreur")):

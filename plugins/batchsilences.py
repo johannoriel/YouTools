@@ -154,9 +154,6 @@ class BatchsilencesPlugin(Plugin):
                         # Remove silence
                         result, reduction, _, _ = self.trimsilences_plugin.remove_silence(
                             video_path,
-                            config['trimsilences']['silence_threshold'],
-                            config['trimsilences']['silence_duration'],
-                            config['trimsilences']['keep_duration'],
                             work_directory
                         )
 
@@ -188,9 +185,6 @@ class BatchsilencesPlugin(Plugin):
                         # Remove silence
                         result, reduction, _, _ = self.trimsilences_plugin.remove_silence(
                             video_path,
-                            config['trimsilences']['silence_threshold'],
-                            config['trimsilences']['silence_duration'],
-                            config['trimsilences']['keep_duration'],
                             work_directory
                         )
 

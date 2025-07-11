@@ -14,6 +14,8 @@ from plugins.ragllm import RagllmPlugin
 import traceback
 import spacy
 from pyannote.audio import Pipeline
+from widgets.audio_splitter import AudioSplitterWidget
+from widgets.chunk_editor import ChunkEditorWidget
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -306,12 +308,24 @@ class PodcasttovideoPlugin(Plugin):
         )
 
     def run(self, config):
-        self.articlevideo_plugin.unload_ollama_model()
+        #self.articlevideo_plugin.unload_ollama_model()
         st.header(t("podcasttovideo"))
         output_dir = os.path.expanduser(config['podcasttovideo']['output_dir'])
         os.makedirs(output_dir, exist_ok=True)
+
         uploaded_file = st.file_uploader(t("select_podcast"), type=[
                                          "mp3", "wav", "mp4", "avi", "mov", "mkv"])
+
+        audio_splitter = AudioSplitterWidget("audiosplitter", "audiosplitter", self.plugin_manager, output_dir)
+        chunks_data = audio_splitter.display(config)
+        if chunks_data:
+            st.session_state.chunks_data = chunks_data
+            st.session_state.audio_paths = [chunk["audio"] for chunk in chunks_data]
+            st.session_state.transcriptions = [open(chunk["text"], "r", encoding="utf-8").read() for chunk in chunks_data]
+
+        chunk_editor = ChunkEditorWidget("chunkeditor", "chunkeditor", self.plugin_manager, output_dir)
+        chunk_editor.display(config)
+
         use_zoom_and_transitions = st.checkbox(
             t("use_zoom_and_transitions"), value=True, key="use_zoom_transitions_checkbox")
         split_method = st.selectbox(
@@ -381,42 +395,25 @@ class PodcasttovideoPlugin(Plugin):
 
         with st.spinner(t("processing")):
             try:
-                input_file, audio_file, chunks, audio_paths = self.prepare_audio(
+                chunks_data, audio_paths, transcriptions = self.prepare_audio(
                     config, uploaded_file, os.path.expanduser(config['podcasttovideo']['output_dir']), split_method)
-                transcriptions = self.transcribe_chunks(chunks, config)
-                prompts = self.generate_prompts(transcriptions, config)
-                image_paths = self.generate_images_from_prompts(
-                    prompts, config)
+                summary, prompts = self.generate_prompts(transcriptions, config, None)
+                image_paths = self.generate_images_from_prompts(prompts, config)
                 self.assemble_video(config, use_zoom_and_transitions, audio_paths, image_paths, os.path.expanduser(
                     config['podcasttovideo']['output_dir']))
                 st.success(t("video_generated"))
             except Exception as e:
                 self.handle_error(e)
-            finally:
-                self.cleanup(input_file, audio_file)
 
     def prepare_audio(self, config, uploaded_file, output_dir, split_method):
-        st.info(t("step_saving_file"))
-        input_file = os.path.join(tempfile.gettempdir(), uploaded_file.name)
-        with open(input_file, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-
-        st.info(t("step_extracting_audio"))
-        audio_file = os.path.join(tempfile.gettempdir(), "extracted_audio.wav")
-        self.extract_audio(input_file, audio_file)
-
-        st.info(t("step_splitting_audio"))
-        if split_method == "silence":
-            min_silence_len = int(config['podcasttovideo']['min_silence_len'])
-            silence_thresh = int(config['podcasttovideo']['silence_thresh'])
-            chunks, audio_paths = self.split_audio_files_by_silence(
-                audio_file, output_dir, min_silence_len, silence_thresh)
-        elif split_method == "phrase":
-            chunks, audio_paths = self.split_audio_files_by_phrase(
-                config, audio_file, output_dir, mode="sentence")
-        else:  # whisper
-            chunks, audio_paths = self.split_audio_files_whisper(
-                config, audio_file, output_dir)
+        audio_splitter = AudioSplitterWidget("audiosplitter", "audiosplitter", self.plugin_manager, output_dir)
+        chunks_data = audio_splitter.display(config, uploaded_file, split_method)
+        audio_paths = [chunk["audio"] for chunk in chunks_data]
+        transcriptions = []
+        for chunk in chunks_data:
+            with open(chunk["text"], "r", encoding="utf-8") as f:
+                transcriptions.append(f.read())
+        return chunks_data, audio_paths, transcriptions
 
         return input_file, audio_file, chunks, audio_paths
 
@@ -555,18 +552,18 @@ class PodcasttovideoPlugin(Plugin):
         st.session_state.edited_prompts = None
         st.session_state.prompts = None
         st.session_state.transcriptions = None
+        st.session_state.chunks_data = None
         if uploaded_file is None:
             st.warning(t("please_upload_file"))
             return
 
         with st.spinner(t("processing")):
-            input_file, audio_file, chunks, audio_paths = self.prepare_audio(
+            chunks_data, audio_paths, transcriptions = self.prepare_audio(
                 config, uploaded_file, os.path.expanduser(config['podcasttovideo']['output_dir']), split_method)
-            st.session_state.transcriptions = self.transcribe_chunks(
-                chunks, config)
+            st.session_state.transcriptions = transcriptions
             st.session_state.summary, st.session_state.prompts = self.generate_prompts(
                 st.session_state.transcriptions, config, None)
-            st.session_state.chunks = chunks
+            st.session_state.chunks_data = chunks_data
             st.session_state.audio_paths = audio_paths
 
         if 'prompts' in st.session_state and 'transcriptions' in st.session_state:
@@ -575,19 +572,26 @@ class PodcasttovideoPlugin(Plugin):
 
     def scan_and_edit(self, config, use_zoom_and_transitions, retranscribe, regenerate_prompts):
         output_dir = os.path.expanduser(config['podcasttovideo']['output_dir'])
-        audio_files = self.articlevideo_plugin.get_sorted_files(
-            output_dir, r'chunk_(\d+)\.wav')
-        image_files = self.articlevideo_plugin.get_sorted_files(
-            output_dir, r'image_(\d+)\.png')
+        audio_files = self.articlevideo_plugin.get_sorted_files(output_dir, r'chunk_(\d+)\.wav')
+        text_files = self.articlevideo_plugin.get_sorted_files(output_dir, r'chunk_(\d+)\.txt')
+        image_files = self.articlevideo_plugin.get_sorted_files(output_dir, r'image_(\d+)\.png')
+        video_files = self.articlevideo_plugin.get_sorted_files(output_dir, r'chunk_(\d+)\.mp4')
 
+        st.session_state.chunks_data = [
+            {"audio": audio, "text": text, "image": img, "video": vid}
+            for audio, text, img, vid in zip(audio_files, text_files, image_files, video_files)
+        ]
         st.session_state.audio_paths = audio_files
         st.session_state.image_paths = image_files
 
-        if retranscribe and not 'transcriptions' in st.session_state:
-            st.session_state.transcriptions = self.transcribe_chunks(
-                [AudioSegment.from_wav(audio_file) for audio_file in audio_files], config)
+        if retranscribe:
+            audio_splitter = AudioSplitterWidget("audiosplitter", "audiosplitter", self.plugin_manager, output_dir)
+            chunks = [AudioSegment.from_wav(audio_file) for audio_file in audio_files]
+            st.session_state.transcriptions = audio_splitter.transcribe_chunks(chunks, audio_files)
+        else:
+            st.session_state.transcriptions = [open(text_file, "r", encoding="utf-8").read() for text_file in text_files]
 
-        if regenerate_prompts and not 'prompts' in st.session_state:
+        if regenerate_prompts:
             st.session_state.summary, st.session_state.prompts = self.generate_prompts(
                 st.session_state.transcriptions, config, None)
 
@@ -602,33 +606,32 @@ class PodcasttovideoPlugin(Plugin):
             st.session_state.transcriptions = []
         if 'prompts' not in st.session_state:
             st.session_state.prompts = []
+        if 'chunks_data' not in st.session_state:
+            st.session_state.chunks_data = []
+
         cols = st.columns(3)
-        for i, (image_path, audio_path, transcription, prompt) in enumerate(zip(
-            st.session_state.image_paths,
-            st.session_state.audio_paths,
-            st.session_state.transcriptions,
-            st.session_state.prompts
-        )):
+        for i, chunk in enumerate(st.session_state.chunks_data):
             with cols[i % 3]:
-                # st.write(transcription)
                 st.markdown(
                     f"""
                     <div style="border: 1px solid #e6e6e6; padding: 10px; width: 100%; height: 100px; overflow-y: scroll;">
-                        {transcription}
-
+                        {st.session_state.transcriptions[i]}
+                    </div>
                     """,
                     unsafe_allow_html=True
                 )
-                st.image(image_path)
+                if chunk["image"]:
+                    st.image(chunk["image"])
+                if chunk["video"]:
+                    st.video(chunk["video"])
                 with st.expander(t("edit_image").format(i+1)):
-                    st.audio(audio_path)
-                    # st.text_area(t("transcription").format(i+1), value=transcription, height=100, key=f"transcription_{i}")
+                    st.audio(chunk["audio"])
                     edited_prompt = st.text_area(t("edit_prompt").format(
-                        i+1), value=prompt, height=100, key=f"gprompt_{i}")
+                        i+1), value=st.session_state.prompts[i], height=100, key=f"gprompt_{i}")
                     if st.button(t("regenerate_image").format(i+1), key=f"regen_{i}"):
                         self.articlevideo_plugin.unload_ollama_model()
                         self.articlevideo_plugin.generate_image(
-                            edited_prompt, image_path)
+                            edited_prompt, chunk["image"])
                         st.rerun()
 
         if st.button(t("assemble_video")):
