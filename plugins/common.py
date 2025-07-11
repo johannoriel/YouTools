@@ -310,9 +310,8 @@ def list_video_files2(directory, prefix_exclude=None, extensions=('.mkv', '.mp4'
 
     video_files = []
     for file in os.listdir(directory):
-        if file.lower().endswith(extensions):
+        if file.lower().endswith(tuple(extensions)):  # Convert list to tuple
             file = rename_file_without_spaces(file, directory)
-
             if prefix_exclude:
                 if not any(file.startswith(prefix) for prefix in prefix_exclude):
                     full_path = os.path.join(directory, file)
