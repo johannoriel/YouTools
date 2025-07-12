@@ -4,7 +4,7 @@ import numpy as np
 from typing import List, Tuple
 import streamlit as st
 from app import Plugin
-from plugins.common import list_video_files2  # Updated import
+from plugins.common import list_video_files2
 from moviepy import VideoFileClip, concatenate_videoclips
 from lib.video_utils import normalize_full_audio
 import matplotlib.pyplot as plt
@@ -36,6 +36,8 @@ translations["en"].update({
     "analyze_silence_removed": "Silence removed: {seconds} seconds ({percentage}%)",
     "select_videos_label": "Select videos to process",
     "process_selected_videos": "Process Selected Videos",
+    "compression_graph_button": "Generate Compression Graph",
+    "compression_graph_title": "Silence Removal Percentage by dB Threshold",
 })
 
 translations["fr"].update({
@@ -64,6 +66,8 @@ translations["fr"].update({
     "analyze_silence_removed": "Silence supprimé : {seconds} secondes ({percentage}%)",
     "select_videos_label": "Sélectionner les vidéos à traiter",
     "process_selected_videos": "Traiter les vidéos sélectionnées",
+    "compression_graph_button": "Générer le graphique de compression",
+    "compression_graph_title": "Pourcentage de suppression des silences par seuil de dB",
 })
 
 def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
@@ -208,6 +212,15 @@ def calculate_silence_duration(audio_array: np.ndarray, sample_rate: int, thresh
     silence_percentage = (total_silence_duration / total_duration * 100) if total_duration > 0 else 0.0
     return total_silence_duration, silence_percentage
 
+def calculate_compression_data(audio_array: np.ndarray, sample_rate: int, min_duration: float) -> tuple[list, list]:
+    """Calcule le pourcentage de silence supprimé pour une plage de seuils de dB."""
+    db_thresholds = list(range(-90, 1, 1))  # De -90 dB à 0 dB, par pas de 5
+    percentages = []
+    for threshold_db in db_thresholds:
+        _, percentage = calculate_silence_duration(audio_array, sample_rate, threshold_db, min_duration)
+        percentages.append(percentage)
+    return db_thresholds, percentages
+
 class TrimsilencesPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
@@ -217,6 +230,8 @@ class TrimsilencesPlugin(Plugin):
             st.session_state.analyzed_audio = {}
         if 'current_analyzed_file' not in st.session_state:
             st.session_state.current_analyzed_file = None
+        if 'compression_data' not in st.session_state:
+            st.session_state.compression_data = {}  # Pour stocker les données de compression
 
     def get_config_fields(self):
         return {
@@ -299,7 +314,7 @@ class TrimsilencesPlugin(Plugin):
             print("Découpage des segments silencieux")
             clips = []
             for i, (start, end, silence_middle) in enumerate(segments):
-                clip = video.subclip(start, end)
+                clip = video.subcliped(start, end)
                 clips.append(clip)
                 if progress_callback:
                     progress = 33 + (i / len(segments) * 33)
@@ -371,7 +386,7 @@ class TrimsilencesPlugin(Plugin):
             print("Découpage des segments non-silencieux")
             clips = []
             for i, (start, end) in enumerate(segments):
-                clip = video.subclip(start, end)
+                clip = video.subclipped(start, end)
                 clips.append(clip)
                 if progress_callback:
                     progress = 33 + (i / len(segments) * 33)
@@ -436,7 +451,7 @@ class TrimsilencesPlugin(Plugin):
         col1, col2, col3 = st.columns(3)
         with col1:
             temp_threshold = st.slider(
-                t("trim contrato_silences_threshold_label"),
+                t("trim_silences_threshold_label"),
                 min_value=-90,
                 max_value=0,
                 value=st.session_state.temp_silence_params["silence_threshold"]
@@ -464,11 +479,9 @@ class TrimsilencesPlugin(Plugin):
             "keep_duration": temp_keep_duration
         }
 
-        # Récupérer les fichiers vidéo (.mp4 et .mkv) avec list_video_files2
         all_videos = list_video_files2(config['common']['work_directory'], extensions=['.mp4', '.mkv'])
         st.session_state['list_video_files'] = all_videos
 
-        # Sélecteur multiple pour les fichiers vidéo
         video_options = [(file, full_path) for file, full_path, _ in all_videos]
         video_names = [file for file, _ in video_options]
         selected_videos = st.multiselect(
@@ -478,7 +491,6 @@ class TrimsilencesPlugin(Plugin):
             key="selected_videos"
         )
 
-        # Boutons pour le traitement en masse
         col_batch1, col_batch2, col_batch3 = st.columns(3)
         with col_batch1:
             if st.button(t("trim_silences_button") + " (Batch)"):
@@ -514,7 +526,7 @@ class TrimsilencesPlugin(Plugin):
                             st.success(
                                 f"{file}: {t('trim_silences_success').format(result=result)} - Reduction: {reduction}"
                             )
-                    st.rerun()
+
 
         with col_batch2:
             if st.button(t("trim_silences_simple_button") + " (Batch)"):
@@ -548,7 +560,7 @@ class TrimsilencesPlugin(Plugin):
                             st.success(
                                 f"{file}: {t('trim_silences_success').format(result=result)} - Reduction: {reduction}"
                             )
-                    st.rerun()
+
 
         with col_batch3:
             if st.button("Normalize (Batch)"):
@@ -564,7 +576,7 @@ class TrimsilencesPlugin(Plugin):
                             st.error(f"{file}: {result}")
                         else:
                             st.success(f"{file}: {result}")
-                    st.rerun()
+
 
         st.subheader(t("trim_silences_original_videos"))
         for file, full_path, _ in all_videos:
@@ -601,7 +613,7 @@ class TrimsilencesPlugin(Plugin):
                             t("trim_silences_success").format(result=result) +
                             f" - Reduction: {reduction}"
                         )
-                        st.rerun()
+
             with col3:
                 if st.button(t("trim_silences_simple_button"), key=f"remove_silence_simple_{file}"):
                     progress_bar = st.progress(0)
@@ -630,7 +642,7 @@ class TrimsilencesPlugin(Plugin):
                             t("trim_silences_success").format(result=result) +
                             f" - Reduction: {reduction}"
                         )
-                        st.rerun()
+
             with col4:
                 if st.button("Normalize", key=f"normalize_{file}"):
                     reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
@@ -640,7 +652,7 @@ class TrimsilencesPlugin(Plugin):
                         st.error(result)
                     else:
                         st.success(result)
-                        st.rerun()
+
             with col5:
                 if st.button(t("analyze_button"), key=f"analyze_{file}"):
                     with st.spinner("Analyzing audio..."):
@@ -656,6 +668,7 @@ class TrimsilencesPlugin(Plugin):
                         }
                         st.session_state.current_analyzed_file = file
 
+
         if st.session_state.current_analyzed_file and st.session_state.current_analyzed_file in st.session_state.analyzed_audio:
             file = st.session_state.current_analyzed_file
             audio_data = st.session_state.analyzed_audio[file]
@@ -663,23 +676,28 @@ class TrimsilencesPlugin(Plugin):
             sample_rate = audio_data["sample_rate"]
 
             st.subheader(f"Analysis for {file}")
+
             granularity = st.selectbox(
                 t("analyze_granularity_label"),
                 [t("analyze_granularity_seconds"), t("analyze_granularity_frames")],
                 key=f"granularity_{file}"
             )
             granularity_value = "seconds" if granularity == t("analyze_granularity_seconds") else "frames"
+
             max_level_db, min_level_db, times, volume_levels_db = analyze_audio(
                 audio_array, sample_rate, granularity_value
             )
+
             st.write(t("analyze_max_level").format(max_level=max_level_db))
             st.write(t("analyze_min_level").format(min_level=min_level_db))
+
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.plot(times, volume_levels_db)
             ax.set_xlabel("Time (seconds)")
             ax.set_ylabel("Volume (dB)")
             ax.set_title(t("analyze_volume_plot"))
             st.pyplot(fig)
+
             analyze_threshold = st.slider(
                 t("analyze_silence_threshold_label"),
                 min_value=-90,
@@ -687,6 +705,7 @@ class TrimsilencesPlugin(Plugin):
                 value=-35,
                 key=f"analyze_threshold_{file}"
             )
+
             silence_duration, silence_percentage = calculate_silence_duration(
                 audio_array,
                 sample_rate,
@@ -697,3 +716,27 @@ class TrimsilencesPlugin(Plugin):
                 seconds=f"{silence_duration:.2f}",
                 percentage=f"{silence_percentage:.1f}"
             ))
+
+            if st.button(t("compression_graph_button"), key=f"compression_graph_{file}"):
+                with st.spinner("Generating compression graph..."):
+                    db_thresholds, percentages = calculate_compression_data(
+                        audio_array,
+                        sample_rate,
+                        st.session_state.temp_silence_params["silence_duration"]
+                    )
+                    st.session_state.compression_data[file] = {
+                        "db_thresholds": db_thresholds,
+                        "percentages": percentages
+                    }
+
+            if file in st.session_state.compression_data:
+                db_thresholds = st.session_state.compression_data[file]["db_thresholds"]
+                percentages = st.session_state.compression_data[file]["percentages"]
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot(db_thresholds, percentages, marker='o')
+                ax.set_xlabel("dB Threshold")
+                ax.set_ylabel("Percentage of Video Removed (%)")
+                ax.set_title(t("compression_graph_title"))
+                ax.grid(True)
+                ax.set_ylim(0, 100)
+                st.pyplot(fig)
