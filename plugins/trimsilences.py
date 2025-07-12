@@ -78,6 +78,26 @@ translations["fr"].update({
     "ff_normalize_error": "Erreur lors de la normalisation FFmpeg : {error}",
 })
 
+def get_video_metadata(_file_path: str) -> tuple[str, str]:
+    """Calcule la durée et la résolution d'une vidéo avec mise en cache dans st.session_state."""
+    if 'video_metadata' not in st.session_state:
+        st.session_state.video_metadata = {}
+
+    if _file_path in st.session_state.video_metadata:
+        return st.session_state.video_metadata[_file_path]
+
+    try:
+        video = VideoFileClip(_file_path)
+        duration = video.duration
+        duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"  # Format MM:SS
+        resolution = video.size
+        resolution_str = f"{resolution[0]}x{resolution[1]}"
+        video.close()
+        st.session_state.video_metadata[_file_path] = (duration_str, resolution_str)
+        return duration_str, resolution_str
+    except Exception as e:
+        return f"Erreur ({e})", f"Erreur ({e})"
+
 def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
                             threshold_db: float, min_duration: float,
                             keep_duration: float, padding: float = 0.2) -> List[Tuple[float, float, float]]:
@@ -309,14 +329,15 @@ class TrimsilencesPlugin(Plugin):
             max_level_db, min_level_db, _, _ = analyze_audio(reference_audio_array, reference_sample_rate, granularity="seconds")
             target_loudness = max_level_db - 3  # Viser 3 dB en dessous du max pour éviter le clipping
 
-            # Construire la commande FFmpeg
+            # Construire la commande FFmpeg avec des filtres pour réduire l'écho
             output_filename = f"ff_normalized_{os.path.basename(input_file)}"
             output_file = os.path.join(videos_dir, output_filename)
 
             ffmpeg_command = [
                 "ffmpeg",
+                "-y",
                 "-i", input_file,
-                "-af", f"afftdn=nr=10:nf=-30,acompressor=threshold=-30dB:ratio=4:attack=20:release=100,deesser,highpass=f=100,loudnorm=I={target_loudness}:TP=-1.5:LRA=11",
+                "-af", f"afftdn=nr=15:nf=-35,highpass=f=150,lowpass=f=8000,acompressor=threshold=-30dB:ratio=4:attack=20:release=100,deesser,loudnorm=I={target_loudness}:TP=-1.5:LRA=11",
                 "-c:v", "copy",  # Conserver la vidéo intacte
                 "-c:a", "aac",
                 "-b:a", "192k",
@@ -495,9 +516,118 @@ class TrimsilencesPlugin(Plugin):
         except Exception as e:
             return t("trim_silences_error").format(error=str(e)), "0%"
 
+    def analyze_audio_ui(self, config):
+        """Gère l'interface et la logique pour l'analyse audio d'un fichier vidéo."""
+        st.subheader(t("analyze_button"))
+
+        all_videos = list_video_files2(config['common']['work_directory'], extensions=['.mp4', '.mkv'])
+        video_options = [(file, full_path) for file, full_path, _ in all_videos]
+        video_names = [file for file, _ in video_options]
+
+        selected_videos = st.multiselect(
+            t("select_videos_label"),
+            options=video_names,
+            default=[],
+            key="analyze_selected_videos"
+        )
+
+        if len(selected_videos) > 1:
+            st.warning("Please select only one video for audio analysis.")
+            return
+
+        if selected_videos:
+            file = selected_videos[0]
+            full_path = next(full_path for fname, full_path in video_options if fname == file)
+
+            if st.button(t("analyze_button"), key=f"analyze_{file}"):
+                with st.spinner("Analyzing audio..."):
+                    video = VideoFileClip(full_path)
+                    audio_array = video.audio.to_soundarray(fps=video.audio.fps)
+                    sample_rate = video.audio.fps
+                    video.close()
+
+                    st.session_state.analyzed_audio[file] = {
+                        "audio_array": audio_array,
+                        "sample_rate": sample_rate,
+                        "duration": len(audio_array) / sample_rate
+                    }
+                    st.session_state.current_analyzed_file = file
+
+            if st.session_state.current_analyzed_file == file and file in st.session_state.analyzed_audio:
+                audio_data = st.session_state.analyzed_audio[file]
+                audio_array = audio_data["audio_array"]
+                sample_rate = audio_data["sample_rate"]
+
+                st.subheader(f"Analysis for {file}")
+
+                granularity = st.selectbox(
+                    t("analyze_granularity_label"),
+                    [t("analyze_granularity_seconds"), t("analyze_granularity_frames")],
+                    key=f"granularity_{file}"
+                )
+                granularity_value = "seconds" if granularity == t("analyze_granularity_seconds") else "frames"
+
+                max_level_db, min_level_db, times, volume_levels_db = analyze_audio(
+                    audio_array, sample_rate, granularity_value
+                )
+
+                st.write(t("analyze_max_level").format(max_level=max_level_db))
+                st.write(t("analyze_min_level").format(min_level=min_level_db))
+
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot(times, volume_levels_db)
+                ax.set_xlabel("Time (seconds)")
+                ax.set_ylabel("Volume (dB)")
+                ax.set_title(t("analyze_volume_plot"))
+                st.pyplot(fig)
+
+                analyze_threshold = st.slider(
+                    t("analyze_silence_threshold_label"),
+                    min_value=-90,
+                    max_value=0,
+                    value=-35,
+                    key=f"analyze_threshold_{file}"
+                )
+
+                silence_duration, silence_percentage = calculate_silence_duration(
+                    audio_array,
+                    sample_rate,
+                    analyze_threshold,
+                    st.session_state.temp_silence_params["silence_duration"]
+                )
+                st.write(t("analyze_silence_removed").format(
+                    seconds=f"{silence_duration:.2f}",
+                    percentage=f"{silence_percentage:.1f}"
+                ))
+
+                if st.button(t("compression_graph_button"), key=f"compression_graph_{file}"):
+                    with st.spinner("Generating compression graph..."):
+                        db_thresholds, percentages = calculate_compression_data(
+                            audio_array,
+                            sample_rate,
+                            st.session_state.temp_silence_params["silence_duration"]
+                        )
+                        st.session_state.compression_data[file] = {
+                            "db_thresholds": db_thresholds,
+                            "percentages": percentages
+                        }
+
+                if file in st.session_state.compression_data:
+                    db_thresholds = st.session_state.compression_data[file]["db_thresholds"]
+                    percentages = st.session_state.compression_data[file]["percentages"]
+                    fig, ax = plt.subplots(figsize=(10, 4))
+                    ax.plot(db_thresholds, percentages, marker='o')
+                    ax.set_xlabel("dB Threshold")
+                    ax.set_ylabel("Percentage of Video Removed (%)")
+                    ax.set_title(t("compression_graph_title"))
+                    ax.grid(True)
+                    ax.set_ylim(0, 100)
+                    st.pyplot(fig)
+
     def run(self, config):
         st.header(t("trim_silences_header"))
 
+        # Paramètres de détection des silences
         st.subheader(t("trim_silences_params"))
         if st.session_state.temp_silence_params is None:
             st.session_state.temp_silence_params = {
@@ -537,37 +667,61 @@ class TrimsilencesPlugin(Plugin):
             "keep_duration": temp_keep_duration
         }
 
+        # Liste des vidéos avec sélection multiple
+        st.subheader(t("trim_silences_original_videos"))
         all_videos = list_video_files2(config['common']['work_directory'], extensions=['.mp4', '.mkv'])
         st.session_state['list_video_files'] = all_videos
 
-        video_options = [(file, full_path) for file, full_path, _ in all_videos]
-        video_names = [file for file, _ in video_options]
-        selected_videos = st.multiselect(
-            t("select_videos_label"),
-            options=video_names,
-            default=[],
-            key="selected_videos"
+        # Préparer les données pour la grille
+        video_data = []
+        for file, full_path, _ in all_videos:
+            duration_str, resolution_str = get_video_metadata(full_path)
+            video_data.append({
+                "File": file,
+                "Duration": duration_str,
+                "Resolution": resolution_str,
+                "Full Path": full_path
+            })
+
+        # Afficher la grille avec sélection multi-row
+        selected_rows = st.dataframe(
+            video_data,
+            column_config={
+                "File": st.column_config.TextColumn("File"),
+                "Duration": st.column_config.TextColumn("Duration"),
+                "Resolution": st.column_config.TextColumn("Resolution"),
+                "Full Path": None  # Cacher la colonne Full Path
+            },
+            use_container_width=True,
+            height=400,
+            selection_mode="multi-row",
+            on_select="rerun",
+            key="video_selection_grid"
         )
 
+        # Récupérer les indices des lignes sélectionnées
+        selected_indices = selected_rows.get('selection', {}).get('rows', [])
+        selected_files = [video_data[i]["Full Path"] for i in selected_indices]
+        selected_names = [video_data[i]["File"] for i in selected_indices]
+
+        # Boutons pour les opérations de masse
         col_batch1, col_batch2, col_batch3 = st.columns(3)
         with col_batch1:
-            if st.button(t("trim_silences_button") + " (Batch)"):
-                if not selected_videos:
+            if st.button(t("trim_silences_button")):
+                if not selected_files:
                     st.warning("Please select at least one video.")
                 else:
-                    for file in selected_videos:
-                        full_path = next(full_path for fname, full_path in video_options if fname == file)
+                    for file, name in zip(selected_files, selected_names):
                         progress_bar = st.progress(0)
                         progress_text = st.empty()
 
                         def update_progress(progress):
                             progress_bar.progress(progress)
-                            progress_text.text(
-                                t("trim_silences_progress").format(progress=progress))
+                            progress_text.text(t("trim_silences_progress").format(progress=progress))
 
-                        with st.spinner(t("trim_silences_processing").format(file=file)):
+                        with st.spinner(t("trim_silences_processing").format(file=name)):
                             result, reduction, _, _ = self.remove_silence_legacy(
-                                full_path,
+                                file,
                                 st.session_state.temp_silence_params["silence_threshold"],
                                 st.session_state.temp_silence_params["silence_duration"],
                                 st.session_state.temp_silence_params["keep_duration"],
@@ -579,31 +733,26 @@ class TrimsilencesPlugin(Plugin):
                         progress_text.empty()
 
                         if result.startswith(t("trim_silences_error").format(error="")):
-                            st.error(f"{file}: {result}")
+                            st.error(f"{name}: {result}")
                         else:
-                            st.success(
-                                f"{file}: {t('trim_silences_success').format(result=result)} - Reduction: {reduction}"
-                            )
-
+                            st.success(f"{name}: {t('trim_silences_success').format(result=result)} - Reduction: {reduction}")
 
         with col_batch2:
-            if st.button(t("trim_silences_simple_button") + " (Batch)"):
-                if not selected_videos:
+            if st.button(t("trim_silences_simple_button")):
+                if not selected_files:
                     st.warning("Please select at least one video.")
                 else:
-                    for file in selected_videos:
-                        full_path = next(full_path for fname, full_path in video_options if fname == file)
+                    for file, name in zip(selected_files, selected_names):
                         progress_bar = st.progress(0)
                         progress_text = st.empty()
 
                         def update_progress(progress):
                             progress_bar.progress(progress)
-                            progress_text.text(
-                                t("trim_silences_progress").format(progress=progress))
+                            progress_text.text(t("trim_silences_progress").format(progress=progress))
 
-                        with st.spinner(t("trim_silences_processing").format(file=file)):
+                        with st.spinner(t("trim_silences_processing").format(file=name)):
                             result, reduction, _, _ = self.remove_silence_simple(
-                                full_path,
+                                file,
                                 st.session_state.temp_silence_params["silence_threshold"],
                                 config['common']['work_directory'],
                                 update_progress
@@ -613,232 +762,39 @@ class TrimsilencesPlugin(Plugin):
                         progress_text.empty()
 
                         if result.startswith(t("trim_silences_error").format(error="")):
-                            st.error(f"{file}: {result}")
+                            st.error(f"{name}: {result}")
                         else:
-                            st.success(
-                                f"{file}: {t('trim_silences_success').format(result=result)} - Reduction: {reduction}"
-                            )
-
+                            st.success(f"{name}: {t('trim_silences_success').format(result=result)} - Reduction: {reduction}")
 
         with col_batch3:
-            if st.button("Normalize (Batch)"):
-                if not selected_videos:
+            if st.button(t("ff_normalize_button")):
+                if not selected_files:
                     st.warning("Please select at least one video.")
                 else:
                     reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
-                    for file in selected_videos:
-                        full_path = next(full_path for fname, full_path in video_options if fname == file)
-                        with st.spinner(f"Normalizing {file}..."):
-                            result, _ = self.normalize_audio(full_path, reference_audio_path)
-                        if result.startswith(t("trim_silences_error").format(error="")):
-                            st.error(f"{file}: {result}")
+                    for file, name in zip(selected_files, selected_names):
+                        progress_bar = st.progress(0)
+                        progress_text = st.empty()
+
+                        def update_progress(progress):
+                            progress_bar.progress(progress)
+                            progress_text.text(t("ff_normalize_processing").format(file=name))
+
+                        with st.spinner(t("ff_normalize_processing").format(file=name)):
+                            result, _ = self.ff_normalize(
+                                file,
+                                reference_audio_path,
+                                config['common']['work_directory'],
+                                update_progress
+                            )
+
+                        progress_bar.empty()
+                        progress_text.empty()
+
+                        if result.startswith(t("ff_normalize_error").format(error="")):
+                            st.error(f"{name}: {result}")
                         else:
-                            st.success(f"{file}: {result}")
+                            st.success(f"{name}: {result}")
 
-
-        st.subheader(t("trim_silences_original_videos"))
-        for file, full_path, _ in all_videos:
-            col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
-            with col1:
-                st.write(file)
-            with col2:
-                try:
-                    video = VideoFileClip(full_path)
-                    duration = video.duration
-                    duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"  # Format MM:SS
-                    st.write(f"Durée: {duration_str}")
-                    video.close()
-                except Exception as e:
-                    st.write(f"Durée: Erreur ({e})")
-            with col3:
-                try:
-                    video = VideoFileClip(full_path)
-                    resolution = video.size
-                    resolution_str = f"{resolution[0]}x{resolution[1]}"
-                    st.write(f"Résolution: {resolution_str}")
-                    video.close()
-                except Exception as e:
-                    st.write(f"Résolution: Erreur ({e})")
-            with col4:
-                if st.button(t("trim_silences_button"), key=f"remove_silence_{file}"):
-                    progress_bar = st.progress(0)
-                    progress_text = st.empty()
-
-                    def update_progress(progress):
-                        progress_bar.progress(progress)
-                        progress_text.text(
-                            t("trim_silences_progress").format(progress=progress))
-
-                    with st.spinner(t("trim_silences_processing").format(file=file)):
-                        result, reduction, _, _ = self.remove_silence_legacy(
-                            full_path,
-                            st.session_state.temp_silence_params["silence_threshold"],
-                            st.session_state.temp_silence_params["silence_duration"],
-                            st.session_state.temp_silence_params["keep_duration"],
-                            config['common']['work_directory'],
-                            update_progress
-                        )
-
-                    progress_bar.empty()
-                    progress_text.empty()
-
-                    if result.startswith(t("trim_silences_error").format(error="")):
-                        st.error(result)
-                    else:
-                        st.success(
-                            t("trim_silences_success").format(result=result) +
-                            f" - Reduction: {reduction}"
-                        )
-
-            with col5:
-                if st.button(t("trim_silences_simple_button"), key=f"remove_silence_simple_{file}"):
-                    progress_bar = st.progress(0)
-                    progress_text = st.empty()
-
-                    def update_progress(progress):
-                        progress_bar.progress(progress)
-                        progress_text.text(
-                            t("trim_silences_progress").format(progress=progress))
-
-                    with st.spinner(t("trim_silences_processing").format(file=file)):
-                        result, reduction, _, _ = self.remove_silence_simple(
-                            full_path,
-                            st.session_state.temp_silence_params["silence_threshold"],
-                            config['common']['work_directory'],
-                            update_progress
-                        )
-
-                    progress_bar.empty()
-                    progress_text.empty()
-
-                    if result.startswith(t("trim_silences_error").format(error="")):
-                        st.error(result)
-                    else:
-                        st.success(
-                            t("trim_silences_success").format(result=result) +
-                            f" - Reduction: {reduction}"
-                        )
-
-            with col6:
-                if st.button("Normalize", key=f"normalize_{file}"):
-                    reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
-                    with st.spinner("Normalizing audio..."):
-                        result, _ = self.normalize_audio(full_path, reference_audio_path)
-                    if result.startswith(t("trim_silences_error").format(error="")):
-                        st.error(result)
-                    else:
-                        st.success(result)
-
-            with col7:
-                if st.button(t("analyze_button"), key=f"analyze_{file}"):
-                    with st.spinner("Analyzing audio..."):
-                        video = VideoFileClip(full_path)
-                        audio_array = video.audio.to_soundarray(fps=video.audio.fps)
-                        sample_rate = video.audio.fps
-                        video.close()
-
-                        st.session_state.analyzed_audio[file] = {
-                            "audio_array": audio_array,
-                            "sample_rate": sample_rate,
-                            "duration": len(audio_array) / sample_rate
-                        }
-                        st.session_state.current_analyzed_file = file
-
-            with col8:
-                if st.button(t("ff_normalize_button"), key=f"ff_normalize_{file}"):
-                    reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
-                    progress_bar = st.progress(0)
-                    progress_text = st.empty()
-
-                    def update_progress(progress):
-                        progress_bar.progress(progress)
-                        progress_text.text(t("ff_normalize_processing").format(file=file))
-
-                    with st.spinner(t("ff_normalize_processing").format(file=file)):
-                        result, _ = self.ff_normalize(
-                            full_path,
-                            reference_audio_path,
-                            config['common']['work_directory'],
-                            update_progress
-                        )
-
-                    progress_bar.empty()
-                    progress_text.empty()
-
-                    if result.startswith(t("ff_normalize_error").format(error="")):
-                        st.error(result)
-                    else:
-                        st.success(result)
-
-
-        if st.session_state.current_analyzed_file and st.session_state.current_analyzed_file in st.session_state.analyzed_audio:
-            file = st.session_state.current_analyzed_file
-            audio_data = st.session_state.analyzed_audio[file]
-            audio_array = audio_data["audio_array"]
-            sample_rate = audio_data["sample_rate"]
-
-            st.subheader(f"Analysis for {file}")
-
-            granularity = st.selectbox(
-                t("analyze_granularity_label"),
-                [t("analyze_granularity_seconds"), t("analyze_granularity_frames")],
-                key=f"granularity_{file}"
-            )
-            granularity_value = "seconds" if granularity == t("analyze_granularity_seconds") else "frames"
-
-            max_level_db, min_level_db, times, volume_levels_db = analyze_audio(
-                audio_array, sample_rate, granularity_value
-            )
-
-            st.write(t("analyze_max_level").format(max_level=max_level_db))
-            st.write(t("analyze_min_level").format(min_level=min_level_db))
-
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(times, volume_levels_db)
-            ax.set_xlabel("Time (seconds)")
-            ax.set_ylabel("Volume (dB)")
-            ax.set_title(t("analyze_volume_plot"))
-            st.pyplot(fig)
-
-            analyze_threshold = st.slider(
-                t("analyze_silence_threshold_label"),
-                min_value=-90,
-                max_value=0,
-                value=-35,
-                key=f"analyze_threshold_{file}"
-            )
-
-            silence_duration, silence_percentage = calculate_silence_duration(
-                audio_array,
-                sample_rate,
-                analyze_threshold,
-                st.session_state.temp_silence_params["silence_duration"]
-            )
-            st.write(t("analyze_silence_removed").format(
-                seconds=f"{silence_duration:.2f}",
-                percentage=f"{silence_percentage:.1f}"
-            ))
-
-            if st.button(t("compression_graph_button"), key=f"compression_graph_{file}"):
-                with st.spinner("Generating compression graph..."):
-                    db_thresholds, percentages = calculate_compression_data(
-                        audio_array,
-                        sample_rate,
-                        st.session_state.temp_silence_params["silence_duration"]
-                    )
-                    st.session_state.compression_data[file] = {
-                        "db_thresholds": db_thresholds,
-                        "percentages": percentages
-                    }
-
-            if file in st.session_state.compression_data:
-                db_thresholds = st.session_state.compression_data[file]["db_thresholds"]
-                percentages = st.session_state.compression_data[file]["percentages"]
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(db_thresholds, percentages, marker='o')
-                ax.set_xlabel("dB Threshold")
-                ax.set_ylabel("Percentage of Video Removed (%)")
-                ax.set_title(t("compression_graph_title"))
-                ax.grid(True)
-                ax.set_ylim(0, 100)
-                st.pyplot(fig)
+        # Section pour l'analyse audio
+        self.analyze_audio_ui(config)
