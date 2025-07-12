@@ -38,6 +38,10 @@ translations["en"].update({
     "process_selected_videos": "Process Selected Videos",
     "compression_graph_button": "Generate Compression Graph",
     "compression_graph_title": "Silence Removal Percentage by dB Threshold",
+    "ff_normalize_button": "FF Normalize",
+    "ff_normalize_processing": "FFmpeg normalization in progress for {file}...",
+    "ff_normalize_success": "FFmpeg normalization completed. Output file: {result}",
+    "ff_normalize_error": "Error during FFmpeg normalization: {error}",
 })
 
 translations["fr"].update({
@@ -68,6 +72,10 @@ translations["fr"].update({
     "process_selected_videos": "Traiter les vidéos sélectionnées",
     "compression_graph_button": "Générer le graphique de compression",
     "compression_graph_title": "Pourcentage de suppression des silences par seuil de dB",
+    "ff_normalize_button": "FF Normaliser",
+    "ff_normalize_processing": "Normalisation FFmpeg en cours pour {file}...",
+    "ff_normalize_success": "Normalisation FFmpeg terminée. Fichier de sortie : {result}",
+    "ff_normalize_error": "Erreur lors de la normalisation FFmpeg : {error}",
 })
 
 def detect_silence_segments(audio_array: np.ndarray, sample_rate: int,
@@ -282,6 +290,56 @@ class TrimsilencesPlugin(Plugin):
     def remove_silence(self, input_file: str, directory: str, progress_callback=None):
         threshold = self.plugin_manager.config['trimsilences']['silence_threshold']
         return self.remove_silence_simple(input_file, threshold, directory, progress_callback)
+
+    def ff_normalize(self, input_file: str, reference_audio_path: str, videos_dir: str, progress_callback=None) -> tuple[str, str]:
+        try:
+            if progress_callback:
+                progress_callback(0)
+
+            # Charger l'audio de référence pour analyse
+            if not reference_audio_path or not os.path.exists(reference_audio_path):
+                return t("ff_normalize_error").format(error="Reference audio file not found"), "0%"
+
+            reference_video = VideoFileClip(reference_audio_path)
+            reference_audio_array = reference_video.audio.to_soundarray(fps=reference_video.audio.fps)
+            reference_sample_rate = reference_video.audio.fps
+            reference_video.close()
+
+            # Analyser l'audio de référence
+            max_level_db, min_level_db, _, _ = analyze_audio(reference_audio_array, reference_sample_rate, granularity="seconds")
+            target_loudness = max_level_db - 3  # Viser 3 dB en dessous du max pour éviter le clipping
+
+            # Construire la commande FFmpeg
+            output_filename = f"ff_normalized_{os.path.basename(input_file)}"
+            output_file = os.path.join(videos_dir, output_filename)
+
+            ffmpeg_command = [
+                "ffmpeg",
+                "-i", input_file,
+                "-af", f"afftdn=nr=10:nf=-30,acompressor=threshold=-30dB:ratio=4:attack=20:release=100,deesser,highpass=f=100,loudnorm=I={target_loudness}:TP=-1.5:LRA=11",
+                "-c:v", "copy",  # Conserver la vidéo intacte
+                "-c:a", "aac",
+                "-b:a", "192k",
+                output_file
+            ]
+
+            if progress_callback:
+                progress_callback(33)
+
+            # Exécuter la commande FFmpeg
+            import subprocess
+            process = subprocess.run(ffmpeg_command, capture_output=True, text=True)
+
+            if process.returncode != 0:
+                return t("ff_normalize_error").format(error=process.stderr), "0%"
+
+            if progress_callback:
+                progress_callback(100)
+
+            return t("ff_normalize_success").format(result=output_file), "100%"
+
+        except Exception as e:
+            return t("ff_normalize_error").format(error=str(e)), "0%"
 
     def remove_silence_legacy(self, input_file: str, threshold: float, duration: float,
                        keep_duration: float, videos_dir: str,
@@ -580,7 +638,7 @@ class TrimsilencesPlugin(Plugin):
 
         st.subheader(t("trim_silences_original_videos"))
         for file, full_path, _ in all_videos:
-            col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 1, 1, 1, 1, 1, 1])  # Ajout d'une colonne pour la résolution
+            col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
             with col1:
                 st.write(file)
             with col2:
@@ -685,6 +743,32 @@ class TrimsilencesPlugin(Plugin):
                             "duration": len(audio_array) / sample_rate
                         }
                         st.session_state.current_analyzed_file = file
+
+            with col8:
+                if st.button(t("ff_normalize_button"), key=f"ff_normalize_{file}"):
+                    reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
+                    progress_bar = st.progress(0)
+                    progress_text = st.empty()
+
+                    def update_progress(progress):
+                        progress_bar.progress(progress)
+                        progress_text.text(t("ff_normalize_processing").format(file=file))
+
+                    with st.spinner(t("ff_normalize_processing").format(file=file)):
+                        result, _ = self.ff_normalize(
+                            full_path,
+                            reference_audio_path,
+                            config['common']['work_directory'],
+                            update_progress
+                        )
+
+                    progress_bar.empty()
+                    progress_text.empty()
+
+                    if result.startswith(t("ff_normalize_error").format(error="")):
+                        st.error(result)
+                    else:
+                        st.success(result)
 
 
         if st.session_state.current_analyzed_file and st.session_state.current_analyzed_file in st.session_state.analyzed_audio:
