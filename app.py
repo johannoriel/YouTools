@@ -14,6 +14,20 @@ CONFIG_FILE = "config.json"
 CORE_PLUGINS = {'common', 'llm'}  # Add your essential plugins here
 
 
+def list_directories(directory):
+    """Liste les dossiers dans le répertoire donné."""
+    directories = []
+    try:
+        for item in os.listdir(directory):
+            full_path = os.path.join(directory, item)
+            if os.path.isdir(full_path):
+                directories.append((item, full_path))
+        directories.sort(key=lambda x: x[0])  # Trier par nom
+        return directories
+    except OSError:
+        return []
+
+
 def load_config() -> Dict[str, Any]:
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
@@ -256,6 +270,27 @@ def main():
 
     if new_lang != st.session_state.lang:
         st.session_state.lang = new_lang
+        st.rerun()
+
+    #Work directory selector
+    expander.subheader(t("work_directory"))
+    current_work_dir = os.path.expanduser(config['common']['work_directory'])
+    directories = list_directories(current_work_dir)
+    parent_dir = os.path.dirname(current_work_dir)
+    dir_options = [current_work_dir, parent_dir] + [d[1] for d in directories]
+    dir_labels = [current_work_dir, "Parent: " + os.path.basename(parent_dir)] + [os.path.basename(d[0]) for d in directories]
+
+    selected_dir = expander.selectbox(
+        t("work_directory"),
+        options=dir_options,
+        format_func=lambda x: dir_labels[dir_options.index(x)],
+        key="work_dir_selector"
+    )
+
+    # Mettre à jour le répertoire si un nouveau dossier est sélectionné
+    if selected_dir != current_work_dir:
+        config['common']['work_directory'] = selected_dir
+        save_config(config)
         st.rerun()
 
     # Handle core plugins sidebar configuration
