@@ -580,10 +580,28 @@ class TrimsilencesPlugin(Plugin):
 
         st.subheader(t("trim_silences_original_videos"))
         for file, full_path, _ in all_videos:
-            col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+            col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 1, 1, 1, 1, 1, 1])  # Ajout d'une colonne pour la résolution
             with col1:
                 st.write(file)
             with col2:
+                try:
+                    video = VideoFileClip(full_path)
+                    duration = video.duration
+                    duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"  # Format MM:SS
+                    st.write(f"Durée: {duration_str}")
+                    video.close()
+                except Exception as e:
+                    st.write(f"Durée: Erreur ({e})")
+            with col3:
+                try:
+                    video = VideoFileClip(full_path)
+                    resolution = video.size
+                    resolution_str = f"{resolution[0]}x{resolution[1]}"
+                    st.write(f"Résolution: {resolution_str}")
+                    video.close()
+                except Exception as e:
+                    st.write(f"Résolution: Erreur ({e})")
+            with col4:
                 if st.button(t("trim_silences_button"), key=f"remove_silence_{file}"):
                     progress_bar = st.progress(0)
                     progress_text = st.empty()
@@ -614,7 +632,7 @@ class TrimsilencesPlugin(Plugin):
                             f" - Reduction: {reduction}"
                         )
 
-            with col3:
+            with col5:
                 if st.button(t("trim_silences_simple_button"), key=f"remove_silence_simple_{file}"):
                     progress_bar = st.progress(0)
                     progress_text = st.empty()
@@ -643,7 +661,7 @@ class TrimsilencesPlugin(Plugin):
                             f" - Reduction: {reduction}"
                         )
 
-            with col4:
+            with col6:
                 if st.button("Normalize", key=f"normalize_{file}"):
                     reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
                     with st.spinner("Normalizing audio..."):
@@ -653,7 +671,7 @@ class TrimsilencesPlugin(Plugin):
                     else:
                         st.success(result)
 
-            with col5:
+            with col7:
                 if st.button(t("analyze_button"), key=f"analyze_{file}"):
                     with st.spinner("Analyzing audio..."):
                         video = VideoFileClip(full_path)
