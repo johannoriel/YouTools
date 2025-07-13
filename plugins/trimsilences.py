@@ -8,6 +8,8 @@ from plugins.common import list_video_files2
 from moviepy import VideoFileClip, concatenate_videoclips
 from lib.video_utils import normalize_full_audio
 import matplotlib.pyplot as plt
+from scipy.fft import fft, fftfreq
+import subprocess
 
 # Ajout des nouvelles traductions
 translations["en"].update({
@@ -249,6 +251,46 @@ def calculate_compression_data(audio_array: np.ndarray, sample_rate: int, min_du
         percentages.append(percentage)
     return db_thresholds, percentages
 
+def analyze_spectrum(audio_array: np.ndarray, sample_rate: int, num_bands: int = 12) -> tuple[np.ndarray, np.ndarray]:
+    """Analyse le spectre fréquentiel d'un signal audio et retourne les amplitudes moyennes par bande."""
+    if len(audio_array.shape) > 1:
+        audio_array = np.mean(audio_array, axis=1).astype(np.float32)
+
+    # Calcul de la FFT
+    N = len(audio_array)
+    fft_result = fft(audio_array)
+    freqs = fftfreq(N, 1 / sample_rate)
+    magnitudes = np.abs(fft_result[:N//2])  # Prendre la moitié positive du spectre
+
+    # Définir les bandes de fréquences (logarithmique)
+    freq_bins = np.logspace(np.log10(20), np.log10(sample_rate/2), num_bands + 1)
+    band_magnitudes = []
+
+    for i in range(num_bands):
+        mask = (freqs[:N//2] >= freq_bins[i]) & (freqs[:N//2] < freq_bins[i+1])
+        band_magnitude = np.mean(magnitudes[mask]) if np.any(mask) else 0
+        band_magnitudes.append(band_magnitude)
+
+    band_centers = (freq_bins[:-1] + freq_bins[1:]) / 2  # Fréquences centrales des bandes
+    return band_centers, np.array(band_magnitudes)
+
+def generate_equalizer_filters(ref_magnitudes: np.ndarray, target_magnitudes: np.ndarray, band_centers: np.ndarray) -> str:
+    """Génère une chaîne de filtres equalizer pour FFmpeg basée sur les différences spectrales."""
+    # Calculer les différences en dB (logarithmique)
+    ref_magnitudes = np.clip(ref_magnitudes, 1e-10, None)  # Éviter division par zéro
+    target_magnitudes = np.clip(target_magnitudes, 1e-10, None)
+    gains_db = 20 * np.log10(ref_magnitudes / target_magnitudes)
+
+    # Limiter les gains pour éviter des ajustements extrêmes
+    gains_db = np.clip(gains_db, -12, 12)
+
+    # Générer les filtres equalizer avec width_type=o et w=1 (1 octave)
+    equalizer_filters = []
+    for freq, gain in zip(band_centers, gains_db):
+        equalizer_filters.append(f"equalizer=f={freq}:width_type=o:width=1:g={gain}")
+
+    return ",".join(equalizer_filters)
+
 class TrimsilencesPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
@@ -349,6 +391,70 @@ class TrimsilencesPlugin(Plugin):
 
             # Exécuter la commande FFmpeg
             import subprocess
+            process = subprocess.run(ffmpeg_command, capture_output=True, text=True)
+
+            if process.returncode != 0:
+                return t("ff_normalize_error").format(error=process.stderr), "0%"
+
+            if progress_callback:
+                progress_callback(100)
+
+            return t("ff_normalize_success").format(result=output_file), "100%"
+
+        except Exception as e:
+            return t("ff_normalize_error").format(error=str(e)), "0%"
+
+    def ff_normalize_spectrum(self, input_file: str, reference_audio_path: str, videos_dir: str, progress_callback=None) -> tuple[str, str]:
+        try:
+            if progress_callback:
+                progress_callback(0)
+
+            # Charger l'audio de référence et l'audio cible pour analyse
+            if not reference_audio_path or not os.path.exists(reference_audio_path):
+                return t("ff_normalize_error").format(error="Reference audio file not found"), "0%"
+
+            reference_video = VideoFileClip(reference_audio_path)
+            reference_audio_array = reference_video.audio.to_soundarray(fps=reference_video.audio.fps)
+            reference_sample_rate = reference_video.audio.fps
+            reference_video.close()
+
+            target_video = VideoFileClip(input_file)
+            target_audio_array = target_video.audio.to_soundarray(fps=target_video.audio.fps)
+            target_sample_rate = target_video.audio.fps
+            target_video.close()
+
+            # Analyser l'audio de référence
+            max_level_db, min_level_db, _, _ = analyze_audio(reference_audio_array, reference_sample_rate, granularity="seconds")
+            target_loudness = max_level_db - 3  # Viser 3 dB en dessous du max pour éviter le clipping
+
+            # Analyser les spectres
+            band_centers, ref_magnitudes = analyze_spectrum(reference_audio_array, reference_sample_rate)
+            _, target_magnitudes = analyze_spectrum(target_audio_array, target_sample_rate)
+
+            # Générer les filtres equalizer
+            equalizer_filter = generate_equalizer_filters(ref_magnitudes, target_magnitudes, band_centers)
+
+            # Construire la commande FFmpeg avec égalisation
+            output_filename = f"ff_normalized_{os.path.basename(input_file)}"
+            output_file = os.path.join(videos_dir, output_filename)
+
+            st.write(equalizer_filter)
+
+            ffmpeg_command = [
+                "ffmpeg",
+                "-y",
+                "-i", input_file,
+                "-af", f"afftdn=nr=15:nf=-35,{equalizer_filter},highpass=f=150,lowpass=f=8000,acompressor=threshold=-30dB:ratio=4:attack=20:release=100,deesser,loudnorm=I={target_loudness}:TP=-1.5:LRA=11",
+                "-c:v", "copy",  # Conserver la vidéo intacte
+                "-c:a", "aac",
+                "-b:a", "192k",
+                output_file
+            ]
+
+            if progress_callback:
+                progress_callback(33)
+
+            # Exécuter la commande FFmpeg
             process = subprocess.run(ffmpeg_command, capture_output=True, text=True)
 
             if process.returncode != 0:
