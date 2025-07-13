@@ -44,6 +44,10 @@ translations["en"].update({
     "ff_normalize_processing": "FFmpeg normalization in progress for {file}...",
     "ff_normalize_success": "FFmpeg normalization completed. Output file: {result}",
     "ff_normalize_error": "Error during FFmpeg normalization: {error}",
+    "enhance_button": "Enhance Audio",
+    "enhance_processing": "Enhancing audio for {file}...",
+    "enhance_success": "Audio enhancement completed. Output file: {result}",
+    "enhance_error": "Error during audio enhancement: {error}",
 })
 
 translations["fr"].update({
@@ -78,7 +82,127 @@ translations["fr"].update({
     "ff_normalize_processing": "Normalisation FFmpeg en cours pour {file}...",
     "ff_normalize_success": "Normalisation FFmpeg terminée. Fichier de sortie : {result}",
     "ff_normalize_error": "Erreur lors de la normalisation FFmpeg : {error}",
+    "enhance_button": "Améliorer l'audio",
+    "enhance_processing": "Amélioration de l'audio pour {file}...",
+    "enhance_success": "Amélioration de l'audio terminée. Fichier de sortie : {result}",
+    "enhance_error": "Erreur lors de l'amélioration de l'audio : {error}",
 })
+
+import os
+import subprocess
+import shutil
+from pathlib import Path
+import sys
+import torchaudio
+import torch
+
+def enhance_audio_with_resemble(input_file: str, output_dir: str, run_dir: str = None, device: str = "cuda",
+                                lambd: float = 1.0, tau: float = 0.5, solver: str = "midpoint",
+                                nfe: int = 64, progress_callback=None) -> tuple[str, str]:
+    """
+    Extrait l'audio d'une vidéo, applique l'amélioration avec resemble-enhance, et recombine avec la vidéo.
+    Crée un fichier de backup avant modification.
+
+    Args:
+        input_file (str): Chemin vers le fichier vidéo d'entrée.
+        output_dir (str): Répertoire où sauvegarder la vidéo améliorée.
+        run_dir (str, optional): Chemin vers le dossier du modèle resemble-enhance.
+        device (str): Device pour le calcul ("cuda" ou "cpu").
+        lambd (float): Force de débruitage (0.0 à 1.0).
+        tau (float): Température du prior CFM (0.0 à 1.0).
+        solver (str): Solveur numérique ("midpoint", "rk4", "euler").
+        nfe (int): Nombre d'évaluations de fonction.
+        progress_callback (callable, optional): Fonction pour mettre à jour la progression.
+
+    Returns:
+        tuple[str, str]: (Message de résultat, Pourcentage de progression)
+    """
+    try:
+        if progress_callback:
+            progress_callback(0)
+
+        # Vérifier si resemble-enhance est accessible
+        try:
+            sys.path.append(str(Path.home() / "Evaluation" / "resemble-enhance"))
+            from resemble_enhance.enhancer.inference import enhance
+        except ImportError as e:
+            return f"Erreur : Impossible d'importer resemble-enhance : {str(e)}", "0%"
+
+        # Créer un fichier de backup
+        backup_file = input_file + ".backup"
+        shutil.copy2(input_file, backup_file)
+
+        # Extraire l'audio en .wav
+        temp_audio = os.path.join(output_dir, "temp_audio.wav")
+        ffmpeg_extract_cmd = [
+            "ffmpeg", "-y", "-i", input_file, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", temp_audio
+        ]
+        process = subprocess.run(ffmpeg_extract_cmd, capture_output=True, text=True)
+        if process.returncode != 0:
+            return f"Erreur lors de l'extraction audio : {process.stderr}", "0%"
+
+        if progress_callback:
+            progress_callback(33)
+
+        # Charger l'audio pour l'amélioration
+        dwav, sr = torchaudio.load(temp_audio)
+        dwav = dwav.mean(0)  # Convertir en mono
+
+        # Appliquer l'amélioration avec resemble-enhance
+        if device == "cuda" and not torch.cuda.is_available():
+            device = "cpu"
+        hwav, sr = enhance(
+            dwav=dwav,
+            sr=sr,
+            device=device,
+            nfe=nfe,
+            solver=solver,
+            lambd=lambd,
+            tau=tau,
+            run_dir=run_dir,
+        )
+
+        # Sauvegarder l'audio amélioré
+        enhanced_audio = os.path.join(output_dir, "enhanced_audio.wav")
+        torchaudio.save(enhanced_audio, hwav[None], sr)
+
+        if progress_callback:
+            progress_callback(66)
+
+        # Recombiner l'audio amélioré avec la vidéo
+        output_filename = f"enhanced_{os.path.basename(input_file)}"
+        output_file = os.path.join(output_dir, output_filename)
+        ffmpeg_combine_cmd = [
+                    "ffmpeg", "-y", "-i", input_file, "-i", enhanced_audio,
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-map", "0:v:0", "-map", "1:a:0", output_file
+        ]
+        try:
+            process = subprocess.run(
+                ffmpeg_combine_cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace'  # Remplacer les caractères non décodables
+            )
+            if process.returncode != 0:
+                return f"Erreur lors de la recombination audio-vidéo : {process.stderr}", "0%"
+        except UnicodeDecodeError as e:
+            return f"Erreur de décodage Unicode lors de la recombination : {str(e)}", "0%"
+
+        # Nettoyer les fichiers temporaires
+        if os.path.exists(temp_audio):
+            os.remove(temp_audio)
+        if os.path.exists(enhanced_audio):
+            os.remove(enhanced_audio)
+
+        if progress_callback:
+            progress_callback(100)
+
+        return f"Amélioration audio terminée. Fichier de sortie : {output_file}", "100%"
+
+    except Exception as e:
+        raise
+        return f"Erreur lors de l'amélioration audio : {str(e)}", "0%"
 
 def get_video_metadata(_file_path: str) -> tuple[str, str]:
     """Calcule la durée et la résolution d'une vidéo avec mise en cache dans st.session_state."""
@@ -811,7 +935,7 @@ class TrimsilencesPlugin(Plugin):
         selected_names = [video_data[i]["File"] for i in selected_indices]
 
         # Boutons pour les opérations de masse
-        col_batch1, col_batch2, col_batch3 = st.columns(3)
+        col_batch1, col_batch2, col_batch3, col_batch4 = st.columns(4)
         with col_batch1:
             if st.button(t("trim_silences_button")):
                 if not selected_files:
@@ -901,6 +1025,33 @@ class TrimsilencesPlugin(Plugin):
                             st.error(f"{name}: {result}")
                         else:
                             st.success(f"{name}: {result}")
+        with col_batch4:
+            if st.button(t("enhance_button")):
+                if not selected_files:
+                    st.warning("Please select at least one video.")
+                else:
+                    for file, name in zip(selected_files, selected_names):
+                        progress_bar = st.progress(0)
+                        progress_text = st.empty()
+
+                        def update_progress(progress):
+                            progress_bar.progress(progress)
+                            progress_text.text(t("enhance_processing").format(file=name))
+
+                        with st.spinner(t("enhance_processing").format(file=name)):
+                            result, _ = enhance_audio_with_resemble(
+                                file,
+                                config['common']['work_directory'],
+                                progress_callback=update_progress
+                            )
+
+                        progress_bar.empty()
+                        progress_text.empty()
+
+                        if result.startswith(t("enhance_error").format(error="")):
+                            st.error(f"{name}: {result}")
+                        else:
+                            st.success(f"{name}: {t('enhance_success').format(result=result)}")
 
         # Section pour l'analyse audio
         self.analyze_audio_ui(config)
