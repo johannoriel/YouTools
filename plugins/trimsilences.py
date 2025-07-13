@@ -48,6 +48,7 @@ translations["en"].update({
     "enhance_processing": "Enhancing audio for {file}...",
     "enhance_success": "Audio enhancement completed. Output file: {result}",
     "enhance_error": "Error during audio enhancement: {error}",
+    "resemble_enhance_dir_label": "Resemble Enhance Directory",
 })
 
 translations["fr"].update({
@@ -86,6 +87,7 @@ translations["fr"].update({
     "enhance_processing": "Amélioration de l'audio pour {file}...",
     "enhance_success": "Amélioration de l'audio terminée. Fichier de sortie : {result}",
     "enhance_error": "Erreur lors de l'amélioration de l'audio : {error}",
+    "resemble_enhance_dir_label": "Répertoire de Resemble Enhance",
 })
 
 import os
@@ -96,8 +98,8 @@ import sys
 import torchaudio
 import torch
 
-def enhance_audio_with_resemble(input_file: str, output_dir: str, run_dir: str = None, device: str = "cuda",
-                                lambd: float = 1.0, tau: float = 0.5, solver: str = "midpoint",
+def enhance_audio_with_resemble(input_file: str, output_dir: str, resemble_enhance_dir: str, run_dir: str = None,
+                                device: str = "cuda", lambd: float = 1.0, tau: float = 0.5, solver: str = "midpoint",
                                 nfe: int = 64, progress_callback=None) -> tuple[str, str]:
     """
     Extrait l'audio d'une vidéo, applique l'amélioration avec resemble-enhance, et recombine avec la vidéo.
@@ -106,6 +108,7 @@ def enhance_audio_with_resemble(input_file: str, output_dir: str, run_dir: str =
     Args:
         input_file (str): Chemin vers le fichier vidéo d'entrée.
         output_dir (str): Répertoire où sauvegarder la vidéo améliorée.
+        resemble_enhance_dir (str): Chemin vers le dossier resemble-enhance.
         run_dir (str, optional): Chemin vers le dossier du modèle resemble-enhance.
         device (str): Device pour le calcul ("cuda" ou "cpu").
         lambd (float): Force de débruitage (0.0 à 1.0).
@@ -123,10 +126,14 @@ def enhance_audio_with_resemble(input_file: str, output_dir: str, run_dir: str =
 
         # Vérifier si resemble-enhance est accessible
         try:
-            sys.path.append(str(Path.home() / "Evaluation" / "resemble-enhance"))
+            sys.path.append(resemble_enhance_dir)
             from resemble_enhance.enhancer.inference import enhance
         except ImportError as e:
-            return f"Erreur : Impossible d'importer resemble-enhance : {str(e)}", "0%"
+            return (
+                f"Erreur : Impossible d'importer resemble-enhance : {str(e)}. "
+                "Veuillez installer le module via 'git clone https://github.com/resemble-ai/resemble-enhance.git' "
+                "et configurer le chemin du répertoire dans les paramètres du plugin."
+            ), "0%"
 
         # Créer un fichier de backup
         backup_file = input_file + ".backup"
@@ -137,7 +144,7 @@ def enhance_audio_with_resemble(input_file: str, output_dir: str, run_dir: str =
         ffmpeg_extract_cmd = [
             "ffmpeg", "-y", "-i", input_file, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", temp_audio
         ]
-        process = subprocess.run(ffmpeg_extract_cmd, capture_output=True, text=True)
+        process = subprocess.run(ffmpeg_extract_cmd, capture_output=True, text=True, encoding='utf-8')
         if process.returncode != 0:
             return f"Erreur lors de l'extraction audio : {process.stderr}", "0%"
 
@@ -173,8 +180,8 @@ def enhance_audio_with_resemble(input_file: str, output_dir: str, run_dir: str =
         output_filename = f"enhanced_{os.path.basename(input_file)}"
         output_file = os.path.join(output_dir, output_filename)
         ffmpeg_combine_cmd = [
-                    "ffmpeg", "-y", "-i", input_file, "-i", enhanced_audio,
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-map", "0:v:0", "-map", "1:a:0", output_file
+            "ffmpeg", "-y", "-i", input_file, "-i", enhanced_audio,
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-map", "0:v:0", "-map", "1:a:0", output_file
         ]
         try:
             process = subprocess.run(
@@ -182,7 +189,7 @@ def enhance_audio_with_resemble(input_file: str, output_dir: str, run_dir: str =
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
-                errors='replace'  # Remplacer les caractères non décodables
+                errors='replace'
             )
             if process.returncode != 0:
                 return f"Erreur lors de la recombination audio-vidéo : {process.stderr}", "0%"
@@ -201,7 +208,6 @@ def enhance_audio_with_resemble(input_file: str, output_dir: str, run_dir: str =
         return f"Amélioration audio terminée. Fichier de sortie : {output_file}", "100%"
 
     except Exception as e:
-        raise
         return f"Erreur lors de l'amélioration audio : {str(e)}", "0%"
 
 def get_video_metadata(_file_path: str) -> tuple[str, str]:
@@ -443,6 +449,11 @@ class TrimsilencesPlugin(Plugin):
                 "type": "number",
                 "label": t("trim_silences_keep_duration_label"),
                 "default": 0.1
+            },
+            "resemble_enhance_dir": {
+                "type": "text",
+                "label": t("resemble_enhance_dir_label"),
+                "default": str(Path.home() / "Evaluation" / "resemble-enhance")
             }
         }
 
@@ -467,6 +478,10 @@ class TrimsilencesPlugin(Plugin):
             max_value=0.5,
             value=config.get("keep_duration", 0.1),
             step=0.05
+        )
+        updated_config["resemble_enhance_dir"] = st.text_input(
+            t("resemble_enhance_dir_label"),
+            value=config.get("resemble_enhance_dir", str(Path.home() / "Evaluation" / "resemble-enhance"))
         )
         return updated_config
 
@@ -899,40 +914,13 @@ class TrimsilencesPlugin(Plugin):
 
         # Liste des vidéos avec sélection multiple
         st.subheader(t("trim_silences_original_videos"))
-        all_videos = list_video_files2(config['common']['work_directory'], extensions=['.mp4', '.mkv'])
-        st.session_state['list_video_files'] = all_videos
-
-        # Préparer les données pour la grille
-        video_data = []
-        for file, full_path, _ in all_videos:
-            duration_str, resolution_str = get_video_metadata(full_path)
-            video_data.append({
-                "File": file,
-                "Duration": duration_str,
-                "Resolution": resolution_str,
-                "Full Path": full_path
-            })
-
-        # Afficher la grille avec sélection multi-row
-        selected_rows = st.dataframe(
-            video_data,
-            column_config={
-                "File": st.column_config.TextColumn("File"),
-                "Duration": st.column_config.TextColumn("Duration"),
-                "Resolution": st.column_config.TextColumn("Resolution"),
-                "Full Path": None  # Cacher la colonne Full Path
-            },
-            use_container_width=True,
-            height=400,
-            selection_mode="multi-row",
-            on_select="rerun",
-            key="video_selection_grid"
+        from widgets.file_selector import FileSelectorWidget
+        file_selector = FileSelectorWidget("trimsilences", "trimsilences", plugin_manager=self.plugin_manager)
+        selected_files = file_selector.display(
+            mode="video",
+            allowed_extensions=['.mp4', '.mkv']
         )
-
-        # Récupérer les indices des lignes sélectionnées
-        selected_indices = selected_rows.get('selection', {}).get('rows', [])
-        selected_files = [video_data[i]["Full Path"] for i in selected_indices]
-        selected_names = [video_data[i]["File"] for i in selected_indices]
+        selected_names = [os.path.basename(f) for f in selected_files]
 
         # Boutons pour les opérations de masse
         col_batch1, col_batch2, col_batch3, col_batch4 = st.columns(4)
@@ -1030,6 +1018,7 @@ class TrimsilencesPlugin(Plugin):
                 if not selected_files:
                     st.warning("Please select at least one video.")
                 else:
+                    resemble_enhance_dir = config['trimsilences'].get('resemble_enhance_dir', str(Path.home() / "Evaluation" / "resemble-enhance"))
                     for file, name in zip(selected_files, selected_names):
                         progress_bar = st.progress(0)
                         progress_text = st.empty()
@@ -1042,6 +1031,7 @@ class TrimsilencesPlugin(Plugin):
                             result, _ = enhance_audio_with_resemble(
                                 file,
                                 config['common']['work_directory'],
+                                resemble_enhance_dir,
                                 progress_callback=update_progress
                             )
 
