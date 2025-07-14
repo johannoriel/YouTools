@@ -344,6 +344,41 @@ class CanvaPlugin(Plugin):
                             with col2:
                                 st.write(f"**Nom**: {item.get('title', 'Sans nom')}")
                                 st.write(f"**ID**: {item['id']}")
+
+                                # Bouton One Click Export
+                                if st.button("One Click Export", key=f"one_click_{item['id']}"):
+                                    with st.spinner(t("canva_export_in_progress")):
+                                        # Créer le job avec les paramètres par défaut
+                                        job_id = self.create_export_job(
+                                            token_data["access_token"],
+                                            item["id"],
+                                            format_type="jpg",
+                                            quality=80,
+                                            pages="1"
+                                        )
+                                        if job_id:
+                                            st.session_state.job_ids.append(job_id)
+                                            st.success(t("canva_export_created").format(job_id=job_id))
+                                            # Attendre 3 secondes
+                                            time.sleep(3)
+                                            # Vérifier l'état du job
+                                            status, urls = self.check_export_status(token_data["access_token"], job_id)
+                                            if status == "success" and urls:
+                                                url = urls[0]
+                                                design_name = item.get("title", f"export_{job_id}").replace(" ", "_")
+                                                filepath = self.download_export(url, design_name, "jpg", config)
+                                                if filepath:
+                                                    st.success(t("canva_export_downloaded").format(filepath=filepath))
+                                                    st.session_state.job_ids.remove(job_id)
+                                                else:
+                                                    st.error(t("canva_download_error"))
+                                            elif status == "failed":
+                                                st.error(t("canva_job_failed").format(job_id=job_id))
+                                                st.session_state.job_ids.remove(job_id)
+                                            else:
+                                                st.write(t("canva_follow_job"))
+
+                                # Bouton Export existant (gardé pour flexibilité)
                                 if st.button(t("canva_export"), key=item["id"]):
                                     st.session_state.export_in_progress = item["id"]
 
@@ -388,7 +423,7 @@ class CanvaPlugin(Plugin):
                         st.info("Tentative de rafraîchissement du token...")
                         new_token = self.refresh_token(token_data["refresh_token"], config)
                         if new_token:
-                            st.rerun()  # Recharger la page avec le nouveau token
+                            st.rerun()
 
         # Onglet Jobs
         with tab2:
