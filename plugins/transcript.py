@@ -51,6 +51,15 @@ translations["en"].update({
     "batch_results_title": "Batch Transcription Results",
     "batch_download_all_button": "Download All Transcripts",
     "batch_no_results": "No batch transcription results available.",
+    "prompt_transcript_tab": "Prompt Transcript",
+    "prompt_transcript_header": "Process Existing Transcript",
+    "prompt_transcript_select_file": "Select a transcript file",
+    "prompt_transcript_no_files": "No transcript files (.txt, .vtt) found in",
+    "prompt_transcript_select_prompt": "Select a prompt to apply",
+    "prompt_transcript_no_prompts": "No saved prompts available",
+    "prompt_transcript_apply_button": "Apply Prompt",
+    "prompt_transcript_result_title": "Prompt Result",
+    "prompt_transcript_no_result": "No prompt result available",
 })
 
 translations["fr"].update({
@@ -91,6 +100,15 @@ translations["fr"].update({
     "batch_results_title": "Résultats de la transcription par lot",
     "batch_download_all_button": "Télécharger toutes les transcriptions",
     "batch_no_results": "Aucun résultat de transcription par lot disponible.",
+    "prompt_transcript_tab": "Prompter une transcription",
+    "prompt_transcript_header": "Traiter une transcription existante",
+    "prompt_transcript_select_file": "Sélectionner un fichier de transcription",
+    "prompt_transcript_no_files": "Aucun fichier de transcription (.txt, .vtt) trouvé dans",
+    "prompt_transcript_select_prompt": "Sélectionner un prompt à appliquer",
+    "prompt_transcript_no_prompts": "Aucun prompt enregistré disponible",
+    "prompt_transcript_apply_button": "Appliquer le prompt",
+    "prompt_transcript_result_title": "Résultat du prompt",
+    "prompt_transcript_no_result": "Aucun résultat de prompt disponible",
 })
 
 class TranscriptPlugin(Plugin):
@@ -98,6 +116,7 @@ class TranscriptPlugin(Plugin):
         super().__init__(name, plugin_manager)
         self.yt_transcript_widget = YoutubeTranscriptWidget("transcript", "transcript", plugin_manager)
         self.file_selector = FileSelectorWidget("transcript", "batch", plugin_manager)
+        self.prompt_file_selector = FileSelectorWidget("transcript", "prompt_transcript", plugin_manager)
         if 'prompts' not in st.session_state:
             st.session_state.prompts = {}
         # Déclarer les prompts auprès du plugin llm
@@ -135,7 +154,8 @@ class TranscriptPlugin(Plugin):
         return [
             {"name": t("transcript_tab"), "plugin": "transcript"},
             {"name": t("playlist_tab"), "plugin": "transcript"},
-            {"name": t("batch_tab"), "plugin": "transcript"}
+            {"name": t("batch_tab"), "plugin": "transcript"},
+            {"name": t("prompt_transcript_tab"), "plugin": "transcript"},
         ]
 
     def transcribe_video(self, video_path, output_format, whisper_path=None, whisper_model=None, ffmpeg_path=None, lang=None):
@@ -430,8 +450,66 @@ class TranscriptPlugin(Plugin):
         else:
             st.info(t("batch_no_results"))
 
+    def run_prompt_transcript(self, config):
+            st.header(t("prompt_transcript_header"))
+
+            # Utiliser display_single pour sélectionner un seul fichier
+            selected_file_path = self.prompt_file_selector.display_single(
+                mode="simple",
+                allowed_extensions=['.txt', '.vtt']
+            )
+
+            if not selected_file_path:
+                work_directory = os.path.expanduser(config['common']['work_directory'])
+                st.info(t("prompt_transcript_no_files").format(work_directory))
+                return
+
+            # Lire le contenu du fichier
+            selected_file = os.path.basename(selected_file_path)
+            try:
+                with open(selected_file_path, "r", encoding="utf-8") as f:
+                    transcript_content = f.read()
+            except Exception as e:
+                st.error(f"Error reading file {selected_file}: {str(e)}")
+                return
+
+            # Sélectionner un prompt
+            prompt_options = list(st.session_state.prompts.keys())
+            if not prompt_options:
+                st.warning(t("prompt_transcript_no_prompts"))
+                return
+
+            selected_prompt = st.selectbox(
+                t("prompt_transcript_select_prompt"),
+                options=prompt_options,
+                key="prompt_transcript_prompt_select"
+            )
+
+            # Bouton pour appliquer le prompt
+            if st.button(t("prompt_transcript_apply_button"), key="prompt_transcript_apply_button"):
+                with st.spinner("Processing prompt..."):
+                    llm_config = config.get('llm', {})
+                    result = self.apply_prompt(transcript_content, st.session_state.prompts[selected_prompt], llm_config)
+                    st.session_state.prompt_transcript_result = result
+
+            # Afficher le résultat
+            if "prompt_transcript_result" in st.session_state:
+                st.subheader(t("prompt_transcript_result_title"))
+                st.write(st.session_state.prompt_transcript_result)
+                st.download_button(
+                    label=t("transcript_download_button"),
+                    data=st.session_state.prompt_transcript_result,
+                    file_name=f"prompt_result_{selected_file}.txt",
+                    mime="text/plain",
+                    key=f"prompt_transcript_download_{selected_file}"
+                )
+            else:
+                st.info(t("prompt_transcript_no_result"))
+
     def run(self, config):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Local", "Remote", t("prompt_management"), t("playlist_tab"), t("batch_tab")])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "Local", "Remote", t("prompt_management"), t("playlist_tab"), t("batch_tab"), t("prompt_transcript_tab")
+        ])
         with tab1:
             self.run_local(config)
         with tab2:
@@ -442,3 +520,5 @@ class TranscriptPlugin(Plugin):
             self.run_playlist(config)
         with tab5:
             self.run_batch(config)
+        with tab6:
+            self.run_prompt_transcript(config)
