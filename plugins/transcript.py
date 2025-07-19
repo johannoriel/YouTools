@@ -8,15 +8,96 @@ import os
 from lib.video_utils import transcribe_video_whisper_cli
 from widgets.yt_transcript import YoutubeTranscriptWidget
 from widgets.prompt_manager import PromptsManagerWidget
+from widgets.file_selector import FileSelectorWidget
 from pytubefix import Playlist
 import re
 
-# ... (translations inchangées) ...
+# Ajout des traductions
+translations["en"].update({
+    "transcript_header": "Video Transcription",
+    "transcript_tab": "Local Transcription",
+    "playlist_tab": "YouTube Playlist",
+    "transcript_select_video": "Select a video",
+    "transcript_no_videos": "No video files found in",
+    "transcript_output_format": "Output format",
+    "transcript_transcribe_button": "Transcribe",
+    "transcript_transcribing": "Transcribing video...",
+    "transcript_transcription_done": "Transcription completed!",
+    "transcript_content": "Transcript",
+    "transcript_copy_button": "Copy Transcript",
+    "transcript_copy_success": "Transcript copied to clipboard!",
+    "transcript_download_button": "Download Transcript",
+    "transcript_question_input": "Ask a question about the transcript",
+    "transcript_question_button": "Ask Question",
+    "transcript_answer_title": "Answer",
+    "prompt_result": "Prompt Result",
+    "select_prompt": "Select a Prompt",
+    "apply_prompt": "Apply Prompt",
+    "playlist_url": "Enter YouTube Playlist URL",
+    "playlist_process_button": "Process Playlist",
+    "playlist_invalid_url": "Invalid playlist URL",
+    "playlist_processing": "Processing video {current} of {total}",
+    "playlist_results": "Playlist Results",
+    "playlist_download_button": "Download Playlist Results",
+    "combined_results_title": "Combined Results",
+    "combined_results_prompt": "Ask a question about combined results",
+    "prompt_management": "Prompt Management",
+    "batch_tab": "Batch Processing",
+    "batch_transcribe_button": "Transcribe Selected Videos",
+    "batch_no_files_selected": "No files selected. Please select at least one video file.",
+    "batch_transcribing": "Transcribing {current} of {total} videos...",
+    "batch_transcription_done": "Transcription completed for {file}",
+    "batch_transcription_failed": "Failed to transcribe {file}: {error}",
+    "batch_results_title": "Batch Transcription Results",
+    "batch_download_all_button": "Download All Transcripts",
+    "batch_no_results": "No batch transcription results available.",
+})
+
+translations["fr"].update({
+    "transcript_header": "Transcription de vidéo",
+    "transcript_tab": "Transcription locale",
+    "playlist_tab": "Playlist YouTube",
+    "transcript_select_video": "Sélectionner une vidéo",
+    "transcript_no_videos": "Aucun fichier vidéo trouvé dans",
+    "transcript_output_format": "Format de sortie",
+    "transcript_transcribe_button": "Transcrire",
+    "transcript_transcribing": "Transcription de la vidéo en cours...",
+    "transcript_transcription_done": "Transcription terminée !",
+    "transcript_content": "Transcription",
+    "transcript_copy_button": "Copier la transcription",
+    "transcript_copy_success": "Transcription copiée dans le presse-papiers !",
+    "transcript_download_button": "Télécharger la transcription",
+    "transcript_question_input": "Poser une question sur la transcription",
+    "transcript_question_button": "Poser la question",
+    "transcript_answer_title": "Réponse",
+    "prompt_result": "Résultat du prompt",
+    "select_prompt": "Sélectionner un prompt",
+    "apply_prompt": "Appliquer le prompt",
+    "playlist_url": "Entrez l'URL de la playlist YouTube",
+    "playlist_process_button": "Traiter la playlist",
+    "playlist_invalid_url": "URL de playlist invalide",
+    "playlist_processing": "Traitement de la vidéo {current} sur {total}",
+    "playlist_results": "Résultats de la playlist",
+    "playlist_download_button": "Télécharger les résultats de la playlist",
+    "combined_results_title": "Résultats combinés",
+    "combined_results_prompt": "Poser une question sur les résultats combinés",
+    "prompt_management": "Gestion des prompts",
+    "batch_tab": "Traitement par lot",
+    "batch_transcribe_button": "Transcrire les vidéos sélectionnées",
+    "batch_no_files_selected": "Aucun fichier sélectionné. Veuillez sélectionner au moins un fichier vidéo.",
+    "batch_transcribing": "Transcription de {current} sur {total} vidéos...",
+    "batch_transcription_done": "Transcription terminée pour {file}",
+    "batch_transcription_failed": "Échec de la transcription de {file} : {error}",
+    "batch_results_title": "Résultats de la transcription par lot",
+    "batch_download_all_button": "Télécharger toutes les transcriptions",
+    "batch_no_results": "Aucun résultat de transcription par lot disponible.",
+})
 
 class TranscriptPlugin(Plugin):
     def __init__(self, name, plugin_manager):
         super().__init__(name, plugin_manager)
         self.yt_transcript_widget = YoutubeTranscriptWidget("transcript", "transcript", plugin_manager)
+        self.file_selector = FileSelectorWidget("transcript", "batch", plugin_manager)
         if 'prompts' not in st.session_state:
             st.session_state.prompts = {}
         # Déclarer les prompts auprès du plugin llm
@@ -34,7 +115,7 @@ class TranscriptPlugin(Plugin):
             "whisper_model": {
                 "type": "select",
                 "label": "transcript_whisper_model",
-                "options": [("tiny", "Tiny"), ("base", "Base"), ("small", "Small"), ("medium", "Medium"), ("large", "Large")],
+                "options": [("tiny", "Tiny"), ("base", "Base"), ("small", "Duel"), ("medium", "Medium"), ("large", "Large")],
                 "default": "medium"
             },
             "ffmpeg_path": {
@@ -53,7 +134,8 @@ class TranscriptPlugin(Plugin):
     def get_tabs(self):
         return [
             {"name": t("transcript_tab"), "plugin": "transcript"},
-            {"name": t("playlist_tab"), "plugin": "transcript"}
+            {"name": t("playlist_tab"), "plugin": "transcript"},
+            {"name": t("batch_tab"), "plugin": "transcript"}
         ]
 
     def transcribe_video(self, video_path, output_format, whisper_path=None, whisper_model=None, ffmpeg_path=None, lang=None):
@@ -160,12 +242,12 @@ class TranscriptPlugin(Plugin):
             st.info(f"{t('transcript_no_videos')} {work_directory}")
             return
 
-        selected_video = st.selectbox(t("transcript_select_video"), options=[v[0] for v in videos])
+        selected_video = st.selectbox(t("transcript_select_video"), options=[v[0] for v in videos], key="local_select_video")
         selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
 
-        output_format = st.radio(t("transcript_output_format"), ["txt", "srt"])
+        output_format = st.radio(t("transcript_output_format"), ["txt", "srt"], key="local_output_format")
 
-        if st.button(t("transcript_transcribe_button")):
+        if st.button(t("transcript_transcribe_button"), key="local_transcribe_button"):
             with st.spinner(t("transcript_transcribing")):
                 transcript = self.transcribe_video(selected_video_path, output_format)
                 st.session_state.transcript = transcript
@@ -175,11 +257,11 @@ class TranscriptPlugin(Plugin):
 
         if st.session_state.get('show_transcript', False):
             st.success(t("transcript_transcription_done"))
-            st.text_area(t("transcript_content"), st.session_state.transcript, height=300)
+            st.text_area(t("transcript_content"), st.session_state.transcript, height=300, key="local_transcript_area")
 
             col1, col2 = st.columns(2)
             with col1:
-                if st.button(t("transcript_copy_button")):
+                if st.button(t("transcript_copy_button"), key="local_copy_button"):
                     st.code(st.session_state.transcript)
                     st.success(t("transcript_copy_success"))
             with col2:
@@ -187,7 +269,8 @@ class TranscriptPlugin(Plugin):
                     label=t("transcript_download_button"),
                     data=st.session_state.transcript,
                     file_name=f"transcript_{os.path.splitext(selected_video)[0]}.{output_format}",
-                    mime="text/plain"
+                    mime="text/plain",
+                    key="local_download_button"
                 )
 
             self.display_transcript_results("transcript", "transcript_answer", "transcript_prompt_result", config, mode="local")
@@ -272,8 +355,83 @@ class TranscriptPlugin(Plugin):
         else:
             st.info(t("playlist_no_results"))
 
+    def run_batch(self, config):
+        st.header(t("batch_tab"))
+
+        # Initialiser le sélecteur de fichiers
+        selected_files = self.file_selector.display(
+            mode="video",
+            allowed_extensions=['.mp4', '.mkv', '.mov', '.avi']
+        )
+
+        # Sélection du format de sortie
+        output_format = st.radio(t("transcript_output_format"), ["txt", "srt"], key="batch_output_format")
+
+        # Bouton pour lancer la transcription par lot
+        if st.button(t("batch_transcribe_button"), key="batch_transcribe_button"):
+            if not selected_files:
+                st.warning(t("batch_no_files_selected"))
+                return
+
+            work_directory = os.path.expanduser(config['common']['work_directory'])
+            total_files = len(selected_files)
+            progress_bar = st.progress(0)
+            results = []
+
+            for i, file_path in enumerate(selected_files, 1):
+                file_name = os.path.basename(file_path)
+                with st.spinner(t("batch_transcribing").format(current=i, total=total_files)):
+                    try:
+                        transcript = self.transcribe_video(file_path, output_format)
+                        output_file = os.path.join(work_directory, f"transcript_{os.path.splitext(file_name)[0]}.{output_format}")
+                        with open(output_file, "w", encoding="utf-8") as f:
+                            f.write(transcript)
+                        results.append({
+                            "file": file_name,
+                            "transcript": transcript,
+                            "output_file": output_file
+                        })
+                        st.success(t("batch_transcription_done").format(file=file_name))
+                    except Exception as e:
+                        st.error(t("batch_transcription_failed").format(file=file_name, error=str(e)))
+
+                progress_bar.progress(i / total_files)
+
+            st.session_state.batch_results = results
+            progress_bar.empty()
+
+        # Afficher les résultats
+        if "batch_results" in st.session_state and st.session_state.batch_results:
+            st.subheader(t("batch_results_title"))
+            data = [{"File": r["file"], "Output File": r["output_file"]} for r in st.session_state.batch_results]
+            st.table(data)
+
+            # Télécharger toutes les transcriptions
+            all_transcripts = "\n\n".join([f"File: {r['file']}\nTranscript:\n{r['transcript']}" for r in st.session_state.batch_results])
+            st.download_button(
+                label=t("batch_download_all_button"),
+                data=all_transcripts,
+                file_name="batch_transcripts.txt",
+                mime="text/plain",
+                key="batch_download_all_button"
+            )
+
+            # Afficher les transcriptions individuelles
+            for result in st.session_state.batch_results:
+                with st.expander(f"Transcript for {result['file']}"):
+                    st.text_area(t("transcript_content"), result["transcript"], height=200, key=f"batch_transcript_area_{result['file']}")
+                    st.download_button(
+                        label=t("transcript_download_button"),
+                        data=result["transcript"],
+                        file_name=f"transcript_{result['file']}.{output_format}",
+                        mime="text/plain",
+                        key=f"batch_download_button_{result['file']}"
+                    )
+        else:
+            st.info(t("batch_no_results"))
+
     def run(self, config):
-        tab1, tab2, tab3, tab4 = st.tabs(["Local", "Remote", t("prompt_management"), t("playlist_tab")])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Local", "Remote", t("prompt_management"), t("playlist_tab"), t("batch_tab")])
         with tab1:
             self.run_local(config)
         with tab2:
@@ -282,3 +440,5 @@ class TranscriptPlugin(Plugin):
             PromptsManagerWidget("transcript", "prompt_manager", self.plugin_manager).display("prompts")
         with tab4:
             self.run_playlist(config)
+        with tab5:
+            self.run_batch(config)
