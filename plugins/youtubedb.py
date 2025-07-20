@@ -459,7 +459,7 @@ class YoutubedbPlugin(Plugin):
                 "Vous pouvez vérifier l'usage réel du quota ici : [Google Cloud Console Quotas](https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas?hl=fr&inv=1&invt=AbrCIQ&pageState=(%22allQuotasTable%22%253A(%22c%22%253A%5B%22displayDimensions%22%5D)))")
             youtube_api = YoutubeAPI(config)
             current_quota = youtube_api.get_quota_usage()['quota_usage']
-            st.write(f"Quota estimé actuel : {current_quota} unités")
+            st.write(f"Quota consomé estimé pour le jour : {current_quota} unités")
             forced_quota = st.number_input(
                 "Forcer la valeur du quota utilisé (unités)",
                 min_value=0,
