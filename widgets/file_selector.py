@@ -170,3 +170,53 @@ class FileSelectorWidget(Widget):
             selected_files = [file_data[i]["Full Path"] for i in selected_indices]
 
             return selected_files
+
+    def display_single(self, mode: str = "simple", allowed_extensions: list = None):
+        """Affiche une liste déroulante pour sélectionner un seul fichier et renvoie son chemin."""
+        st.subheader(t("file_selector_title"))
+
+        # Liste des extensions par défaut selon le mode
+        if mode == "video":
+            default_extensions = ['.mp4', '.ogg', '.mov', '.avi', '.mkv']
+        else:
+            default_extensions = ['.mp4', '.ogg', '.mov', '.avi', '.mkv', '.txt', '.jpg', '.png', '.pdf']
+
+        allowed_extensions = allowed_extensions or default_extensions
+
+        # Créer des colonnes pour aligner les filtres
+        col1, col2 = st.columns([2, 2])
+
+        # Sélection des extensions
+        with col1:
+            selected_extensions = st.multiselect(
+                t("file_selector_extensions_label"),
+                options=allowed_extensions,
+                default=allowed_extensions,
+                key=f"{self.prefix}_single_extensions"
+            )
+
+        # Filtre de recherche
+        with col2:
+            filter_text = st.text_input(
+                t("file_selector_filter_label"),
+                key=f"{self.prefix}_single_filter"
+            )
+
+        # Lister les fichiers
+        files = self.list_files(selected_extensions, mode)
+        filtered_files = [(file, path) for file, path in files if filter_text.lower() in file.lower()]
+
+        if not filtered_files:
+            return None
+
+        # Afficher une liste déroulante pour sélectionner un seul fichier
+        file_names = [file for file, _ in filtered_files]
+        selected_file = st.selectbox(
+            t("file_selector_file_column"),
+            options=file_names,
+            key=f"{self.prefix}_single_file_select"
+        )
+
+        # Renvoyer le chemin du fichier sélectionné
+        selected_file_path = next((path for file, path in filtered_files if file == selected_file), None)
+        return selected_file_path

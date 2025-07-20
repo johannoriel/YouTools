@@ -10,6 +10,7 @@ from lib.video_utils import normalize_full_audio
 import matplotlib.pyplot as plt
 from scipy.fft import fft, fftfreq
 import subprocess
+import pandas as pd
 
 # Ajout des nouvelles traductions
 translations["en"].update({
@@ -49,6 +50,15 @@ translations["en"].update({
     "enhance_success": "Audio enhancement completed. Output file: {result}",
     "enhance_error": "Error during audio enhancement: {error}",
     "resemble_enhance_dir_label": "Resemble Enhance Directory",
+    "merge_videos_label": "Merge processed videos",
+    "merge_only_button": "Merge Selected Videos",
+    "merge_success": "Successfully merged {count} videos",
+    "merge_error": "Error merging videos: {error}",
+    "no_videos_selected": "No videos selected for processing",
+    "batchsilences_normalizing_audio": "Normalizing audio...",
+    "batchsilences_reorder_videos": "Reorder Videos",
+    "batchsilences_reorder_instructions": "Drag and drop to reorder the videos for merging.",
+    "batchsilences_normalize_audio" : "FF normalize",
 })
 
 translations["fr"].update({
@@ -88,6 +98,15 @@ translations["fr"].update({
     "enhance_success": "Amélioration de l'audio terminée. Fichier de sortie : {result}",
     "enhance_error": "Erreur lors de l'amélioration de l'audio : {error}",
     "resemble_enhance_dir_label": "Répertoire de Resemble Enhance",
+    "merge_videos_label": "Fusionner les vidéos traitées",
+    "merge_only_button": "Fusionner les vidéos sélectionnées",
+    "merge_success": "{count} vidéos fusionnées avec succès",
+    "merge_error": "Erreur lors de la fusion des vidéos : {error}",
+    "no_videos_selected": "Aucune vidéo sélectionnée pour le traitement",
+    "batchsilences_normalizing_audio": "Normalisation de l'audio en cours...",
+    "batchsilences_reorder_videos": "Réorganiser les Vidéos",
+    "batchsilences_reorder_instructions": "Glissez-déposez pour réorganiser l'ordre des vidéos avant la fusion.",
+    "batchsilences_normalize_audio" : "FF normalize",
 })
 
 import os
@@ -869,6 +888,67 @@ class TrimsilencesPlugin(Plugin):
                     ax.set_ylim(0, 100)
                     st.pyplot(fig)
 
+    def merge_videos(self, video_paths: List[str], output_path: str) -> str:
+        """
+        Fusionne plusieurs vidéos en une seule.
+
+        Args:
+            video_paths: Liste des chemins des vidéos à fusionner
+            output_path: Chemin de sortie pour la vidéo fusionnée
+
+        Returns:
+            Chemin de la vidéo fusionnée ou message d'erreur
+        """
+        try:
+            clips = [VideoFileClip(path) for path in video_paths]
+            final_clip = concatenate_videoclips(clips)
+            final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", temp_audiofile="temp-audio.m4a", remove_temp=True, audio_bitrate="192k")
+            for clip in clips:
+                clip.close()
+            final_clip.close()
+            return output_path
+        except Exception as e:
+            return t("merge_error").format(error=str(e))
+
+    def post_process_videos(self, video_paths: List[str], config: dict, output_dir: str) -> tuple[str, str]:
+        """
+        Post-traite les vidéos : fusionne si activé et normalise l'audio si activé.
+
+        Args:
+            video_paths: Liste des chemins des vidéos à traiter
+            config: Configuration du plugin
+            output_dir: Répertoire de sortie
+
+        Returns:
+            tuple[str, str]: (Message de résultat, Pourcentage de progression)
+        """
+        try:
+            final_output = video_paths
+            result_message = ""
+
+            # Fusion si activée
+            if st.session_state.get("merge_videos", False) and len(video_paths) > 1:
+                output_path = os.path.join(output_dir, "merged_video.mp4")
+                merge_result = self.merge_videos(video_paths, output_path)
+                if merge_result.startswith(t("merge_error").format(error="")):
+                    return merge_result, "0%"
+                final_output = [merge_result]
+                result_message = t("merge_success").format(count=len(video_paths))
+
+            # Normalisation si activée
+            if st.session_state.get("normalize_audio", False):
+                reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
+                for video_path in final_output:
+                    with st.spinner(t("batchsilences_normalizing_audio")):
+                        norm_result, _ = self.ff_normalize(video_path, reference_audio_path, output_dir)
+                        if norm_result.startswith(t("ff_normalize_error").format(error="")):
+                            return norm_result, "0%"
+                        result_message = f"{result_message} {norm_result}" if result_message else norm_result
+
+            return result_message or "Processing completed", "100%"
+        except Exception as e:
+            return t("merge_error").format(error=str(e)), "0%"
+
     def run(self, config):
         st.header(t("trim_silences_header"))
 
@@ -922,14 +1002,60 @@ class TrimsilencesPlugin(Plugin):
         )
         selected_names = [os.path.basename(f) for f in selected_files]
 
+        # Checkbox pour fusionner les vidéos traitées
+        st.checkbox(
+            t("merge_videos_label"),
+            value=False,
+            key="merge_videos"
+        )
+
+        # Checkbox pour normaliser l'audio
+        st.checkbox(
+            t("batchsilences_normalize_audio"),
+            value=True,
+            key="normalize_audio"
+        )
+
+        # Initialiser les listes ordonnées avec les valeurs par défaut
+        ordered_files = selected_files
+        ordered_names = selected_names
+
+        # Réorganisation des vidéos si fusion activée et plusieurs vidéos sélectionnées
+        if st.session_state.get("merge_videos", False) and len(selected_files) > 1:
+            st.subheader(t("batchsilences_reorder_videos"))
+            st.markdown(t("batchsilences_reorder_instructions"))
+
+            # Créer un DataFrame pour la réorganisation
+            video_df = pd.DataFrame({
+                "Video Name": selected_names,
+                "Order": range(1, len(selected_names) + 1)
+            })
+
+            # Permettre la réorganisation
+            edited_df = st.data_editor(
+                video_df,
+                key="video_order_editor",
+                num_rows="dynamic"
+            )
+
+            # Trier les vidéos selon le nouvel ordre
+            edited_df = edited_df.sort_values(by="Order")
+            ordered_names = edited_df["Video Name"].tolist()
+            ordered_files = [
+                next(f for f in selected_files if os.path.basename(f) == name)
+                for name in ordered_names
+            ]
+
         # Boutons pour les opérations de masse
-        col_batch1, col_batch2, col_batch3, col_batch4 = st.columns(4)
+        col_batch1, col_batch2, col_batch3, col_batch4, col_batch5 = st.columns(5)
+        processed_videos = []
         with col_batch1:
             if st.button(t("trim_silences_button")):
                 if not selected_files:
-                    st.warning("Please select at least one video.")
+                    st.warning(t("no_videos_selected"))
                 else:
-                    for file, name in zip(selected_files, selected_names):
+                    processed_videos = []
+                    for file, name in zip(ordered_files, ordered_names):
                         progress_bar = st.progress(0)
                         progress_text = st.empty()
 
@@ -954,13 +1080,23 @@ class TrimsilencesPlugin(Plugin):
                             st.error(f"{name}: {result}")
                         else:
                             st.success(f"{name}: {t('trim_silences_success').format(result=result)} - Reduction: {reduction}")
+                            processed_videos.append(result)
+
+                    if processed_videos:
+                        with st.spinner(t("batchsilences_processing")):
+                            result, _ = self.post_process_videos(processed_videos, config, config['common']['work_directory'])
+                            if result.startswith(t("merge_error").format(error="")) or result.startswith(t("ff_normalize_error").format(error="")):
+                                st.error(result)
+                            else:
+                                st.success(result)
 
         with col_batch2:
             if st.button(t("trim_silences_simple_button")):
                 if not selected_files:
-                    st.warning("Please select at least one video.")
+                    st.warning(t("no_videos_selected"))
                 else:
-                    for file, name in zip(selected_files, selected_names):
+                    processed_videos = []
+                    for file, name in zip(ordered_files, ordered_names):
                         progress_bar = st.progress(0)
                         progress_text = st.empty()
 
@@ -983,14 +1119,24 @@ class TrimsilencesPlugin(Plugin):
                             st.error(f"{name}: {result}")
                         else:
                             st.success(f"{name}: {t('trim_silences_success').format(result=result)} - Reduction: {reduction}")
+                            processed_videos.append(result)
+
+                    if processed_videos:
+                        with st.spinner(t("batchsilences_processing")):
+                            result, _ = self.post_process_videos(processed_videos, config, config['common']['work_directory'])
+                            if result.startswith(t("merge_error").format(error="")) or result.startswith(t("ff_normalize_error").format(error="")):
+                                st.error(result)
+                            else:
+                                st.success(result)
 
         with col_batch3:
             if st.button(t("ff_normalize_button")):
                 if not selected_files:
-                    st.warning("Please select at least one video.")
+                    st.warning(t("no_videos_selected"))
                 else:
+                    processed_videos = []
                     reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
-                    for file, name in zip(selected_files, selected_names):
+                    for file, name in zip(ordered_files, ordered_names):
                         progress_bar = st.progress(0)
                         progress_text = st.empty()
 
@@ -1013,13 +1159,24 @@ class TrimsilencesPlugin(Plugin):
                             st.error(f"{name}: {result}")
                         else:
                             st.success(f"{name}: {result}")
+                            processed_videos.append(result)
+
+                    if processed_videos:
+                        with st.spinner(t("batchsilences_processing")):
+                            result, _ = self.post_process_videos(processed_videos, config, config['common']['work_directory'])
+                            if result.startswith(t("merge_error").format(error="")) or result.startswith(t("ff_normalize_error").format(error="")):
+                                st.error(result)
+                            else:
+                                st.success(result)
+
         with col_batch4:
             if st.button(t("enhance_button")):
                 if not selected_files:
-                    st.warning("Please select at least one video.")
+                    st.warning(t("no_videos_selected"))
                 else:
+                    processed_videos = []
                     resemble_enhance_dir = config['trimsilences'].get('resemble_enhance_dir', str(Path.home() / "Evaluation" / "resemble-enhance"))
-                    for file, name in zip(selected_files, selected_names):
+                    for file, name in zip(ordered_files, ordered_names):
                         progress_bar = st.progress(0)
                         progress_text = st.empty()
 
@@ -1042,6 +1199,27 @@ class TrimsilencesPlugin(Plugin):
                             st.error(f"{name}: {result}")
                         else:
                             st.success(f"{name}: {t('enhance_success').format(result=result)}")
+                            processed_videos.append(result)
+
+                    if processed_videos:
+                        with st.spinner(t("batchsilences_processing")):
+                            result, _ = self.post_process_videos(processed_videos, config, config['common']['work_directory'])
+                            if result.startswith(t("merge_error").format(error="")) or result.startswith(t("ff_normalize_error").format(error="")):
+                                st.error(result)
+                            else:
+                                st.success(result)
+
+        with col_batch5:
+            if st.button(t("merge_only_button")):
+                if not selected_files:
+                    st.warning(t("no_videos_selected"))
+                else:
+                    with st.spinner(t("batchsilences_processing")):
+                        result, _ = self.post_process_videos(ordered_files, config, config['common']['work_directory'])
+                        if result.startswith(t("merge_error").format(error="")) or result.startswith(t("ff_normalize_error").format(error="")):
+                            st.error(result)
+                        else:
+                            st.success(result)
 
         # Section pour l'analyse audio
         self.analyze_audio_ui(config)
