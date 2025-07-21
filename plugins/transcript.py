@@ -451,60 +451,151 @@ class TranscriptPlugin(Plugin):
             st.info(t("batch_no_results"))
 
     def run_prompt_transcript(self, config):
-            st.header(t("prompt_transcript_header"))
+        st.header(t("prompt_transcript_header"))
 
-            # Utiliser display_single pour sélectionner un seul fichier
-            selected_file_path = self.prompt_file_selector.display_single(
-                mode="simple",
-                allowed_extensions=['.txt', '.vtt']
-            )
+        # Utiliser display pour sélectionner plusieurs fichiers
+        selected_files = self.prompt_file_selector.display(
+            mode="simple",
+            allowed_extensions=['.txt', '.vtt']
+        )
 
-            if not selected_file_path:
+        if not selected_files:
+            work_directory = os.path.expanduser(config['common']['work_directory'])
+            st.info(t("prompt_transcript_no_files").format(work_directory))
+            return
+
+        # Sélectionner un prompt
+        prompt_options = list(st.session_state.prompts.keys())
+        if not prompt_options:
+            st.warning(t("prompt_transcript_no_prompts"))
+            return
+
+        selected_prompt = st.selectbox(
+            t("prompt_transcript_select_prompt"),
+            options=prompt_options,
+            key="prompt_transcript_prompt_select"
+        )
+
+        # Bouton pour appliquer le prompt à tous les fichiers sélectionnés
+        if st.button(t("prompt_transcript_apply_button"), key="prompt_transcript_apply_button"):
+            total_files = len(selected_files)
+            progress_bar = st.progress(0)
+            results = []
+            work_directory = os.path.expanduser(config['common']['work_directory'])
+
+            for i, file_path in enumerate(selected_files, 1):
+                file_name = os.path.basename(file_path)
+                with st.spinner(f"Processing {file_name}..."):
+                    try:
+                        # Lire le contenu du fichier
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            transcript_content = f.read()
+
+                        # Appliquer le prompt
+                        llm_config = config.get('llm', {})
+                        result = self.apply_prompt(transcript_content, st.session_state.prompts[selected_prompt], llm_config)
+
+                        # Définir le nom du fichier de sortie sans extension en double
+                        output_filename = f"prompt_result_{os.path.splitext(file_name)[0]}.txt"
+                        output_file_path = os.path.join(work_directory, output_filename)
+
+                        # Écrire le résultat dans le fichier
+                        with open(output_file_path, "w", encoding="utf-8") as f:
+                            f.write(result)
+
+                        # Stocker les résultats
+                        results.append({
+                            "file": file_name,
+                            "result": result,
+                            "output_file": output_filename
+                        })
+                        st.success(f"Prompt applied successfully for {file_name}")
+                    except Exception as e:
+                        st.error(f"Error processing file {file_name}: {str(e)}")
+
+                    progress_bar.progress(i / total_files)
+
+            st.session_state.prompt_transcript_results = results
+            progress_bar.empty()
+
+        # Bouton pour fusionner les fichiers sélectionnés
+        if st.button("Merge Selected Files", key="prompt_transcript_merge_button"):
+            work_directory = os.path.expanduser(config['common']['work_directory'])
+            merged_content = []
+            for i, file_path in enumerate(selected_files):
+                file_name = os.path.basename(file_path)
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    # Ajouter le séparateur et le titre sauf pour le premier fichier
+                    if i > 0:
+                        merged_content.append(f"---\n# {file_name}\n{content}")
+                    else:
+                        merged_content.append(f"# {file_name}\n{content}")
+                except Exception as e:
+                    st.error(f"Error reading file {file_name}: {str(e)}")
+
+            if merged_content:
+                merged_text = "\n".join(merged_content)
+                merged_file_path = os.path.join(work_directory, "merged_transcripts.txt")
+                try:
+                    with open(merged_file_path, "w", encoding="utf-8") as f:
+                        f.write(merged_text)
+                    st.success(f"Merged file saved as {merged_file_path}")
+                    st.download_button(
+                        label="Download Merged File",
+                        data=merged_text,
+                        file_name="merged_transcripts.txt",
+                        mime="text/plain",
+                        key="prompt_transcript_download_merged"
+                    )
+                except Exception as e:
+                    st.error(f"Error saving merged file: {str(e)}")
+
+        # Bouton pour supprimer les fichiers sélectionnés
+        if st.button("Delete Selected Files", key="prompt_transcript_delete_button"):
+            st.warning("Are you sure you want to delete the selected files?")
+            if st.button("Confirm Deletion", key="prompt_transcript_confirm_delete_button"):
                 work_directory = os.path.expanduser(config['common']['work_directory'])
-                st.info(t("prompt_transcript_no_files").format(work_directory))
-                return
+                for file_path in selected_files:
+                    file_name = os.path.basename(file_path)
+                    try:
+                        os.remove(file_path)
+                        st.success(f"File {file_name} deleted successfully")
+                    except Exception as e:
+                        st.error(f"Error deleting file {file_name}: {str(e)}")
+                # Rafraîchir la liste des fichiers après suppression
+                self.prompt_file_selector.refresh_files()
 
-            # Lire le contenu du fichier
-            selected_file = os.path.basename(selected_file_path)
-            try:
-                with open(selected_file_path, "r", encoding="utf-8") as f:
-                    transcript_content = f.read()
-            except Exception as e:
-                st.error(f"Error reading file {selected_file}: {str(e)}")
-                return
+        # Afficher les résultats
+        if "prompt_transcript_results" in st.session_state and st.session_state.prompt_transcript_results:
+            st.subheader(t("prompt_transcript_result_title"))
+            data = [{"File": r["file"], "Output File": r["output_file"]} for r in st.session_state.prompt_transcript_results]
+            st.table(data)
 
-            # Sélectionner un prompt
-            prompt_options = list(st.session_state.prompts.keys())
-            if not prompt_options:
-                st.warning(t("prompt_transcript_no_prompts"))
-                return
-
-            selected_prompt = st.selectbox(
-                t("prompt_transcript_select_prompt"),
-                options=prompt_options,
-                key="prompt_transcript_prompt_select"
+            # Télécharger tous les résultats
+            all_results = "\n\n".join([f"File: {r['file']}\nResult:\n{r['result']}" for r in st.session_state.prompt_transcript_results])
+            st.download_button(
+                label=t("batch_download_all_button"),
+                data=all_results,
+                file_name="batch_prompt_results.txt",
+                mime="text/plain",
+                key="prompt_transcript_download_all"
             )
 
-            # Bouton pour appliquer le prompt
-            if st.button(t("prompt_transcript_apply_button"), key="prompt_transcript_apply_button"):
-                with st.spinner("Processing prompt..."):
-                    llm_config = config.get('llm', {})
-                    result = self.apply_prompt(transcript_content, st.session_state.prompts[selected_prompt], llm_config)
-                    st.session_state.prompt_transcript_result = result
-
-            # Afficher le résultat
-            if "prompt_transcript_result" in st.session_state:
-                st.subheader(t("prompt_transcript_result_title"))
-                st.write(st.session_state.prompt_transcript_result)
-                st.download_button(
-                    label=t("transcript_download_button"),
-                    data=st.session_state.prompt_transcript_result,
-                    file_name=f"prompt_result_{selected_file}.txt",
-                    mime="text/plain",
-                    key=f"prompt_transcript_download_{selected_file}"
-                )
-            else:
-                st.info(t("prompt_transcript_no_result"))
+            # Afficher les résultats individuels
+            for result in st.session_state.prompt_transcript_results:
+                with st.expander(f"Prompt Result for {result['file']}"):
+                    st.text_area(t("prompt_transcript_result_title"), result["result"], height=200, key=f"prompt_transcript_area_{result['file']}")
+                    st.download_button(
+                        label=t("transcript_download_button"),
+                        data=result["result"],
+                        file_name=result["output_file"],
+                        mime="text/plain",
+                        key=f"prompt_transcript_download_{result['file']}"
+                    )
+        else:
+            st.info(t("prompt_transcript_no_result"))
 
     def run(self, config):
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([

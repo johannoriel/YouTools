@@ -1020,32 +1020,6 @@ class TrimsilencesPlugin(Plugin):
         ordered_files = selected_files
         ordered_names = selected_names
 
-        # Réorganisation des vidéos si fusion activée et plusieurs vidéos sélectionnées
-        if st.session_state.get("merge_videos", False) and len(selected_files) > 1:
-            st.subheader(t("batchsilences_reorder_videos"))
-            st.markdown(t("batchsilences_reorder_instructions"))
-
-            # Créer un DataFrame pour la réorganisation
-            video_df = pd.DataFrame({
-                "Video Name": selected_names,
-                "Order": range(1, len(selected_names) + 1)
-            })
-
-            # Permettre la réorganisation
-            edited_df = st.data_editor(
-                video_df,
-                key="video_order_editor",
-                num_rows="dynamic"
-            )
-
-            # Trier les vidéos selon le nouvel ordre
-            edited_df = edited_df.sort_values(by="Order")
-            ordered_names = edited_df["Video Name"].tolist()
-            ordered_files = [
-                next(f for f in selected_files if os.path.basename(f) == name)
-                for name in ordered_names
-            ]
-
         # Boutons pour les opérations de masse
         col_batch1, col_batch2, col_batch3, col_batch4, col_batch5 = st.columns(5)
         processed_videos = []
