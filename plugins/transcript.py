@@ -60,6 +60,13 @@ translations["en"].update({
     "prompt_transcript_apply_button": "Apply Prompt",
     "prompt_transcript_result_title": "Prompt Result",
     "prompt_transcript_no_result": "No prompt result available",
+    "download_transcripts_only": "Download Transcripts Only",
+    "reprocess_transcripts": "Reprocess Existing Transcripts",
+    "no_transcript_files": "No existing transcript files found in",
+    "merge_selected_files": "Merge Selected Files",
+    "delete_selected_files": "Delete Selected Files",
+    "confirm_deletion": "Confirm Deletion",
+    "download_merged_file": "Download Merged File",
 })
 
 translations["fr"].update({
@@ -109,6 +116,13 @@ translations["fr"].update({
     "prompt_transcript_apply_button": "Appliquer le prompt",
     "prompt_transcript_result_title": "Résultat du prompt",
     "prompt_transcript_no_result": "Aucun résultat de prompt disponible",
+    "download_transcripts_only": "Télécharger uniquement les transcriptions",
+    "reprocess_transcripts": "Retraiter les transcriptions existantes",
+    "no_transcript_files": "Aucun fichier de transcription trouvé dans",
+    "merge_selected_files": "Fusionner les fichiers sélectionnés",
+    "delete_selected_files": "Supprimer les fichiers sélectionnés",
+    "confirm_deletion": "Confirmer la suppression",
+    "download_merged_file": "Télécharger le fichier fusionné",
 })
 
 class TranscriptPlugin(Plugin):
@@ -299,8 +313,73 @@ class TranscriptPlugin(Plugin):
         self.yt_transcript_widget.display()
         self.display_transcript_results("transcript_transcript", "transcript_answer", "transcript_prompt_result", config, mode="remote")
 
+    # Dans la classe TranscriptPlugin
+
+    def download_playlist_transcripts(self, playlist_url, work_directory):
+        """Download transcripts for all videos in a YouTube playlist."""
+        playlist_id = self.extract_playlist_id(playlist_url)
+        if not playlist_id:
+            return None, t("playlist_invalid_url")
+
+        normalized_playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+        transcripts = []
+
+        try:
+            playlist = Playlist(normalized_playlist_url)
+            videos = list(playlist.videos)
+            total_videos = len(videos)
+            progress_bar = st.progress(0)
+
+            for i, video in enumerate(videos, 1):
+                progress_bar.progress(i / total_videos, text=t("playlist_processing").format(current=i, total=total_videos))
+                try:
+                    transcript = self.yt_transcript_widget.fetch_transcript(video.watch_url)
+                    if transcript:
+                        # Créer un nom de fichier sécurisé
+                        safe_title = re.sub(r'[^\w\-_\. ]', '_', video.title)
+                        output_file = os.path.join(work_directory, f"transcript_{safe_title}.txt")
+                        with open(output_file, "w", encoding="utf-8") as f:
+                            f.write(transcript)
+                        transcripts.append({
+                            "title": video.title,
+                            "url": video.watch_url,
+                            "file_path": output_file,
+                            "transcript": transcript
+                        })
+                except Exception as e:
+                    st.error(f"Error downloading transcript for {video.title}: {str(e)}")
+
+            progress_bar.empty()
+            return transcripts, None
+        except Exception as e:
+            return None, f"{t('playlist_invalid_url')} ({normalized_playlist_url}): {str(e)}"
+
+    def process_playlist_transcripts(self, transcripts, question=None, selected_prompt=None, llm_config=None):
+        """Process downloaded transcripts with a prompt or question."""
+        results = []
+        total_transcripts = len(transcripts)
+        progress_bar = st.progress(0)
+
+        for i, transcript_data in enumerate(transcripts, 1):
+            progress_bar.progress(i / total_transcripts, text=t("playlist_processing").format(current=i, total=total_transcripts))
+            try:
+                response = self.process_transcript(transcript_data["transcript"], question, selected_prompt, llm_config)
+                if response:
+                    results.append({
+                        "title": transcript_data["title"],
+                        "url": transcript_data["url"],
+                        "response": response,
+                        "file_path": transcript_data["file_path"]
+                    })
+            except Exception as e:
+                st.error(f"Error processing transcript for {transcript_data['title']}: {str(e)}")
+
+        progress_bar.empty()
+        return results
+
     def run_playlist(self, config):
         st.header(t("playlist_tab"))
+        work_directory = os.path.expanduser(config['common']['work_directory'])
         playlist_url = st.text_input(t("playlist_url"))
         prompt_options = list(st.session_state.prompts.keys())
         question = st.text_input(t("transcript_question_input"), key="playlist_question_input")
@@ -308,47 +387,76 @@ class TranscriptPlugin(Plugin):
         if prompt_options:
             selected_prompt = st.selectbox(t("select_prompt"), options=prompt_options, key="playlist_prompt_select")
 
-        if st.button(t("playlist_process_button")) and playlist_url:
-            playlist_id = self.extract_playlist_id(playlist_url)
-            if not playlist_id:
-                st.error(t("playlist_invalid_url"))
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            download_only = st.button("Download Transcripts Only", key="download_transcripts_only")
+        with col2:
+            process_playlist = st.button(t("playlist_process_button"), key="process_playlist")
+        with col3:
+            reprocess_transcripts = st.button("Reprocess Existing Transcripts", key="reprocess_transcripts")
+
+        if download_only and playlist_url:
+            with st.spinner(t("playlist_processing").format(current=0, total=0)):
+                transcripts, error = self.download_playlist_transcripts(playlist_url, work_directory)
+                if error:
+                    st.error(error)
+                elif transcripts:
+                    st.success(f"Successfully downloaded {len(transcripts)} transcripts")
+                    st.session_state.playlist_transcripts = transcripts
+
+        if process_playlist and playlist_url:
+            with st.spinner(t("playlist_processing").format(current=0, total=0)):
+                # Étape 1 : Télécharger les transcripts
+                transcripts, error = self.download_playlist_transcripts(playlist_url, work_directory)
+                if error:
+                    st.error(error)
+                    return
+
+                # Étape 2 : Traiter les transcripts
+                if transcripts:
+                    llm_config = config.get('llm', {})
+                    results = self.process_playlist_transcripts(transcripts, question, selected_prompt, llm_config)
+                    st.session_state.playlist_results = results
+                    st.session_state.playlist_transcripts = transcripts
+
+        if reprocess_transcripts:
+            # Chercher les fichiers de transcript existants
+            transcript_files = [f for f in os.listdir(work_directory) if f.startswith("transcript_") and f.endswith(".txt")]
+            if not transcript_files:
+                st.warning("No existing transcript files found in the working directory")
                 return
 
-            normalized_playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
-            with st.spinner(t("playlist_processing").format(current=0, total=0)):
+            transcripts = []
+            for file in transcript_files:
+                file_path = os.path.join(work_directory, file)
                 try:
-                    playlist = Playlist(normalized_playlist_url)
-                    videos = list(playlist.videos)  # Convert to list to get total count
-                    total_videos = len(videos)
-                    progress_bar = st.progress(0)
-                    results = []
-                    llm_config = config.get('llm', {})
-
-                    for i, video in enumerate(videos, 1):
-                        progress_bar.progress(i / total_videos, text=t("playlist_processing").format(current=i, total=total_videos))
-                        try:
-                            # Step 1: Get transcript
-                            transcript = self.yt_transcript_widget.fetch_transcript(video.watch_url)
-                            if transcript:
-                                # Step 2: Apply prompt or question
-                                response = self.process_transcript(transcript, question, selected_prompt, llm_config)
-                                if response:
-                                    results.append({"title": video.title, "url": video.watch_url, "response": response})
-                        except Exception as e:
-                            st.error(f"Error processing video {video.title}: {str(e)}")
-
-                    st.session_state.playlist_results = results
-                    progress_bar.empty()
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        transcript = f.read()
+                    # Extraire le titre du nom du fichier
+                    title = file.replace("transcript_", "").replace(".txt", "")
+                    transcripts.append({
+                        "title": title,
+                        "url": "",  # URL non disponible pour les fichiers existants
+                        "file_path": file_path,
+                        "transcript": transcript
+                    })
                 except Exception as e:
-                    st.error(f"{t('playlist_invalid_url')} ({normalized_playlist_url}): {str(e)}")
+                    st.error(f"Error reading transcript file {file}: {str(e)}")
+
+            if transcripts:
+                with st.spinner(t("playlist_processing").format(current=0, total=0)):
+                    llm_config = config.get('llm', {})
+                    results = self.process_playlist_transcripts(transcripts, question, selected_prompt, llm_config)
+                    st.session_state.playlist_results = results
+                    st.session_state.playlist_transcripts = transcripts
 
         if "playlist_results" in st.session_state and st.session_state.playlist_results:
             st.subheader(t("playlist_results"))
-            data = [{"Video Title": r["title"], "URL": r["url"], "Response": r["response"]} for r in st.session_state.playlist_results]
+            data = [{"Video Title": r["title"], "URL": r["url"], "Response": r["response"], "Transcript File": r["file_path"]} for r in st.session_state.playlist_results]
             st.table(data)
 
             # Export results to a file
-            results_text = "\n\n".join([f"Video: {r['title']}\nURL: {r['url']}\nResponse: {r['response']}" for r in st.session_state.playlist_results])
+            results_text = "\n\n".join([f"Video: {r['title']}\nURL: {r['url']}\nResponse: {r['response']}\nTranscript File: {r['file_path']}" for r in st.session_state.playlist_results])
             st.download_button(
                 label=t("playlist_download_button"),
                 data=results_text,
@@ -476,96 +584,98 @@ class TranscriptPlugin(Plugin):
             key="prompt_transcript_prompt_select"
         )
 
-        # Bouton pour appliquer le prompt à tous les fichiers sélectionnés
-        if st.button(t("prompt_transcript_apply_button"), key="prompt_transcript_apply_button"):
-            total_files = len(selected_files)
-            progress_bar = st.progress(0)
-            results = []
-            work_directory = os.path.expanduser(config['common']['work_directory'])
-
-            for i, file_path in enumerate(selected_files, 1):
-                file_name = os.path.basename(file_path)
-                with st.spinner(f"Processing {file_name}..."):
-                    try:
-                        # Lire le contenu du fichier
-                        with open(file_path, "r", encoding="utf-8") as f:
-                            transcript_content = f.read()
-
-                        # Appliquer le prompt
-                        llm_config = config.get('llm', {})
-                        result = self.apply_prompt(transcript_content, st.session_state.prompts[selected_prompt], llm_config)
-
-                        # Définir le nom du fichier de sortie sans extension en double
-                        output_filename = f"prompt_result_{os.path.splitext(file_name)[0]}.txt"
-                        output_file_path = os.path.join(work_directory, output_filename)
-
-                        # Écrire le résultat dans le fichier
-                        with open(output_file_path, "w", encoding="utf-8") as f:
-                            f.write(result)
-
-                        # Stocker les résultats
-                        results.append({
-                            "file": file_name,
-                            "result": result,
-                            "output_file": output_filename
-                        })
-                        st.success(f"Prompt applied successfully for {file_name}")
-                    except Exception as e:
-                        st.error(f"Error processing file {file_name}: {str(e)}")
-
-                    progress_bar.progress(i / total_files)
-
-            st.session_state.prompt_transcript_results = results
-            progress_bar.empty()
-
-        # Bouton pour fusionner les fichiers sélectionnés
-        if st.button("Merge Selected Files", key="prompt_transcript_merge_button"):
-            work_directory = os.path.expanduser(config['common']['work_directory'])
-            merged_content = []
-            for i, file_path in enumerate(selected_files):
-                file_name = os.path.basename(file_path)
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    # Ajouter le séparateur et le titre sauf pour le premier fichier
-                    if i > 0:
-                        merged_content.append(f"---\n# {file_name}\n{content}")
-                    else:
-                        merged_content.append(f"# {file_name}\n{content}")
-                except Exception as e:
-                    st.error(f"Error reading file {file_name}: {str(e)}")
-
-            if merged_content:
-                merged_text = "\n".join(merged_content)
-                merged_file_path = os.path.join(work_directory, "merged_transcripts.txt")
-                try:
-                    with open(merged_file_path, "w", encoding="utf-8") as f:
-                        f.write(merged_text)
-                    st.success(f"Merged file saved as {merged_file_path}")
-                    st.download_button(
-                        label="Download Merged File",
-                        data=merged_text,
-                        file_name="merged_transcripts.txt",
-                        mime="text/plain",
-                        key="prompt_transcript_download_merged"
-                    )
-                except Exception as e:
-                    st.error(f"Error saving merged file: {str(e)}")
-
-        # Bouton pour supprimer les fichiers sélectionnés
-        if st.button("Delete Selected Files", key="prompt_transcript_delete_button"):
-            st.warning("Are you sure you want to delete the selected files?")
-            if st.button("Confirm Deletion", key="prompt_transcript_confirm_delete_button"):
+        # Boutons sur une même ligne
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button(t("prompt_transcript_apply_button"), key="prompt_transcript_apply_button"):
+                total_files = len(selected_files)
+                progress_bar = st.progress(0)
+                results = []
                 work_directory = os.path.expanduser(config['common']['work_directory'])
-                for file_path in selected_files:
+
+                for i, file_path in enumerate(selected_files, 1):
+                    file_name = os.path.basename(file_path)
+                    with st.spinner(f"Processing {file_name}..."):
+                        try:
+                            # Lire le contenu du fichier
+                            with open(file_path, "r", encoding="utf-8") as f:
+                                transcript_content = f.read()
+
+                            # Appliquer le prompt
+                            llm_config = config.get('llm', {})
+                            result = self.apply_prompt(transcript_content, st.session_state.prompts[selected_prompt], llm_config)
+
+                            # Définir le nom du fichier de sortie sans extension en double
+                            output_filename = f"prompt_result_{os.path.splitext(file_name)[0]}.txt"
+                            output_file_path = os.path.join(work_directory, output_filename)
+
+                            # Écrire le résultat dans le fichier
+                            with open(output_file_path, "w", encoding="utf-8") as f:
+                                f.write(result)
+
+                            # Stocker les résultats
+                            results.append({
+                                "file": file_name,
+                                "result": result,
+                                "output_file": output_filename
+                            })
+                            st.success(f"Prompt applied successfully for {file_name}")
+                        except Exception as e:
+                            st.error(f"Error processing file {file_name}: {str(e)}")
+
+                        progress_bar.progress(i / total_files)
+
+                st.session_state.prompt_transcript_results = results
+                progress_bar.empty()
+
+        with col2:
+            if st.button(t("merge_selected_files"), key="prompt_transcript_merge_button"):
+                work_directory = os.path.expanduser(config['common']['work_directory'])
+                merged_content = []
+                for i, file_path in enumerate(selected_files):
                     file_name = os.path.basename(file_path)
                     try:
-                        os.remove(file_path)
-                        st.success(f"File {file_name} deleted successfully")
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        # Ajouter le séparateur et le titre sauf pour le premier fichier
+                        if i > 0:
+                            merged_content.append(f"---\n# {file_name}\n{content}")
+                        else:
+                            merged_content.append(f"# {file_name}\n{content}")
                     except Exception as e:
-                        st.error(f"Error deleting file {file_name}: {str(e)}")
-                # Rafraîchir la liste des fichiers après suppression
-                self.prompt_file_selector.refresh_files()
+                        st.error(f"Error reading file {file_name}: {str(e)}")
+
+                if merged_content:
+                    merged_text = "\n".join(merged_content)
+                    merged_file_path = os.path.join(work_directory, "merged_transcripts.txt")
+                    try:
+                        with open(merged_file_path, "w", encoding="utf-8") as f:
+                            f.write(merged_text)
+                        st.success(f"Merged file saved as {merged_file_path}")
+                        st.download_button(
+                            label=t("download_merged_file"),
+                            data=merged_text,
+                            file_name="merged_transcripts.txt",
+                            mime="text/plain",
+                            key="prompt_transcript_download_merged"
+                        )
+                    except Exception as e:
+                        st.error(f"Error saving merged file: {str(e)}")
+
+        with col3:
+            if st.button(t("delete_selected_files"), key="prompt_transcript_delete_button"):
+                st.warning("Are you sure you want to delete the selected files?")
+                if st.button(t("confirm_deletion"), key="prompt_transcript_confirm_delete_button"):
+                    work_directory = os.path.expanduser(config['common']['work_directory'])
+                    for file_path in selected_files:
+                        file_name = os.path.basename(file_path)
+                        try:
+                            os.remove(file_path)
+                            st.success(f"File {file_name} deleted successfully")
+                        except Exception as e:
+                            st.error(f"Error deleting file {file_name}: {str(e)}")
+                    # Rafraîchir la liste des fichiers après suppression
+                    self.prompt_file_selector.refresh_files()
 
         # Afficher les résultats
         if "prompt_transcript_results" in st.session_state and st.session_state.prompt_transcript_results:
