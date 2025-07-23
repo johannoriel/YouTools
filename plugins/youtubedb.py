@@ -208,10 +208,9 @@ class YoutubedbPlugin(Plugin):
         return [kw.strip() for kw in llm_response.split(",")]
 
     def display_video_stats(self, filter_type: str, keyword: str, keyword_filter: List[str] = None):
-        from datetime import datetime  # Importer datetime pour formater la date
+        from datetime import datetime
 
-        videos = get_videos(filter_type, keyword,
-                            keyword_filter=keyword_filter)
+        videos = get_videos(filter_type, keyword, keyword_filter=keyword_filter)
         total_videos = len(videos)
 
         st.write(t("marketyoutube_video_count").format(total_videos))
@@ -220,61 +219,54 @@ class YoutubedbPlugin(Plugin):
         advanced_stats_list = self.youtube_api.get_advanced_stats_list()
         for video in videos:
             latest_stats = get_latest_stats(video['video_id'])
-            keywords_str = ", ".join(
-                video['keywords']) if video['keywords'] else "--"
-            # Formater la date pour n'afficher que le jour (YYYY-MM-DD)
+            keywords_str = ", ".join(video['keywords']) if video['keywords'] else "--"
             published_date = datetime.strptime(
                 video['published_at'], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d") if video['published_at'] else "--"
             row = {
                 t("marketyoutube_title"): video['title'],
                 t("marketyoutube_url"): video['url'],
-                t("marketyoutube_published"): published_date,  # Uniquement la date
+                t("marketyoutube_published"): published_date,
                 t("marketyoutube_status"): video['status'],
                 t("marketyoutube_keywords"): keywords_str,
                 t("marketyoutube_views"): latest_stats['view_count'] if latest_stats else 0,
                 t("marketyoutube_retention_rate"): latest_stats['retention_rate'] if latest_stats else 0.0,
+                "Views at 28 Days": latest_stats['views_at_28_days'] if latest_stats else 0,
+                "Views at 3 Months": latest_stats['views_at_3_months'] if latest_stats else 0,
+                "Views at 1 Year": latest_stats['views_at_1_year'] if latest_stats else 0,
             }
             if latest_stats and 'advanced_stats' in latest_stats:
                 for stat in advanced_stats_list:
                     translation_key = f"marketyoutube_{stat.lower()}"
-                    label = t(translation_key) if translation_key in translations["en"] else stat.replace(
-                        "Rate", " Rate (%)")
+                    label = t(translation_key) if translation_key in translations["en"] else stat.replace("Rate", " Rate (%)")
                     value = latest_stats['advanced_stats'].get(stat, 0)
                     row[label] = value
             else:
                 for stat in advanced_stats_list:
                     translation_key = f"marketyoutube_{stat.lower()}"
-                    label = t(translation_key) if translation_key in translations["en"] else stat.replace(
-                        "Rate", " Rate (%)")
+                    label = t(translation_key) if translation_key in translations["en"] else stat.replace("Rate", " Rate (%)")
                     row[label] = 0
+
             stats_data.append(row)
 
         column_config = {
-            t("marketyoutube_title"): st.column_config.TextColumn(
-                t("marketyoutube_title"), width="small"),  # Réduction de la largeur
-            t("marketyoutube_url"): st.column_config.LinkColumn(
-                t("marketyoutube_url"), width="small"),
-            t("marketyoutube_published"): st.column_config.TextColumn(
-                t("marketyoutube_published")),
-            t("marketyoutube_status"): st.column_config.TextColumn(
-                t("marketyoutube_status")),
-            t("marketyoutube_keywords"): st.column_config.TextColumn(
-                t("marketyoutube_keywords")),
-            t("marketyoutube_views"): st.column_config.NumberColumn(
-                t("marketyoutube_views")),
-            t("marketyoutube_retention_rate"): st.column_config.NumberColumn(
-                t("marketyoutube_retention_rate"), format="%.1f"),
+            t("marketyoutube_title"): st.column_config.TextColumn(t("marketyoutube_title"), width="small"),
+            t("marketyoutube_url"): st.column_config.LinkColumn(t("marketyoutube_url"), width="small"),
+            t("marketyoutube_published"): st.column_config.TextColumn(t("marketyoutube_published")),
+            t("marketyoutube_status"): st.column_config.TextColumn(t("marketyoutube_status")),
+            t("marketyoutube_keywords"): st.column_config.TextColumn(t("marketyoutube_keywords")),
+            t("marketyoutube_views"): st.column_config.NumberColumn(t("marketyoutube_views")),
+            t("marketyoutube_retention_rate"): st.column_config.NumberColumn(t("marketyoutube_retention_rate"), format="%.1f"),
+            "Views at 28 Days": st.column_config.NumberColumn("Views at 28 Days"),
+            "Views at 3 Months": st.column_config.NumberColumn("Views at 3 Months"),
+            "Views at 1 Year": st.column_config.NumberColumn("Views at 1 Year"),
         }
         for stat in advanced_stats_list:
             translation_key = f"marketyoutube_{stat.lower()}"
-            label = t(translation_key) if translation_key in translations["en"] else stat.replace(
-                "Rate", " Rate (%)")
+            label = t(translation_key) if translation_key in translations["en"] else stat.replace("Rate", " Rate (%)")
             format_str = "%.2f" if "Rate" in stat or "Percentage" in stat else "%.1f" if stat == "estimatedMinutesWatched" else "%.2f" if stat == "estimatedAdRevenue" else None
-            column_config[label] = st.column_config.NumberColumn(
-                label, format=format_str)
+            column_config[label] = st.column_config.NumberColumn(label, format=format_str)
 
-        st.dataframe(stats_data, column_config=column_config,
-                     use_container_width=True)
+        st.dataframe(stats_data, column_config=column_config, use_container_width=True)
 
     def sync_stats(self, channel_id: str, progress_callback=None):
         """Sync stats for all videos with progress callback."""
@@ -283,8 +275,7 @@ class YoutubedbPlugin(Plugin):
         timestamp = datetime.now(pytz.UTC).isoformat()
 
         for i, video in enumerate(videos):
-            stats = self.youtube_api.get_advanced_video_stats(
-                video['video_id'])
+            stats = self.youtube_api.get_advanced_video_stats(video['video_id'])
             if stats:
                 insert_stats_snapshot(video['video_id'], timestamp, stats)
             if progress_callback:
@@ -447,11 +438,11 @@ class YoutubedbPlugin(Plugin):
                 keyword_filter=selected_keyword_filter if selected_keyword_filter else None
             )
 
-        # Tab 4: Channel Manager
+        # Tab 3: Channel Manager
         with tab3:
             self.display_channel_manager(config)
 
-        # Tab 5: Debug Stats API
+        # Tab 4: Debug Stats API
         with tab4:
             st.header("Debug YouTube Analytics API")
             st.subheader("Gestion du Quota YouTube")
@@ -479,30 +470,48 @@ class YoutubedbPlugin(Plugin):
                 st.write(
                     f"Testing on video: **{last_video['title']}** (ID: {last_video['video_id']})")
 
-                available_metrics = self.youtube_api.get_advanced_stats_list()
+                available_metrics = youtube_api.get_advanced_stats_list()
                 selected_metrics = []
-                st.write("Select metrics to fetch:")
+                st.write("Select metrics to fetch (leave empty to fetch all):")
                 for metric in available_metrics:
                     if st.checkbox(metric, key=f"metric_{metric}"):
                         selected_metrics.append(metric)
 
-                if st.button("Fetch Debug Stats"):
+                # Bouton pour tester toutes les métriques
+                if st.button("Test All Metrics"):
+                    with st.spinner("Fetching all metrics for testing..."):
+                        result = youtube_api.debug_advanced_video_stats(
+                            last_video['video_id'], available_metrics)
+                        if result["error"]:
+                            st.error(f"Error: {result['error']}")
+                        else:
+                            st.write("**Test Results for All Metrics:**")
+                            st.write("**Analytics Response (Advanced Stats):**")
+                            st.json(result["analytics_response"])
+                            st.write("**Basic Stats (from videos.list):**")
+                            st.json(result["basic_stats"])
+                            st.write(f"**Calculated Retention Rate:** {result['calculated_retention_rate']:.1f}%")
+                            st.write("**View Counts:**")
+                            st.json(result["view_counts"])
+
+                if st.button("Fetch Selected Stats"):
                     if not selected_metrics:
-                        st.warning("Please select at least one metric.")
-                    else:
-                        with st.spinner("Fetching debug stats..."):
-                            result = self.youtube_api.debug_advanced_video_stats(
-                                last_video['video_id'], selected_metrics)
-                            if result["error"]:
-                                st.error(f"Error: {result['error']}")
-                            else:
-                                st.write("**Analytics Response:**")
-                                st.json(result["analytics_response"])
-                                st.write("**Basic Stats (from videos.list):**")
-                                st.json(result["basic_stats"])
-                                if 'calculated_retention_rate' in result:
-                                    st.write(
-                                        f"**Calculated Retention Rate:** {result['calculated_retention_rate']:.1f}%")
+                        selected_metrics = available_metrics  # Si rien n'est sélectionné, prendre toutes les métriques
+                    with st.spinner("Fetching selected stats..."):
+                        result = youtube_api.debug_advanced_video_stats(
+                            last_video['video_id'], selected_metrics)
+                        if result["error"]:
+                            st.error(f"Error: {result['error']}")
+                        else:
+                            st.write("**Analytics Response (Selected Metrics):**")
+                            st.json(result["analytics_response"])
+                            st.write("**Basic Stats (from videos.list):**")
+                            st.json(result["basic_stats"])
+                            if 'calculated_retention_rate' in result:
+                                st.write(
+                                    f"**Calculated Retention Rate:** {result['calculated_retention_rate']:.1f}%")
+                            st.write("**View Counts:**")
+                            st.json(result["view_counts"])
 
         with tab5:
             self.response_db_widget.display()

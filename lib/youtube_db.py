@@ -7,15 +7,13 @@ import json
 
 # Database file
 DB_FILE = "youtube_database.db"
-SCHEMA_VERSION = 5  # Nouvelle version avec le statut
-
+SCHEMA_VERSION = 6  # Nouvelle version avec les colonnes views_at_*
 
 def get_db_connection():
     """Create or connect to the SQLite database."""
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row  # Return rows as dictionaries
     return conn
-
 
 def reset_database():
     """Reset the database structure to version 0 and recreate tables."""
@@ -29,6 +27,8 @@ def reset_database():
     cursor.execute("DROP TABLE IF EXISTS campaign_cache")
     cursor.execute("DROP TABLE IF EXISTS target_channels")
     cursor.execute("DROP TABLE IF EXISTS posted_responses")
+    cursor.execute("DROP TABLE IF EXISTS campaign_responses")
+    cursor.execute("DROP TABLE IF EXISTS campaign_stats")
 
     # Réinitialiser avec la version courante
     initialize_database()
@@ -36,19 +36,18 @@ def reset_database():
     conn.commit()
     conn.close()
 
-
 def auto_upgrade_database():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT version FROM schema_version")
-    current_version = cursor.fetchone()['version']
+    current_version = cursor.fetchone()
+    current_version = current_version['version'] if current_version else 0
     if current_version < SCHEMA_VERSION:
         upgrade_database(current_version, SCHEMA_VERSION, cursor)
         cursor.execute("UPDATE schema_version SET version = ?",
                        (SCHEMA_VERSION,))
         conn.commit()
-        conn.close()
-
+    conn.close()
 
 def upgrade_database(current_version: int, target_version: int, cursor):
     """Handle database schema upgrades."""
@@ -60,43 +59,66 @@ def upgrade_database(current_version: int, target_version: int, cursor):
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS posted_responses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                campaign_timestamp TEXT,  -- Timestamp de la campagne
-                video_id TEXT,           -- ID de la vidéo commentée
-                comment_id TEXT,         -- ID du commentaire répondu
-                response_id TEXT,        -- ID de la réponse postée
-                channel_id TEXT,         -- ID de la chaîne de la vidéo
-                keyword TEXT,            -- Mot-clé ayant généré la réponse
-                response_text TEXT,      -- Texte de la réponse
-                posted_at TEXT           -- Timestamp de l'envoi
+                campaign_timestamp TEXT,
+                video_id TEXT,
+                comment_id TEXT,
+                response_id TEXT,
+                channel_id TEXT,
+                keyword TEXT,
+                response_text TEXT,
+                posted_at TEXT,
+                moderation_status TEXT DEFAULT 'unknown'
             )
         """)
     if current_version < 4 and target_version >= 4:
         # Nouvelle table pour les stats de campagne
         cursor.execute("""
-                CREATE TABLE IF NOT EXISTS campaign_stats (
-                    campaign_id TEXT PRIMARY KEY,
-                    total_videos INTEGER,
-                    excluded_videos INTEGER,
-                    total_comments INTEGER,
-                    stop_comments INTEGER,
-                    excluded_comments INTEGER,
-                    refused_responses INTEGER,
-                    posted_responses INTEGER,
-                    recorded_at TEXT
-                )
-            """)
+            CREATE TABLE IF NOT EXISTS campaign_stats (
+                campaign_id TEXT PRIMARY KEY,
+                total_videos INTEGER,
+                excluded_videos INTEGER,
+                total_comments INTEGER,
+                stop_comments INTEGER,
+                excluded_comments INTEGER,
+                refused_responses INTEGER,
+                posted_responses INTEGER,
+                recorded_at TEXT
+            )
+        """)
     if current_version < 5 and target_version >= 5:
         # Ajout de la colonne moderation_status à posted_responses
         cursor.execute("""
-                ALTER TABLE posted_responses
-                ADD COLUMN moderation_status TEXT DEFAULT 'unknown'
-            """)
+            ALTER TABLE posted_responses
+            ADD COLUMN moderation_status TEXT DEFAULT 'unknown'
+        """)
         # Ajout de la colonne moderated_responses à campaign_stats
         cursor.execute("""
-                ALTER TABLE campaign_stats
-                ADD COLUMN moderated_responses INTEGER DEFAULT 0
-            """)
-
+            ALTER TABLE campaign_stats
+            ADD COLUMN moderated_responses INTEGER DEFAULT 0
+        """)
+    if current_version < 6 and target_version >= 6:
+        # Ajout des colonnes views_at_28_days, views_at_3_months, views_at_1_year à stats_snapshots
+        cursor.execute("""
+            ALTER TABLE stats_snapshots
+            ADD COLUMN views_at_28_days INTEGER DEFAULT 0
+        """)
+        cursor.execute("""
+            ALTER TABLE stats_snapshots
+            ADD COLUMN views_at_3_months INTEGER DEFAULT 0
+        """)
+        cursor.execute("""
+            ALTER TABLE stats_snapshots
+            ADD COLUMN views_at_1_year INTEGER DEFAULT 0
+        """)
+        # Suppression des colonnes last_view_date et view_thresholds si elles existent
+        try:
+            cursor.execute("ALTER TABLE stats_snapshots DROP COLUMN last_view_date")
+        except sqlite3.OperationalError:
+            pass  # La colonne n'existe pas
+        try:
+            cursor.execute("ALTER TABLE stats_snapshots DROP COLUMN view_thresholds")
+        except sqlite3.OperationalError:
+            pass  # La colonne n'existe pas
 
 def initialize_database():
     conn = get_db_connection()
@@ -115,20 +137,19 @@ def initialize_database():
             "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
 
     cursor.execute("""
-            CREATE TABLE IF NOT EXISTS videos (
-                video_id TEXT PRIMARY KEY,
-                url TEXT UNIQUE,
-                title TEXT,
-                thumbnail_url TEXT,
-                transcript TEXT,
-                description TEXT,
-                published_at TEXT,
-                status TEXT,
-                keywords TEXT DEFAULT '[]'  -- Nouveau champ pour les mots-clés, JSON par défaut une liste vide
-            )
-        """)
+        CREATE TABLE IF NOT EXISTS videos (
+            video_id TEXT PRIMARY KEY,
+            url TEXT UNIQUE,
+            title TEXT,
+            thumbnail_url TEXT,
+            transcript TEXT,
+            description TEXT,
+            published_at TEXT,
+            status TEXT,
+            keywords TEXT DEFAULT '[]'
+        )
+    """)
 
-    # Nouvelle structure avec advanced_stats en JSON
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS stats_snapshots (
             snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,7 +157,10 @@ def initialize_database():
             timestamp TEXT,
             view_count INTEGER,
             retention_rate REAL,
-            advanced_stats TEXT,  -- JSON pour les stats avancées
+            advanced_stats TEXT,
+            views_at_28_days INTEGER DEFAULT 0,
+            views_at_3_months INTEGER DEFAULT 0,
+            views_at_1_year INTEGER DEFAULT 0,
             FOREIGN KEY (video_id) REFERENCES videos (video_id)
         )
     """)
@@ -156,31 +180,31 @@ def initialize_database():
     """)
 
     cursor.execute("""
-            CREATE TABLE IF NOT EXISTS target_channels (
-                channel_id TEXT PRIMARY KEY,
-                channel_title TEXT,
-                channel_url TEXT UNIQUE,
-                subscriber_count INTEGER DEFAULT 0,
-                keywords TEXT,  -- JSON contenant la liste des mots-clés
-                added_at TEXT,
-                last_updated TEXT
-            )
-        """)
+        CREATE TABLE IF NOT EXISTS target_channels (
+            channel_id TEXT PRIMARY KEY,
+            channel_title TEXT,
+            channel_url TEXT UNIQUE,
+            subscriber_count INTEGER DEFAULT 0,
+            keywords TEXT,
+            added_at TEXT,
+            last_updated TEXT
+        )
+    """)
 
     cursor.execute("""
-                CREATE TABLE IF NOT EXISTS campaign_responses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    campaign_id TEXT,
-                    comment_id TEXT,
-                    comment_text TEXT,
-                    response_text TEXT,
-                    video_id TEXT,
-                    channel_id TEXT,
-                    author TEXT,
-                    status TEXT,
-                    timestamp TEXT
-                )
-            """)
+        CREATE TABLE IF NOT EXISTS campaign_responses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id TEXT,
+            comment_id TEXT,
+            comment_text TEXT,
+            response_text TEXT,
+            video_id TEXT,
+            channel_id TEXT,
+            author TEXT,
+            status TEXT,
+            timestamp TEXT
+        )
+    """)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS posted_responses (
@@ -194,7 +218,7 @@ def initialize_database():
             response_text TEXT,
             posted_at TEXT,
             campaign_id TEXT,
-            moderation_status TEXT DEFAULT 'unknown'  -- Nouvelle colonne
+            moderation_status TEXT DEFAULT 'unknown'
         )
     """)
 
@@ -208,13 +232,12 @@ def initialize_database():
             excluded_comments INTEGER,
             refused_responses INTEGER,
             posted_responses INTEGER,
-            moderated_responses INTEGER DEFAULT 0,  -- Nouvelle colonne
+            moderated_responses INTEGER DEFAULT 0,
             recorded_at TEXT
         )
     """)
     conn.commit()
     conn.close()
-
 
 def get_latest_stats(video_id: str) -> Optional[Dict[str, Any]]:
     conn = get_db_connection()
@@ -235,27 +258,28 @@ def get_latest_stats(video_id: str) -> Optional[Dict[str, Any]]:
         return stats_dict
     return None
 
-
 def insert_stats_snapshot(video_id: str, timestamp: str, stats: Dict[str, Any]):
-    """Insère un snapshot de statistiques dans la base."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
         INSERT INTO stats_snapshots (
-            video_id, timestamp, view_count, retention_rate, advanced_stats
-        ) VALUES (?, ?, ?, ?, ?)
+            video_id, timestamp, view_count, retention_rate, advanced_stats,
+            views_at_28_days, views_at_3_months, views_at_1_year
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         video_id,
         timestamp,
         stats['view_count'],
         stats['retention_rate'],
-        json.dumps(stats['advanced_stats'])
+        json.dumps(stats['advanced_stats']),
+        stats['view_counts']['views_at_28_days'],
+        stats['view_counts']['views_at_3_months'],
+        stats['view_counts']['views_at_1_year']
     ))
 
     conn.commit()
     conn.close()
-
 
 def get_stats_history(video_id: str) -> List[Dict[str, Any]]:
     """Get all historical stats snapshots for a video."""
@@ -268,6 +292,9 @@ def get_stats_history(video_id: str) -> List[Dict[str, Any]]:
         ORDER BY timestamp DESC
     """, (video_id,))
     history = [dict(row) for row in cursor.fetchall()]
+
+    for row in history:
+        row['advanced_stats'] = json.loads(row['advanced_stats'])
 
     conn.close()
     return history

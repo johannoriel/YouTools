@@ -715,11 +715,19 @@ class YoutubeAPI:
             print(f"Error fetching channel videos: {str(e)}")
             return []
 
-    def get_advanced_video_stats(self, video_id: str) -> Optional[Dict[str, Any]]:
+    def _fetch_video_stats(self, video_id: str, metrics: List[str]) -> Optional[Dict[str, Any]]:
         """
-        Fetch advanced statistics using Analytics API with dynamic metrics.
+        Fetch video statistics (basic and advanced) for a given video ID and metrics.
+
+        Args:
+            video_id: YouTube video ID
+            metrics: List of advanced metrics to fetch from YouTube Analytics
+
+        Returns:
+            Dictionary containing basic and advanced stats, or None if an error occurs
         """
         try:
+            # Requête pour les statistiques de base
             request = self.youtube.videos().list(
                 part="statistics,contentDetails",
                 id=video_id
@@ -738,48 +746,8 @@ class YoutubeAPI:
                 'duration': video_info['contentDetails']['duration']
             }
 
-            metrics = ",".join(ADVANCED_STATS)
-            analytics_response = self.analytics.reports().query(
-                ids=f"channel=={self.channel_id}",
-                startDate="2014-01-01",
-                endDate=datetime.now().strftime("%Y-%m-%d"),
-                metrics=metrics,
-                dimensions="video",
-                filters=f"video=={video_id}"
-            ).execute()
-
-            if analytics_response.get('rows'):
-                row = analytics_response['rows'][0]
-                advanced_stats = {}
-                for i, metric in enumerate(ADVANCED_STATS):
-                    value = row[i + 1]  # +1 car row[0] est l'ID vidéo
-                    advanced_stats[metric] = float(value) if isinstance(
-                        value, (int, float)) and '.' in str(value) else int(value) if value else 0
-                stats['advanced_stats'] = advanced_stats
-            else:
-                stats['advanced_stats'] = {
-                    metric: 0 for metric in ADVANCED_STATS}
-
-            total_seconds = self._iso_duration_to_seconds(
-                video_info['contentDetails']['duration'])
-            stats['retention_rate'] = (
-                stats['advanced_stats']['averageViewDuration'] / total_seconds * 100) if total_seconds > 0 else 0.0
-
-            return stats
-        except HttpError as e:
-            print(
-                f"YouTube Analytics API Error (get_advanced_video_stats): {str(e)}")
-            return None
-        except Exception as e:
-            print(f"Unexpected Error (get_advanced_video_stats): {str(e)}")
-            return None
-
-    def debug_advanced_video_stats(self, video_id: str, selected_metrics: List[str]) -> Dict[str, Any]:
-        """
-        Debug method with selectable metrics from ADVANCED_STATS.
-        """
-        try:
-            metrics_str = ",".join(selected_metrics)
+            # Requête Analytics pour les statistiques avancées
+            metrics_str = ",".join(metrics)
             analytics_response = self.analytics.reports().query(
                 ids=f"channel=={self.channel_id}",
                 startDate="2014-01-01",
@@ -788,37 +756,110 @@ class YoutubeAPI:
                 dimensions="video",
                 filters=f"video=={video_id}"
             ).execute()
+            self.track_quota_usage(1)
 
-            request = self.youtube.videos().list(
-                part="statistics,contentDetails",
-                id=video_id
-            )
-            response = request.execute()
+            if analytics_response.get('rows'):
+                row = analytics_response['rows'][0]
+                advanced_stats = {}
+                for i, metric in enumerate(metrics):
+                    value = row[i + 1]  # +1 car row[0] est l'ID vidéo
+                    advanced_stats[metric] = float(value) if isinstance(value, (int, float)) and '.' in str(value) else int(value) if value else 0
+                stats['advanced_stats'] = advanced_stats
+            else:
+                stats['advanced_stats'] = {metric: 0 for metric in metrics}
 
-            result = {
-                "analytics_response": analytics_response,
-                "basic_stats": response if response['items'] else None,
-                "error": None
+            # Calcul du taux de rétention
+            total_seconds = self._iso_duration_to_seconds(video_info['contentDetails']['duration'])
+            stats['retention_rate'] = (
+                stats['advanced_stats']['averageViewDuration'] / total_seconds * 100
+            ) if total_seconds > 0 and 'averageViewDuration' in stats['advanced_stats'] else 0.0
+
+            # Requête pour les vues par jour (dernière vue et nombre total de vues)
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date_28d = (datetime.now() - timedelta(days=28)).strftime("%Y-%m-%d")
+            start_date_3m = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+            start_date_1y = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+
+            periods = {
+                '28_days': start_date_28d,
+                '3_months': start_date_3m,
+                '1_year': start_date_1y
             }
 
-            if response['items'] and 'averageViewDuration' in selected_metrics and analytics_response.get('rows'):
-                duration = response['items'][0]['contentDetails']['duration']
-                total_seconds = self._iso_duration_to_seconds(duration)
-                avg_view_duration_idx = selected_metrics.index(
-                    'averageViewDuration') + 1
-                avg_view_duration = float(
-                    analytics_response['rows'][0][avg_view_duration_idx])
-                result['calculated_retention_rate'] = (
-                    avg_view_duration / total_seconds * 100) if total_seconds > 0 else 0.0
+            last_view_date = None
+            view_counts = {f'views_at_{period}': 0 for period in periods}
 
-            return result
+            for period, start_date in periods.items():
+                analytics_response_daily = self.analytics.reports().query(
+                    ids=f"channel=={self.channel_id}",
+                    startDate=start_date,
+                    endDate=end_date,
+                    metrics="views",
+                    dimensions="day",
+                    filters=f"video=={video_id}"
+                ).execute()
+                self.track_quota_usage(1)
+
+                total_views = 0
+                if analytics_response_daily.get('rows'):
+                    rows = sorted(analytics_response_daily['rows'], key=lambda x: x[0], reverse=True)
+                    for row in rows:
+                        day = row[0]  # Date au format YYYY-MM-DD
+                        views = int(row[1])  # Nombre de vues
+                        if views > 0 and last_view_date is None:
+                            last_view_date = day
+                        total_views += views
+                    view_counts[f'views_at_{period}'] = total_views
+                else:
+                    view_counts[f'views_at_{period}'] = 0
+
+            stats['last_view_date'] = last_view_date or "N/A"
+            stats['view_counts'] = view_counts
+
+            return stats
         except HttpError as e:
-            print(
-                f"YouTube Analytics API Error (debug_advanced_video_stats): {str(e)}")
-            return {"analytics_response": None, "basic_stats": None, "error": str(e)}
+            print(f"YouTube Analytics API Error (_fetch_video_stats): {str(e)}")
+            return None
+        except Exception as e:
+            print(f"Unexpected Error (_fetch_video_stats): {str(e)}")
+            return None
+
+    def get_advanced_video_stats(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch advanced statistics including last view date and view counts.
+        """
+        return self._fetch_video_stats(video_id, ADVANCED_STATS)
+
+    def debug_advanced_video_stats(self, video_id: str, selected_metrics: List[str]) -> Dict[str, Any]:
+        """
+        Debug method with selectable metrics from ADVANCED_STATS.
+        """
+        try:
+            stats = self._fetch_video_stats(video_id, selected_metrics)
+            result = {
+                "analytics_response": stats['advanced_stats'] if stats else None,
+                "basic_stats": {
+                    'view_count': stats['view_count'],
+                    'like_count': stats['like_count'],
+                    'comment_count': stats['comment_count'],
+                    'duration': stats['duration']
+                } if stats else None,
+                "error": None,
+                "calculated_retention_rate": stats['retention_rate'] if stats else 0.0,
+                "last_view_date": stats['last_view_date'] if stats else "N/A",
+                "view_counts": stats['view_counts'] if stats else {f'views_at_{period}': 0 for period in ['28_days', '3_months', '1_year']}
+            }
+            return result
         except Exception as e:
             print(f"Unexpected Error (debug_advanced_video_stats): {str(e)}")
-            return {"analytics_response": None, "basic_stats": None, "error": str(e)}
+            return {
+                "analytics_response": None,
+                "basic_stats": None,
+                "error": str(e),
+                "calculated_retention_rate": 0.0,
+                "last_view_date": "N/A",
+                "view_counts": {f'views_at_{period}': 0 for period in ['28_days', '3_months', '1_year']}
+            }
 
     def _iso_duration_to_seconds(self, duration: str) -> int:
         """Convert ISO 8601 duration to seconds."""
