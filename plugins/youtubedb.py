@@ -9,6 +9,7 @@ import re
 import pandas as pd
 from widgets.yt_responses import ResponseDBDisplayWidget
 from widgets.yt_videos import VideoDatabaseWidget
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
 
 translations["en"].update({
     "marketyoutube_tab_videos": "Videos Database",
@@ -210,11 +211,21 @@ class YoutubedbPlugin(Plugin):
     def display_video_stats(self, filter_type: str, keyword: str, keyword_filter: List[str] = None):
         from datetime import datetime
 
-        videos = get_videos(filter_type, keyword, keyword_filter=keyword_filter)
+        # Récupérer les vidéos sans filtre de statut
+        videos = get_videos(
+            filter_type=filter_type,
+            keyword=keyword,
+            keyword_filter=keyword_filter
+        )
         total_videos = len(videos)
 
         st.write(t("marketyoutube_video_count").format(total_videos))
 
+        if total_videos == 0:
+            st.warning("No videos to display.")
+            return
+
+        # Préparer les données pour AgGrid
         stats_data = []
         advanced_stats_list = self.youtube_api.get_advanced_stats_list()
         for video in videos:
@@ -223,16 +234,16 @@ class YoutubedbPlugin(Plugin):
             published_date = datetime.strptime(
                 video['published_at'], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d") if video['published_at'] else "--"
             row = {
-                t("marketyoutube_title"): video['title'],
-                t("marketyoutube_url"): video['url'],
-                t("marketyoutube_published"): published_date,
-                t("marketyoutube_status"): video['status'],
-                t("marketyoutube_keywords"): keywords_str,
-                t("marketyoutube_views"): latest_stats['view_count'] if latest_stats else 0,
-                t("marketyoutube_retention_rate"): latest_stats['retention_rate'] if latest_stats else 0.0,
-                "Views at 28 Days": latest_stats['views_at_28_days'] if latest_stats else 0,
-                "Views at 3 Months": latest_stats['views_at_3_months'] if latest_stats else 0,
-                "Views at 1 Year": latest_stats['views_at_1_year'] if latest_stats else 0,
+                "title": video['title'],
+                "url": video['url'],
+                "published": published_date,
+                "status": video['status'],
+                "keywords": keywords_str,
+                "views": latest_stats['view_count'] if latest_stats else 0,
+                "retention_rate": latest_stats['retention_rate'] if latest_stats else 0.0,
+                "views_at_28_days": latest_stats['views_at_28_days'] if latest_stats else 0,
+                "views_at_3_months": latest_stats['views_at_3_months'] if latest_stats else 0,
+                "views_at_1_year": latest_stats['views_at_1_year'] if latest_stats else 0,
             }
             if latest_stats and 'advanced_stats' in latest_stats:
                 for stat in advanced_stats_list:
@@ -248,25 +259,114 @@ class YoutubedbPlugin(Plugin):
 
             stats_data.append(row)
 
-        column_config = {
-            t("marketyoutube_title"): st.column_config.TextColumn(t("marketyoutube_title"), width="small"),
-            t("marketyoutube_url"): st.column_config.LinkColumn(t("marketyoutube_url"), width="small"),
-            t("marketyoutube_published"): st.column_config.TextColumn(t("marketyoutube_published")),
-            t("marketyoutube_status"): st.column_config.TextColumn(t("marketyoutube_status")),
-            t("marketyoutube_keywords"): st.column_config.TextColumn(t("marketyoutube_keywords")),
-            t("marketyoutube_views"): st.column_config.NumberColumn(t("marketyoutube_views")),
-            t("marketyoutube_retention_rate"): st.column_config.NumberColumn(t("marketyoutube_retention_rate"), format="%.1f"),
-            "Views at 28 Days": st.column_config.NumberColumn("Views at 28 Days"),
-            "Views at 3 Months": st.column_config.NumberColumn("Views at 3 Months"),
-            "Views at 1 Year": st.column_config.NumberColumn("Views at 1 Year"),
-        }
-        for stat in advanced_stats_list:
-            translation_key = f"marketyoutube_{stat.lower()}"
-            label = t(translation_key) if translation_key in translations["en"] else stat.replace("Rate", " Rate (%)")
-            format_str = "%.2f" if "Rate" in stat or "Percentage" in stat else "%.1f" if stat == "estimatedMinutesWatched" else "%.2f" if stat == "estimatedAdRevenue" else None
-            column_config[label] = st.column_config.NumberColumn(label, format=format_str)
+        # Créer le DataFrame
+        df = pd.DataFrame(stats_data)
 
-        st.dataframe(stats_data, column_config=column_config, use_container_width=True)
+        # JavaScript pour rendre les liens
+        link_renderer = JsCode("""
+            class LinkRenderer {
+                init(params) {
+                    this.eGui = document.createElement('a');
+                    this.eGui.href = params.data.url;
+                    this.eGui.target = '_blank';
+                    this.eGui.innerText = params.value;
+                }
+                getGui() {
+                    return this.eGui;
+                }
+            }
+        """)
+
+        # Configurer les options d'AgGrid
+        grid_options = {
+            "rowSelection": "multiple",
+            "rowHeight": 80,
+            "columnDefs": [
+                {
+                    "field": "title",
+                    "headerName": t("marketyoutube_title"),
+                    "cellRenderer": link_renderer,
+                    "flex": 2
+                },
+                {
+                    "field": "url",
+                    "headerName": t("marketyoutube_url"),
+                    "hide": True  # Caché mais nécessaire pour le lien
+                },
+                {
+                    "field": "published",
+                    "headerName": t("marketyoutube_published"),
+                    "width": 120
+                },
+                {
+                    "field": "status",
+                    "headerName": t("marketyoutube_status"),
+                    "width": 100,
+                    "filter": "agSetColumnFilter",
+                    "filterParams": {
+                        "values": ["public", "private", "unlisted"],
+                        "suppressSelectAll": True,
+                        "closeOnApply": True
+                    }
+                },
+                {
+                    "field": "keywords",
+                    "headerName": t("marketyoutube_keywords"),
+                    "flex": 1
+                },
+                {
+                    "field": "views",
+                    "headerName": t("marketyoutube_views"),
+                    "width": 100
+                },
+                {
+                    "field": "retention_rate",
+                    "headerName": t("marketyoutube_retention_rate"),
+                    "width": 120,
+                    "valueFormatter": "Math.round(value * 10) / 10 + '%'"
+                },
+                {
+                    "field": "views_at_28_days",
+                    "headerName": "Views at 28 Days",
+                    "width": 120
+                },
+                {
+                    "field": "views_at_3_months",
+                    "headerName": "Views at 3 Months",
+                    "width": 120
+                },
+                {
+                    "field": "views_at_1_year",
+                    "headerName": "Views at 1 Year",
+                    "width": 120
+                }
+            ] + [
+                {
+                    "field": t(f"marketyoutube_{stat.lower()}") if f"marketyoutube_{stat.lower()}" in translations["en"] else stat.replace("Rate", " Rate (%)"),
+                    "headerName": t(f"marketyoutube_{stat.lower()}") if f"marketyoutube_{stat.lower()}" in translations["en"] else stat.replace("Rate", " Rate (%)"),
+                    "width": 120,
+                    "valueFormatter": "Math.round(value * 100) / 100" if "Rate" in stat or "Percentage" in stat else "Math.round(value * 10) / 10" if stat == "estimatedMinutesWatched" else "Math.round(value * 100) / 100" if stat == "estimatedAdRevenue" else None
+                } for stat in advanced_stats_list
+            ],
+            "defaultColDef": {
+                "flex": 1,
+                "sortable": True,
+                "filter": True,  # Activer le filtrage pour toutes les colonnes
+                "resizable": True
+            }
+        }
+
+        # Afficher AgGrid
+        AgGrid(
+            df,
+            gridOptions=grid_options,
+            height=400,
+            fit_columns_on_grid_load=True,
+            allow_unsafe_jscode=True,
+            update_mode=GridUpdateMode.SELECTION_CHANGED,
+            key=f"youtubedb_stats_grid"
+        )
+
 
     def sync_stats(self, channel_id: str, progress_callback=None):
         """Sync stats for all videos with progress callback."""
