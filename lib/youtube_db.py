@@ -7,7 +7,7 @@ import json
 
 # Database file
 DB_FILE = "youtube_database.db"
-SCHEMA_VERSION = 6  # Nouvelle version avec les colonnes views_at_*
+SCHEMA_VERSION = 5  # Nouvelle version avec les colonnes views_at_*
 
 def get_db_connection():
     """Create or connect to the SQLite database."""
@@ -96,29 +96,7 @@ def upgrade_database(current_version: int, target_version: int, cursor):
             ALTER TABLE campaign_stats
             ADD COLUMN moderated_responses INTEGER DEFAULT 0
         """)
-    if current_version < 6 and target_version >= 6:
-        # Ajout des colonnes views_at_28_days, views_at_3_months, views_at_1_year à stats_snapshots
-        cursor.execute("""
-            ALTER TABLE stats_snapshots
-            ADD COLUMN views_at_28_days INTEGER DEFAULT 0
-        """)
-        cursor.execute("""
-            ALTER TABLE stats_snapshots
-            ADD COLUMN views_at_3_months INTEGER DEFAULT 0
-        """)
-        cursor.execute("""
-            ALTER TABLE stats_snapshots
-            ADD COLUMN views_at_1_year INTEGER DEFAULT 0
-        """)
-        # Suppression des colonnes last_view_date et view_thresholds si elles existent
-        try:
-            cursor.execute("ALTER TABLE stats_snapshots DROP COLUMN last_view_date")
-        except sqlite3.OperationalError:
-            pass  # La colonne n'existe pas
-        try:
-            cursor.execute("ALTER TABLE stats_snapshots DROP COLUMN view_thresholds")
-        except sqlite3.OperationalError:
-            pass  # La colonne n'existe pas
+
 
 def initialize_database():
     conn = get_db_connection()
@@ -264,18 +242,14 @@ def insert_stats_snapshot(video_id: str, timestamp: str, stats: Dict[str, Any]):
 
     cursor.execute("""
         INSERT INTO stats_snapshots (
-            video_id, timestamp, view_count, retention_rate, advanced_stats,
-            views_at_28_days, views_at_3_months, views_at_1_year
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            video_id, timestamp, view_count, retention_rate, advanced_stats
+        ) VALUES (?, ?, ?, ?, ?)
     """, (
         video_id,
         timestamp,
         stats['view_count'],
         stats['retention_rate'],
-        json.dumps(stats['advanced_stats']),
-        stats['view_counts']['views_at_28_days'],
-        stats['view_counts']['views_at_3_months'],
-        stats['view_counts']['views_at_1_year']
+        json.dumps(stats['advanced_stats'])
     ))
 
     conn.commit()

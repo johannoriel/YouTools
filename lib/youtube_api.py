@@ -764,17 +764,10 @@ class YoutubeAPI:
                 for i, metric in enumerate(metrics):
                     value = row[i + 1]  # +1 car row[0] est l'ID vidéo
                     advanced_stats[metric] = float(value) if isinstance(value, (int, float)) and '.' in str(value) else int(value) if value else 0
-                stats['advanced_stats'] = advanced_stats
             else:
-                stats['advanced_stats'] = {metric: 0 for metric in metrics}
+                advanced_stats = {metric: 0 for metric in metrics}
 
-            # Calcul du taux de rétention
-            total_seconds = self._iso_duration_to_seconds(video_info['contentDetails']['duration'])
-            stats['retention_rate'] = (
-                stats['advanced_stats']['averageViewDuration'] / total_seconds * 100
-            ) if total_seconds > 0 and 'averageViewDuration' in stats['advanced_stats'] else 0.0
-
-            # Requête pour les vues par jour (dernière vue et nombre total de vues)
+            # Requête pour les vues par période (28 jours, 3 mois, 1 an)
             end_date = datetime.now().strftime("%Y-%m-%d")
             start_date_28d = (datetime.now() - timedelta(days=28)).strftime("%Y-%m-%d")
             start_date_3m = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
@@ -813,8 +806,22 @@ class YoutubeAPI:
                 else:
                     view_counts[f'views_at_{period}'] = 0
 
+            # Ajouter les compteurs de vues à advanced_stats
+            advanced_stats.update({
+                'views_at_28_days': view_counts['views_at_28_days'],
+                'views_at_3_months': view_counts['views_at_3_months'],
+                'views_at_1_year': view_counts['views_at_1_year']
+            })
+
+            stats['advanced_stats'] = advanced_stats
             stats['last_view_date'] = last_view_date or "N/A"
-            stats['view_counts'] = view_counts
+            stats['view_counts'] = view_counts  # Conservé pour compatibilité ascendante
+
+            # Calcul du taux de rétention
+            total_seconds = self._iso_duration_to_seconds(video_info['contentDetails']['duration'])
+            stats['retention_rate'] = (
+                stats['advanced_stats']['averageViewDuration'] / total_seconds * 100
+            ) if total_seconds > 0 and 'averageViewDuration' in stats['advanced_stats'] else 0.0
 
             return stats
         except HttpError as e:

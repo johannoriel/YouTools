@@ -241,9 +241,9 @@ class YoutubedbPlugin(Plugin):
                 "keywords": keywords_str,
                 "views": latest_stats['view_count'] if latest_stats else 0,
                 "retention_rate": latest_stats['retention_rate'] if latest_stats else 0.0,
-                "views_at_28_days": latest_stats['views_at_28_days'] if latest_stats else 0,
-                "views_at_3_months": latest_stats['views_at_3_months'] if latest_stats else 0,
-                "views_at_1_year": latest_stats['views_at_1_year'] if latest_stats else 0,
+                "views_at_28_days": latest_stats['advanced_stats'].get('views_at_28_days', 0) if latest_stats else 0,
+                "views_at_3_months": latest_stats['advanced_stats'].get('views_at_3_months', 0) if latest_stats else 0,
+                "views_at_1_year": latest_stats['advanced_stats'].get('views_at_1_year', 0) if latest_stats else 0,
             }
             if latest_stats and 'advanced_stats' in latest_stats:
                 for stat in advanced_stats_list:

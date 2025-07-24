@@ -111,9 +111,9 @@ class TempvideosPlugin(Plugin):
                 'likes': advanced_stats.get('likes', 0),
                 'share_count': advanced_stats.get('shares', 0),
                 'subscribers_gained': advanced_stats.get('subscribersGained', 0),
-                'views_at_28_days': latest_stats.get('views_at_28_days', 0),
-                'views_at_3_months': latest_stats.get('views_at_3_months', 0),
-                'views_at_1_year': latest_stats.get('views_at_1_year', 0)
+                'views_at_28_days': advanced_stats.get('views_at_28_days', 0),
+                'views_at_3_months': advanced_stats.get('views_at_3_months', 0),
+                'views_at_1_year': advanced_stats.get('views_at_1_year', 0)
             }
         return {
             'view_count': 0,
