@@ -12,9 +12,9 @@ import datetime
 import re
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
-from lib.youtube_db import get_latest_stats
+from lib.youtube_db import get_latest_stats, get_videos
 
-# Ajout des traductions spécifiques
+# Traductions existantes (inchangées)
 translations["en"].update({
     "temp_videos_tab": "Temporary Videos",
     "temp_videos_header": "Managing Temporary Videos",
@@ -42,6 +42,16 @@ translations["en"].update({
     "views_at_28_days": "Views at 28 Days",
     "views_at_3_months": "Views at 3 Months",
     "views_at_1_year": "Views at 1 Year",
+    "no_videos_selected": "No videos selected.",
+    "no_valid_videos_selected": "No valid videos selected.",
+    "select_new_status": "Select the new status for the selected videos:",
+    "status_public": "Public",
+    "status_private": "Private",
+    "status_unlisted": "Unlisted",
+    "change_status_button": "Change the status of selected videos",
+    "status_update_success": "{count} videos have been updated to the '{status}' status.",
+    "unknown_title": "Unknown Title",
+    "selected_videos_list": "List of selected videos with their links (Markdown):",
 })
 
 translations["fr"].update({
@@ -70,7 +80,17 @@ translations["fr"].update({
     "marketyoutube_subscribers_gained": "Abonnés gagnés",
     "views_at_28_days": "Vues à 28 jours",
     "views_at_3_months": "Vues à 3 mois",
-    "views_at_1_year": "Vues à 1 an"
+    "views_at_1_year": "Vues à 1 an",
+    "no_videos_selected": "Aucune vidéo sélectionnée.",
+    "no_valid_videos_selected": "Aucune vidéo sélectionnée valide.",
+    "select_new_status": "Sélectionner le nouveau statut pour les vidéos sélectionnées :",
+    "status_public": "Public",
+    "status_private": "Privé",
+    "status_unlisted": "Non répertorié",
+    "change_status_button": "Changer le statut des vidéos sélectionnées",
+    "status_update_success": "{count} vidéos ont été mises à jour vers le statut '{status}'.",
+    "unknown_title": "Titre inconnu",
+    "selected_videos_list": "Liste des vidéos sélectionnées avec leur lien (Markdown) :",
 })
 
 class TempvideosPlugin(Plugin):
@@ -143,6 +163,7 @@ class TempvideosPlugin(Plugin):
         title = video['snippet']['title']
         published_at = datetime.datetime.strptime(video['snippet']['publishedAt'], '%Y-%m-%dT%H:%M:%SZ')
         match = re.match(r'\[(\d+)j\]', title)
+        privacy_status = video['status']['privacyStatus']
 
         if match:
             days = int(match.group(1))
@@ -155,25 +176,25 @@ class TempvideosPlugin(Plugin):
                 'expiration_days': days,
                 'days_left': days_left,
                 'is_expired': days_left <= 0,
-                'privacy_status': video['status']['privacyStatus']
+                'privacy_status': privacy_status
             }
         return None
 
     def display_manual_unpublish(self, youtube, channel_id):
         st.header(t("manual_unpublish_header"))
 
-        videos = self.list_videos(youtube, channel_id)
+        videos = get_videos()
         video_data = []
 
         for video in videos:
-            video_id = video['snippet']['resourceId']['videoId']
+            video_id = video['video_id']
             stats = self.get_video_stats(video_id)
             video_data.append({
-                'title': video['snippet']['title'],
+                'title': video['title'],
                 'video_id': video_id,
                 'url': f"https://www.youtube.com/watch?v={video_id}",
-                'published_at': datetime.datetime.strptime(video['snippet']['publishedAt'], '%Y-%m-%dT%H:%M:%SZ').strftime('%Y-%m-%d'),
-                'status': video['status']['privacyStatus'],
+                'published_at': datetime.datetime.strptime(video['published_at'], '%Y-%m-%dT%H:%M:%SZ').strftime('%Y-%m-%d'),
+                'status': video['status'],
                 'views': stats['view_count'],
                 'likes': stats['likes'],
                 'shares': stats['share_count'],
@@ -189,7 +210,7 @@ class TempvideosPlugin(Plugin):
 
         df = pd.DataFrame(video_data)
 
-        # JavaScript pour rendre les liens cliquables
+        # JavaScript pour rendre les liens cliquables (inchangé)
         link_renderer = JsCode("""
             class LinkRenderer {
                 init(params) {
@@ -204,7 +225,7 @@ class TempvideosPlugin(Plugin):
             }
         """)
 
-        # Configurer AgGrid
+        # Configurer AgGrid avec le statut "members only"
         grid_options = {
             "rowSelection": "multiple",
             "rowHeight": 80,
@@ -212,7 +233,8 @@ class TempvideosPlugin(Plugin):
                 {
                     "field": "title",
                     "checkboxSelection": True,
-                    "headerCheckboxSelection": True,                    "headerName": t("marketyoutube_title"),
+                    "headerCheckboxSelection": True,
+                    "headerName": t("marketyoutube_title"),
                     "cellRenderer": link_renderer,
                     "flex": 2
                 },
@@ -294,17 +316,39 @@ class TempvideosPlugin(Plugin):
 
         selected_rows = grid_response.get('selected_rows', [])
 
-        if st.button(t("manual_unpublish_button")):
-            if not selected_rows:
+        # Afficher la liste des vidéos sélectionnées sous forme de liens Markdown
+        if not selected_rows is None and not selected_rows.empty:
+            video_list = []
+            for _, row in selected_rows.iterrows():
+                title = row['title'] if pd.notna(row['title']) else t("unknown_title")
+                url = row['url'] if pd.notna(row['url']) else ''
+                video_list.append(f"- [{title}]({url})")
+            st.markdown(t("selected_videos_list"))
+            st.code("\n".join(video_list), language="markdown")
+        else:
+            st.info(t("no_videos_selected"))
+
+        # Combobox pour sélectionner le nouveau statut
+        new_status = st.selectbox(
+            t("select_new_status"),
+            options=["public", "private", "unlisted"],
+            format_func=lambda x: {"public": t("status_public"), "private": t("status_private"), "unlisted": t("status_unlisted")}[x]
+        )
+
+        # Bouton pour appliquer le changement de statut
+        if st.button(t("change_status_button")):
+            if selected_rows is None or selected_rows.empty:
                 st.warning(t("manual_unpublish_no_selection"))
             else:
                 progress_bar = st.progress(0)
                 total_videos = len(selected_rows)
-                for i, row in enumerate(selected_rows):
-                    self.update_video_privacy(youtube, row['video_id'])
+                for i, (_, row) in enumerate(selected_rows.iterrows()):
+                    video_id = row['video_id'] if pd.notna(row['video_id']) else None
+                    if video_id:
+                        self.update_video_privacy(youtube, video_id, privacy_status=new_status)
                     progress_bar.progress((i + 1) / total_videos)
                 progress_bar.empty()
-                st.success(t("manual_unpublish_success").format(count=len(selected_rows)))
+                st.success(t("status_update_success").format(count=len(selected_rows), status=new_status))
                 st.rerun()
 
     def run(self, config):
@@ -321,10 +365,13 @@ class TempvideosPlugin(Plugin):
         credentials = get_credentials()
         youtube = build('youtube', 'v3', credentials=credentials)
 
+        # Charger les vidéos tagguées pour tab1 une seule fois et les stocker dans session_state
+        if 'tagged_videos' not in st.session_state:
+            st.session_state.tagged_videos = self.list_videos(youtube, channel_id)
+
         with tab1:
             st.header(t("temp_videos_header"))
-            videos = self.list_videos(youtube, channel_id)
-            temp_videos = [self.check_video_expiration(video) for video in videos if self.check_video_expiration(video)]
+            temp_videos = [self.check_video_expiration(video) for video in st.session_state.tagged_videos if self.check_video_expiration(video)]
 
             if temp_videos:
                 for video in temp_videos:
@@ -354,6 +401,8 @@ class TempvideosPlugin(Plugin):
                     for video in expired_videos:
                         self.update_video_privacy(youtube, video['video_id'])
                     st.success(t("temp_videos_unpublish_success").format(count=len(expired_videos)))
+                    # Réinitialiser la liste après dépublication
+                    del st.session_state.tagged_videos
                     st.rerun()
             else:
                 st.info(t("temp_videos_no_temp_videos"))
