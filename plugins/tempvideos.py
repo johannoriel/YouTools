@@ -14,7 +14,7 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
 from lib.youtube_db import get_latest_stats, get_videos
 
-# Traductions existantes (inchangées)
+# Traductions (inchangées, sauf ajout d'une nouvelle clé pour le filtre)
 translations["en"].update({
     "temp_videos_tab": "Temporary Videos",
     "temp_videos_header": "Managing Temporary Videos",
@@ -52,6 +52,7 @@ translations["en"].update({
     "status_update_success": "{count} videos have been updated to the '{status}' status.",
     "unknown_title": "Unknown Title",
     "selected_videos_list": "List of selected videos with their links (Markdown):",
+    "exclude_temp_videos": "Exclude temporary videos ([n days] format)"
 })
 
 translations["fr"].update({
@@ -91,6 +92,7 @@ translations["fr"].update({
     "status_update_success": "{count} vidéos ont été mises à jour vers le statut '{status}'.",
     "unknown_title": "Titre inconnu",
     "selected_videos_list": "Liste des vidéos sélectionnées avec leur lien (Markdown) :",
+    "exclude_temp_videos": "Exclure les vidéos temporaires (format [n jours])"
 })
 
 class TempvideosPlugin(Plugin):
@@ -176,18 +178,32 @@ class TempvideosPlugin(Plugin):
                 'expiration_days': days,
                 'days_left': days_left,
                 'is_expired': days_left <= 0,
-                'privacy_status': privacy_status
+                'privacy_status': privacy_status,
+                'is_temp_video': True
             }
-        return None
+        return {
+            'title': title,
+            'video_id': video['snippet']['resourceId']['videoId'],
+            'published_at': published_at,
+            'privacy_status': privacy_status,
+            'is_temp_video': False
+        }
 
     def display_manual_unpublish(self, youtube, channel_id):
         st.header(t("manual_unpublish_header"))
+
+        # Ajout de la case à cocher pour exclure les vidéos temporaires
+        exclude_temp_videos = st.checkbox(t("exclude_temp_videos"), value=False)
 
         videos = get_videos()
         video_data = []
 
         for video in videos:
             video_id = video['video_id']
+            # Vérifier si la vidéo est temporaire en utilisant check_video_expiration
+            temp_check = self.check_video_expiration({'snippet': {'title': video['title'], 'publishedAt': video['published_at'], 'resourceId': {'videoId': video_id}}, 'status': {'privacyStatus': video['status']}})
+            if exclude_temp_videos and temp_check['is_temp_video']:
+                continue
             stats = self.get_video_stats(video_id)
             video_data.append({
                 'title': video['title'],
@@ -371,7 +387,7 @@ class TempvideosPlugin(Plugin):
 
         with tab1:
             st.header(t("temp_videos_header"))
-            temp_videos = [self.check_video_expiration(video) for video in st.session_state.tagged_videos if self.check_video_expiration(video)]
+            temp_videos = [self.check_video_expiration(video) for video in st.session_state.tagged_videos if self.check_video_expiration(video).get('is_temp_video')]
 
             if temp_videos:
                 for video in temp_videos:
