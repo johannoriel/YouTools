@@ -52,7 +52,15 @@ translations["en"].update({
     "status_update_success": "{count} videos have been updated to the '{status}' status.",
     "unknown_title": "Unknown Title",
     "selected_videos_list": "List of selected videos with their links (Markdown):",
-    "exclude_temp_videos": "Exclude temporary videos ([n days] format)"
+    "exclude_temp_videos": "Exclude temporary videos ([n days] format)",
+    "select_playlist": "Select a playlist",
+    "create_new_playlist": "Create a new playlist",
+    "new_playlist_name": "New playlist name",
+    "create_playlist_button": "Create Playlist",
+    "add_to_playlist_button": "Add selected videos to playlist",
+    "add_to_playlist_success": "{count} videos added to playlist '{playlist_title}'.",
+    "no_playlist_selected": "Please select a playlist.",
+    "playlist_created_success": "Playlist '{title}' created successfully."
 })
 
 translations["fr"].update({
@@ -92,7 +100,15 @@ translations["fr"].update({
     "status_update_success": "{count} vidéos ont été mises à jour vers le statut '{status}'.",
     "unknown_title": "Titre inconnu",
     "selected_videos_list": "Liste des vidéos sélectionnées avec leur lien (Markdown) :",
-    "exclude_temp_videos": "Exclure les vidéos temporaires (format [n jours])"
+    "exclude_temp_videos": "Exclure les vidéos temporaires (format [n jours])",
+    "select_playlist": "Sélectionner une playlist",
+    "create_new_playlist": "Créer une nouvelle playlist",
+    "new_playlist_name": "Nom de la nouvelle playlist",
+    "create_playlist_button": "Créer la playlist",
+    "add_to_playlist_button": "Ajouter les vidéos sélectionnées à la playlist",
+    "add_to_playlist_success": "{count} vidéos ajoutées à la playlist '{playlist_title}'.",
+    "no_playlist_selected": "Veuillez sélectionner une playlist.",
+    "playlist_created_success": "Playlist '{title}' créée avec succès."
 })
 
 class TempvideosPlugin(Plugin):
@@ -102,6 +118,56 @@ class TempvideosPlugin(Plugin):
             {"name": t("temp_videos_tab"), "plugin": "tempvideos"},
             {"name": t("manual_unpublish_tab"), "plugin": "tempvideos"}
         ]
+
+    def list_playlists(self, youtube, channel_id):
+        playlists = []
+        next_page_token = None
+        while True:
+            request = youtube.playlists().list(
+                part='snippet',
+                channelId=channel_id,
+                maxResults=50,
+                pageToken=next_page_token
+            )
+            response = request.execute()
+            playlists += response['items']
+            next_page_token = response.get('nextPageToken')
+            if next_page_token is None:
+                break
+        return playlists
+
+    def create_playlist(self, youtube, title):
+        request_body = {
+            'snippet': {
+                'title': title,
+                'description': 'Playlist created via TempvideosPlugin'
+            },
+            'status': {
+                'privacyStatus': 'public'
+            }
+        }
+        request = youtube.playlists().insert(
+            part='snippet,status',
+            body=request_body
+        )
+        response = request.execute()
+        return response['id']
+
+    def add_videos_to_playlist(self, youtube, playlist_id, video_ids):
+        for video_id in video_ids:
+            request_body = {
+                'snippet': {
+                    'playlistId': playlist_id,
+                    'resourceId': {
+                        'kind': 'youtube#video',
+                        'videoId': video_id
+                    }
+                }
+            }
+            youtube.playlistItems().insert(
+                part='snippet',
+                body=request_body
+            ).execute()
 
     def list_videos(self, youtube, channel_id):
         request = youtube.channels().list(part='contentDetails,statistics', id=channel_id)
@@ -147,7 +213,7 @@ class TempvideosPlugin(Plugin):
             'views_at_1_year': 0
         }
 
-    def update_video_privacy(self, youtube, video_id, privacy_status='unlisted'):
+    def update_video_privacy(self, youtube, video_id, video_title, privacy_status='unlisted'):
         request_body = {
             'id': video_id,
             'status': {
@@ -158,7 +224,12 @@ class TempvideosPlugin(Plugin):
             part='status',
             body=request_body
         )
-        response = request.execute()
+        try:
+            response = request.execute()
+        except Exception as e:
+            st.write(f"Error updating video - probably a membership video : {video_id} {video_title} to {privacy_status} : {e}")
+            return None
+
         return response
 
     def check_video_expiration(self, video):
@@ -192,7 +263,6 @@ class TempvideosPlugin(Plugin):
     def display_manual_unpublish(self, youtube, channel_id):
         st.header(t("manual_unpublish_header"))
 
-        # Ajout de la case à cocher pour exclure les vidéos temporaires
         exclude_temp_videos = st.checkbox(t("exclude_temp_videos"), value=False)
 
         videos = get_videos()
@@ -200,7 +270,6 @@ class TempvideosPlugin(Plugin):
 
         for video in videos:
             video_id = video['video_id']
-            # Vérifier si la vidéo est temporaire en utilisant check_video_expiration
             temp_check = self.check_video_expiration({'snippet': {'title': video['title'], 'publishedAt': video['published_at'], 'resourceId': {'videoId': video_id}}, 'status': {'privacyStatus': video['status']}})
             if exclude_temp_videos and temp_check['is_temp_video']:
                 continue
@@ -226,7 +295,6 @@ class TempvideosPlugin(Plugin):
 
         df = pd.DataFrame(video_data)
 
-        # JavaScript pour rendre les liens cliquables (inchangé)
         link_renderer = JsCode("""
             class LinkRenderer {
                 init(params) {
@@ -241,7 +309,6 @@ class TempvideosPlugin(Plugin):
             }
         """)
 
-        # Configurer AgGrid avec le statut "members only"
         grid_options = {
             "rowSelection": "multiple",
             "rowHeight": 80,
@@ -319,7 +386,6 @@ class TempvideosPlugin(Plugin):
             }
         }
 
-        # Afficher AgGrid
         grid_response = AgGrid(
             df,
             gridOptions=grid_options,
@@ -332,7 +398,6 @@ class TempvideosPlugin(Plugin):
 
         selected_rows = grid_response.get('selected_rows', [])
 
-        # Afficher la liste des vidéos sélectionnées sous forme de liens Markdown
         if not selected_rows is None and not selected_rows.empty:
             video_list = []
             for _, row in selected_rows.iterrows():
@@ -344,28 +409,60 @@ class TempvideosPlugin(Plugin):
         else:
             st.info(t("no_videos_selected"))
 
-        # Combobox pour sélectionner le nouveau statut
-        new_status = st.selectbox(
-            t("select_new_status"),
-            options=["public", "private", "unlisted"],
-            format_func=lambda x: {"public": t("status_public"), "private": t("status_private"), "unlisted": t("status_unlisted")}[x]
-        )
+        col1, col2 = st.columns(2)
 
-        # Bouton pour appliquer le changement de statut
-        if st.button(t("change_status_button")):
-            if selected_rows is None or selected_rows.empty:
-                st.warning(t("manual_unpublish_no_selection"))
-            else:
-                progress_bar = st.progress(0)
-                total_videos = len(selected_rows)
-                for i, (_, row) in enumerate(selected_rows.iterrows()):
-                    video_id = row['video_id'] if pd.notna(row['video_id']) else None
-                    if video_id:
-                        self.update_video_privacy(youtube, video_id, privacy_status=new_status)
-                    progress_bar.progress((i + 1) / total_videos)
-                progress_bar.empty()
-                st.success(t("status_update_success").format(count=len(selected_rows), status=new_status))
-                st.rerun()
+        with col1:
+            st.subheader(t("select_new_status"))
+            new_status = st.selectbox(
+                t("select_new_status"),
+                options=["public", "private", "unlisted"],
+                format_func=lambda x: {"public": t("status_public"), "private": t("status_private"), "unlisted": t("status_unlisted")}[x],
+                key="status_select"
+            )
+            if st.button(t("change_status_button")):
+                if selected_rows is None or selected_rows.empty:
+                    st.warning(t("manual_unpublish_no_selection"))
+                else:
+                    progress_bar = st.progress(0)
+                    total_videos = len(selected_rows)
+                    for i, (_, row) in enumerate(selected_rows.iterrows()):
+                        video_id = row['video_id'] if pd.notna(row['video_id']) else None
+                        if video_id:
+                            self.update_video_privacy(youtube, video_id, row['title'], privacy_status=new_status)
+                        progress_bar.progress((i + 1) / total_videos)
+                    progress_bar.empty()
+                    st.success(t("status_update_success").format(count=len(selected_rows), status=new_status))
+                    st.rerun()
+
+        with col2:
+            st.subheader(t("select_playlist"))
+            playlists = self.list_playlists(youtube, channel_id)
+            playlist_options = {playlist['snippet']['title']: playlist['id'] for playlist in playlists}
+            selected_playlist = st.selectbox(
+                t("select_playlist"),
+                options=[""] + list(playlist_options.keys()),
+                key="playlist_select"
+            )
+
+            st.subheader(t("create_new_playlist"))
+            new_playlist_name = st.text_input(t("new_playlist_name"))
+            if st.button(t("create_playlist_button")):
+                if new_playlist_name:
+                    new_playlist_id = self.create_playlist(youtube, new_playlist_name)
+                    st.success(t("playlist_created_success").format(title=new_playlist_name))
+                    st.rerun()
+
+            if st.button(t("add_to_playlist_button")):
+                if selected_rows is None or selected_rows.empty:
+                    st.warning(t("manual_unpublish_no_selection"))
+                elif not selected_playlist:
+                    st.warning(t("no_playlist_selected"))
+                else:
+                    video_ids = [row['video_id'] for _, row in selected_rows.iterrows() if pd.notna(row['video_id'])]
+                    if video_ids:
+                        self.add_videos_to_playlist(youtube, playlist_options[selected_playlist], video_ids)
+                        st.success(t("add_to_playlist_success").format(count=len(video_ids), playlist_title=selected_playlist))
+                        st.rerun()
 
     def run(self, config):
         tab1, tab2 = st.tabs([
@@ -415,7 +512,7 @@ class TempvideosPlugin(Plugin):
                 if st.button(t("temp_videos_unpublish_button")):
                     expired_videos = [video for video in temp_videos if video['is_expired'] and video['privacy_status'] == 'public']
                     for video in expired_videos:
-                        self.update_video_privacy(youtube, video['video_id'])
+                        self.update_video_privacy(youtube, video['video_id'], video['title'])
                     st.success(t("temp_videos_unpublish_success").format(count=len(expired_videos)))
                     # Réinitialiser la liste après dépublication
                     del st.session_state.tagged_videos
