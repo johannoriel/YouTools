@@ -60,7 +60,12 @@ translations["en"].update({
     "add_to_playlist_button": "Add selected videos to playlist",
     "add_to_playlist_success": "{count} videos added to playlist '{playlist_title}'.",
     "no_playlist_selected": "Please select a playlist.",
-    "playlist_created_success": "Playlist '{title}' created successfully."
+    "playlist_created_success": "Playlist '{title}' created successfully.",
+    "filter_by_playlist": "Filter by playlist",
+    "include_exclude_playlist": "Include or exclude videos from selected playlist",
+    "include_videos_in_playlist": "Include videos in playlist",
+    "exclude_videos_in_playlist": "Exclude videos in playlist",
+
 })
 
 translations["fr"].update({
@@ -108,7 +113,11 @@ translations["fr"].update({
     "add_to_playlist_button": "Ajouter les vidéos sélectionnées à la playlist",
     "add_to_playlist_success": "{count} vidéos ajoutées à la playlist '{playlist_title}'.",
     "no_playlist_selected": "Veuillez sélectionner une playlist.",
-    "playlist_created_success": "Playlist '{title}' créée avec succès."
+    "playlist_created_success": "Playlist '{title}' créée avec succès.",
+    "filter_by_playlist": "Filtrer par playlist",
+    "include_exclude_playlist": "Inclure ou exclure les vidéos de la playlist sélectionnée",
+    "include_videos_in_playlist": "Inclure les vidéos dans la playlist",
+    "exclude_videos_in_playlist": "Exclure les vidéos dans la playlist",
 })
 
 class TempvideosPlugin(Plugin):
@@ -168,6 +177,23 @@ class TempvideosPlugin(Plugin):
                 part='snippet',
                 body=request_body
             ).execute()
+
+    def get_playlist_videos(self, youtube, playlist_id):
+        video_ids = []
+        next_page_token = None
+        while True:
+            request = youtube.playlistItems().list(
+                part='contentDetails',
+                playlistId=playlist_id,
+                maxResults=50,
+                pageToken=next_page_token
+            )
+            response = request.execute()
+            video_ids += [item['contentDetails']['videoId'] for item in response['items']]
+            next_page_token = response.get('nextPageToken')
+            if next_page_token is None:
+                break
+        return video_ids
 
     def list_videos(self, youtube, channel_id):
         request = youtube.channels().list(part='contentDetails,statistics', id=channel_id)
@@ -263,16 +289,55 @@ class TempvideosPlugin(Plugin):
     def display_manual_unpublish(self, youtube, channel_id):
         st.header(t("manual_unpublish_header"))
 
+        # Sélection de playlist pour filtrer les vidéos
+        st.subheader(t("filter_by_playlist"))
+        playlists = self.list_playlists(youtube, channel_id)
+        playlist_options = {"": ""} | {playlist['snippet']['title']: playlist['id'] for playlist in playlists}
+        filter_playlist = st.selectbox(
+            t("filter_by_playlist"),
+            options=list(playlist_options.keys()),
+            key="filter_playlist_select"
+        )
+        include_exclude = st.radio(
+            t("include_exclude_playlist"),
+            options=["include", "exclude"],
+            format_func=lambda x: t("include_videos_in_playlist") if x == "include" else t("exclude_videos_in_playlist"),
+            key="include_exclude_radio"
+        )
+
+        # Case à cocher pour exclure les vidéos temporaires
         exclude_temp_videos = st.checkbox(t("exclude_temp_videos"), value=False)
 
         videos = get_videos()
         video_data = []
 
+        # Récupérer les vidéos de la playlist sélectionnée si applicable
+        playlist_video_ids = []
+        if filter_playlist:
+            playlist_video_ids = self.get_playlist_videos(youtube, playlist_options[filter_playlist])
+
         for video in videos:
             video_id = video['video_id']
-            temp_check = self.check_video_expiration({'snippet': {'title': video['title'], 'publishedAt': video['published_at'], 'resourceId': {'videoId': video_id}}, 'status': {'privacyStatus': video['status']}})
+            temp_check = self.check_video_expiration({
+                'snippet': {
+                    'title': video['title'],
+                    'publishedAt': video['published_at'],
+                    'resourceId': {'videoId': video_id}
+                },
+                'status': {'privacyStatus': video['status']}
+            })
+
+            # Filtrer selon l'appartenance à la playlist
+            in_playlist = video_id in playlist_video_ids
+            if filter_playlist:
+                if include_exclude == "include" and not in_playlist:
+                    continue
+                if include_exclude == "exclude" and in_playlist:
+                    continue
+
             if exclude_temp_videos and temp_check['is_temp_video']:
                 continue
+
             stats = self.get_video_stats(video_id)
             video_data.append({
                 'title': video['title'],
