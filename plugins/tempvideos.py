@@ -287,22 +287,25 @@ class TempvideosPlugin(Plugin):
         }
 
     def display_manual_unpublish(self, youtube, channel_id):
-        st.header(t("manual_unpublish_header"))
-
-        # Sélection de playlist pour filtrer les vidéos
+        # Sélection multiple de playlists pour inclure/exclure les vidéos
         st.subheader(t("filter_by_playlist"))
+
+        # Récupérer les playlists
         playlists = self.list_playlists(youtube, channel_id)
-        playlist_options = {"": ""} | {playlist['snippet']['title']: playlist['id'] for playlist in playlists}
-        filter_playlist = st.selectbox(
-            t("filter_by_playlist"),
+        playlist_options = {playlist['snippet']['title']: playlist['id'] for playlist in playlists}
+
+        # Multiselect pour inclure les vidéos des playlists sélectionnées
+        include_playlists = st.multiselect(
+            t("include_videos_in_playlist"),
             options=list(playlist_options.keys()),
-            key="filter_playlist_select"
+            key="include_playlists_select"
         )
-        include_exclude = st.radio(
-            t("include_exclude_playlist"),
-            options=["include", "exclude"],
-            format_func=lambda x: t("include_videos_in_playlist") if x == "include" else t("exclude_videos_in_playlist"),
-            key="include_exclude_radio"
+
+        # Multiselect pour exclure les vidéos des playlists sélectionnées
+        exclude_playlists = st.multiselect(
+            t("exclude_videos_in_playlist"),
+            options=list(playlist_options.keys()),
+            key="exclude_playlists_select"
         )
 
         # Case à cocher pour exclure les vidéos temporaires
@@ -311,10 +314,17 @@ class TempvideosPlugin(Plugin):
         videos = get_videos()
         video_data = []
 
-        # Récupérer les vidéos de la playlist sélectionnée si applicable
-        playlist_video_ids = []
-        if filter_playlist:
-            playlist_video_ids = self.get_playlist_videos(youtube, playlist_options[filter_playlist])
+        # Récupérer les vidéos des playlists incluses
+        include_video_ids = set()
+        for playlist_title in include_playlists:
+            playlist_id = playlist_options[playlist_title]
+            include_video_ids.update(self.get_playlist_videos(youtube, playlist_id))
+
+        # Récupérer les vidéos des playlists exclues
+        exclude_video_ids = set()
+        for playlist_title in exclude_playlists:
+            playlist_id = playlist_options[playlist_title]
+            exclude_video_ids.update(self.get_playlist_videos(youtube, playlist_id))
 
         for video in videos:
             video_id = video['video_id']
@@ -327,14 +337,15 @@ class TempvideosPlugin(Plugin):
                 'status': {'privacyStatus': video['status']}
             })
 
-            # Filtrer selon l'appartenance à la playlist
-            in_playlist = video_id in playlist_video_ids
-            if filter_playlist:
-                if include_exclude == "include" and not in_playlist:
-                    continue
-                if include_exclude == "exclude" and in_playlist:
-                    continue
+            # Filtrer selon les playlists incluses (si spécifié)
+            if include_playlists and video_id not in include_video_ids:
+                continue
 
+            # Filtrer selon les playlists exclues
+            if video_id in exclude_video_ids:
+                continue
+
+            # Exclure les vidéos temporaires si demandé
             if exclude_temp_videos and temp_check['is_temp_video']:
                 continue
 
