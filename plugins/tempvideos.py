@@ -5,7 +5,6 @@ from plugins.common import get_credentials
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.exceptions import RefreshError
 import os
 import datetime
@@ -14,7 +13,7 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode
 from lib.youtube_db import get_latest_stats, get_videos
 
-# Traductions (inchangées, sauf ajout d'une nouvelle clé pour le filtre)
+# Traductions (inchangées)
 translations["en"].update({
     "temp_videos_tab": "Temporary Videos",
     "temp_videos_header": "Managing Temporary Videos",
@@ -65,7 +64,6 @@ translations["en"].update({
     "include_exclude_playlist": "Include or exclude videos from selected playlist",
     "include_videos_in_playlist": "Include videos in playlist",
     "exclude_videos_in_playlist": "Exclude videos in playlist",
-
 })
 
 translations["fr"].update({
@@ -145,6 +143,13 @@ class TempvideosPlugin(Plugin):
                 break
         return playlists
 
+    def cached_list_playlists(self, youtube, channel_id, renew_cache=False):
+        if not renew_cache and 'cached_playlists' in st.session_state:
+            return st.session_state.cached_playlists
+        playlists = self.list_playlists(youtube, channel_id)
+        st.session_state.cached_playlists = playlists
+        return playlists
+
     def create_playlist(self, youtube, title):
         request_body = {
             'snippet': {
@@ -162,6 +167,13 @@ class TempvideosPlugin(Plugin):
         response = request.execute()
         return response['id']
 
+    def cached_create_playlist(self, youtube, title, renew_cache=False):
+        playlist_id = self.create_playlist(youtube, title)
+        # Forcer la mise à jour du cache des playlists
+        if 'cached_playlists' in st.session_state:
+            del st.session_state.cached_playlists
+        return playlist_id
+
     def add_videos_to_playlist(self, youtube, playlist_id, video_ids):
         for video_id in video_ids:
             request_body = {
@@ -178,6 +190,12 @@ class TempvideosPlugin(Plugin):
                 body=request_body
             ).execute()
 
+    def cached_add_videos_to_playlist(self, youtube, playlist_id, video_ids, renew_cache=False):
+        self.add_videos_to_playlist(youtube, playlist_id, video_ids)
+        # Forcer la mise à jour du cache des vidéos de la playlist
+        if 'cached_playlist_videos' in st.session_state:
+            del st.session_state.cached_playlist_videos
+
     def get_playlist_videos(self, youtube, playlist_id):
         video_ids = []
         next_page_token = None
@@ -193,6 +211,14 @@ class TempvideosPlugin(Plugin):
             next_page_token = response.get('nextPageToken')
             if next_page_token is None:
                 break
+        return video_ids
+
+    def cached_get_playlist_videos(self, youtube, playlist_id, renew_cache=False):
+        cache_key = f"cached_playlist_videos_{playlist_id}"
+        if not renew_cache and cache_key in st.session_state:
+            return st.session_state[cache_key]
+        video_ids = self.get_playlist_videos(youtube, playlist_id)
+        st.session_state[cache_key] = video_ids
         return video_ids
 
     def list_videos(self, youtube, channel_id):
@@ -214,6 +240,13 @@ class TempvideosPlugin(Plugin):
             next_page_token = response.get('nextPageToken')
             if next_page_token is None:
                 break
+        return videos
+
+    def cached_list_videos(self, youtube, channel_id, renew_cache=False):
+        if not renew_cache and 'cached_videos' in st.session_state:
+            return st.session_state.cached_videos
+        videos = self.list_videos(youtube, channel_id)
+        st.session_state.cached_videos = videos
         return videos
 
     def get_video_stats(self, video_id):
@@ -287,44 +320,38 @@ class TempvideosPlugin(Plugin):
         }
 
     def display_manual_unpublish(self, youtube, channel_id):
-        # Sélection multiple de playlists pour inclure/exclure les vidéos
         st.subheader(t("filter_by_playlist"))
 
-        # Récupérer les playlists
-        playlists = self.list_playlists(youtube, channel_id)
+        # Utiliser la version en cache pour les playlists
+        playlists = self.cached_list_playlists(youtube, channel_id)
         playlist_options = {playlist['snippet']['title']: playlist['id'] for playlist in playlists}
 
-        # Multiselect pour inclure les vidéos des playlists sélectionnées
         include_playlists = st.multiselect(
             t("include_videos_in_playlist"),
             options=list(playlist_options.keys()),
             key="include_playlists_select"
         )
 
-        # Multiselect pour exclure les vidéos des playlists sélectionnées
         exclude_playlists = st.multiselect(
             t("exclude_videos_in_playlist"),
             options=list(playlist_options.keys()),
             key="exclude_playlists_select"
         )
 
-        # Case à cocher pour exclure les vidéos temporaires
         exclude_temp_videos = st.checkbox(t("exclude_temp_videos"), value=False)
 
         videos = get_videos()
         video_data = []
 
-        # Récupérer les vidéos des playlists incluses
         include_video_ids = set()
         for playlist_title in include_playlists:
             playlist_id = playlist_options[playlist_title]
-            include_video_ids.update(self.get_playlist_videos(youtube, playlist_id))
+            include_video_ids.update(self.cached_get_playlist_videos(youtube, playlist_id))
 
-        # Récupérer les vidéos des playlists exclues
         exclude_video_ids = set()
         for playlist_title in exclude_playlists:
             playlist_id = playlist_options[playlist_title]
-            exclude_video_ids.update(self.get_playlist_videos(youtube, playlist_id))
+            exclude_video_ids.update(self.cached_get_playlist_videos(youtube, playlist_id))
 
         for video in videos:
             video_id = video['video_id']
@@ -337,15 +364,12 @@ class TempvideosPlugin(Plugin):
                 'status': {'privacyStatus': video['status']}
             })
 
-            # Filtrer selon les playlists incluses (si spécifié)
             if include_playlists and video_id not in include_video_ids:
                 continue
 
-            # Filtrer selon les playlists exclues
             if video_id in exclude_video_ids:
                 continue
 
-            # Exclure les vidéos temporaires si demandé
             if exclude_temp_videos and temp_check['is_temp_video']:
                 continue
 
@@ -508,25 +532,20 @@ class TempvideosPlugin(Plugin):
                         progress_bar.progress((i + 1) / total_videos)
                     progress_bar.empty()
                     st.success(t("status_update_success").format(count=len(selected_rows), status=new_status))
+                    # Forcer la mise à jour du cache des vidéos
+                    if 'cached_videos' in st.session_state:
+                        del st.session_state.cached_videos
                     st.rerun()
 
         with col2:
             st.subheader(t("select_playlist"))
-            playlists = self.list_playlists(youtube, channel_id)
+            playlists = self.cached_list_playlists(youtube, channel_id)
             playlist_options = {playlist['snippet']['title']: playlist['id'] for playlist in playlists}
             selected_playlist = st.selectbox(
                 t("select_playlist"),
                 options=[""] + list(playlist_options.keys()),
                 key="playlist_select"
             )
-
-            st.subheader(t("create_new_playlist"))
-            new_playlist_name = st.text_input(t("new_playlist_name"))
-            if st.button(t("create_playlist_button")):
-                if new_playlist_name:
-                    new_playlist_id = self.create_playlist(youtube, new_playlist_name)
-                    st.success(t("playlist_created_success").format(title=new_playlist_name))
-                    st.rerun()
 
             if st.button(t("add_to_playlist_button")):
                 if selected_rows is None or selected_rows.empty:
@@ -536,9 +555,17 @@ class TempvideosPlugin(Plugin):
                 else:
                     video_ids = [row['video_id'] for _, row in selected_rows.iterrows() if pd.notna(row['video_id'])]
                     if video_ids:
-                        self.add_videos_to_playlist(youtube, playlist_options[selected_playlist], video_ids)
+                        self.cached_add_videos_to_playlist(youtube, playlist_options[selected_playlist], video_ids, renew_cache=True)
                         st.success(t("add_to_playlist_success").format(count=len(video_ids), playlist_title=selected_playlist))
                         st.rerun()
+
+            st.subheader(t("create_new_playlist"))
+            new_playlist_name = st.text_input(t("new_playlist_name"))
+            if st.button(t("create_playlist_button")):
+                if new_playlist_name:
+                    new_playlist_id = self.cached_create_playlist(youtube, new_playlist_name, renew_cache=True)
+                    st.success(t("playlist_created_success").format(title=new_playlist_name))
+                    st.rerun()
 
     def run(self, config):
         tab1, tab2 = st.tabs([
@@ -556,7 +583,7 @@ class TempvideosPlugin(Plugin):
 
         # Charger les vidéos tagguées pour tab1 une seule fois et les stocker dans session_state
         if 'tagged_videos' not in st.session_state:
-            st.session_state.tagged_videos = self.list_videos(youtube, channel_id)
+            st.session_state.tagged_videos = self.cached_list_videos(youtube, channel_id)
 
         with tab1:
             st.header(t("temp_videos_header"))
@@ -592,6 +619,8 @@ class TempvideosPlugin(Plugin):
                     st.success(t("temp_videos_unpublish_success").format(count=len(expired_videos)))
                     # Réinitialiser la liste après dépublication
                     del st.session_state.tagged_videos
+                    if 'cached_videos' in st.session_state:
+                        del st.session_state.cached_videos
                     st.rerun()
             else:
                 st.info(t("temp_videos_no_temp_videos"))
