@@ -21,6 +21,8 @@ translations["en"].update({
     "mailerlite_error": "An error occurred: {error}",
     "mailerlite_no_title": "No title found in Markdown content",
     "mailerlite_no_subject": "No subject found in Markdown content",
+    "mailerlite_from_name_label": "From Name",
+    "mailerlite_from_email_label": "From Email",
 })
 
 translations["fr"].update({
@@ -38,6 +40,8 @@ translations["fr"].update({
     "mailerlite_error": "Une erreur s'est produite : {error}",
     "mailerlite_no_title": "Aucun titre trouvé dans le contenu Markdown",
     "mailerlite_no_subject": "Aucun sujet trouvé dans le contenu Markdown",
+    "mailerlite_from_name_label": "Nom de l'expéditeur",
+    "mailerlite_from_email_label": "Email de l'expéditeur",
 })
 
 class MailerlitePlugin(Plugin):
@@ -56,6 +60,16 @@ class MailerlitePlugin(Plugin):
                 "type": "text",
                 "label": t("mailerlite_test_email_label"),
                 "default": ""
+            },
+            "mailerlite_from_name": {
+                "type": "text",
+                "label": t("mailerlite_from_name_label"),
+                "default": "Your Name"
+            },
+            "mailerlite_from_email": {
+                "type": "text",
+                "label": t("mailerlite_from_email_label"),
+                "default": "your_email@example.com"
             }
         }
 
@@ -67,9 +81,12 @@ class MailerlitePlugin(Plugin):
         """Main plugin logic."""
         st.header(t("mailerlite_header"))
 
-        # Get API token from config
-        api_token = config.get(self.name, {}).get("mailerlite_api_token", "")
-        test_email = config.get(self.name, {}).get("mailerlite_test_email", "")
+        # Get configuration values
+        plugin_config = config.get(self.name, {})
+        api_token = plugin_config.get("mailerlite_api_token", "")
+        test_email = plugin_config.get("mailerlite_test_email", "")
+        from_name = plugin_config.get("mailerlite_from_name", "Your Name")
+        from_email = plugin_config.get("mailerlite_from_email", "your_email@example.com")
 
         # Input for campaign content (Markdown)
         campaign_content = st.text_area(
@@ -99,7 +116,7 @@ class MailerlitePlugin(Plugin):
             t("mailerlite_group_select_label"),
             options=group_options,
             format_func=lambda x: x[0]
-        )
+        ) if group_options else None
 
         # Create two columns for buttons
         col1, col2 = st.columns(2)
@@ -115,7 +132,7 @@ class MailerlitePlugin(Plugin):
                             # Convert Markdown to HTML
                             html_content = markdown.markdown(campaign_content)
                             # Create campaign
-                            campaign_id = self.create_campaign(api_token, title, subject, selected_group[1], t("language"))
+                            campaign_id = self.create_campaign(api_token, title, subject, selected_group[1], from_name, from_email)
                             # Upload content
                             self.upload_campaign_content(api_token, campaign_id, html_content)
                             # Send campaign
@@ -123,6 +140,8 @@ class MailerlitePlugin(Plugin):
                             st.success(t("mailerlite_success").format(campaign_id=campaign_id))
                         except Exception as e:
                             st.error(t("mailerlite_error").format(error=str(e)))
+                            # Debug information
+                            st.error(f"Debug: API response details might be in the logs")
 
         with col2:
             # Button to send test campaign
@@ -134,8 +153,8 @@ class MailerlitePlugin(Plugin):
                         try:
                             # Convert Markdown to HTML
                             html_content = markdown.markdown(campaign_content)
-                            # Create test campaign
-                            campaign_id = self.create_campaign(api_token, title, subject, None, t("language"))
+                            # Create test campaign (without group filter)
+                            campaign_id = self.create_campaign(api_token, title, subject, None, from_name, from_email)
                             # Upload content
                             self.upload_campaign_content(api_token, campaign_id, html_content)
                             # Send test email
@@ -143,6 +162,8 @@ class MailerlitePlugin(Plugin):
                             st.success(t("mailerlite_test_success"))
                         except Exception as e:
                             st.error(t("mailerlite_error").format(error=str(e)))
+                            # Debug information
+                            st.error(f"Debug: API response details might be in the logs")
 
     def extract_title(self, markdown_content: str) -> str:
         """Extract the first h1 heading as the campaign title."""
@@ -169,27 +190,45 @@ class MailerlitePlugin(Plugin):
             st.error(t("mailerlite_error").format(error=f"Failed to fetch groups: {str(e)}"))
             return []
 
-    def create_campaign(self, api_token: str, title: str, subject: str, group_id: str, language: str) -> str:
+    def create_campaign(self, api_token: str, title: str, subject: str, group_id: str, from_name: str, from_email: str) -> str:
         """Create a campaign in MailerLite."""
         headers = {
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
+
+        # Base payload structure
         payload = {
             "name": title,
             "type": "regular",
             "emails": [{
                 "subject": subject,
-                "from_name": "Your Name",  # Default value
-                "from": "your_email@example.com"  # Default value
-            }],
-            "filter": [[{"operator": "in_any", "args": ["groups", [group_id]]}]] if group_id else [],
-            "language_id": language
+                "from_name": from_name,
+                "from": from_email
+            }]
         }
-        response = requests.post("https://connect.mailerlite.com/api/campaigns", json=payload, headers=headers)
-        response.raise_for_status()
-        return response.json()["data"]["id"]
+
+        # Add group filter only if group_id is provided
+        if group_id:
+            payload["filter"] = {
+                "groups": [group_id]
+            }
+
+        try:
+            print(f"Debug: Creating campaign with payload: {payload}")  # Debug log
+            response = requests.post("https://connect.mailerlite.com/api/campaigns", json=payload, headers=headers)
+
+            # Log response details for debugging
+            print(f"Debug: Response status: {response.status_code}")
+            print(f"Debug: Response body: {response.text}")
+
+            response.raise_for_status()
+            return response.json()["data"]["id"]
+        except requests.exceptions.HTTPError as e:
+            # More detailed error information
+            error_detail = f"HTTP {response.status_code}: {response.text}"
+            raise Exception(error_detail)
 
     def upload_campaign_content(self, api_token: str, campaign_id: str, html_content: str):
         """Upload HTML content to the campaign."""
@@ -198,12 +237,23 @@ class MailerlitePlugin(Plugin):
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
+
+        # Generate plain text from HTML (basic conversion)
+        plain_text = re.sub('<[^<]+?>', '', html_content)
+        plain_text = plain_text.strip()
+
         payload = {
             "html": html_content,
-            "plain_text": "This is a plain text version of the campaign.\n\nTo unsubscribe, click here: {$unsubscribe}"
+            "plain_text": plain_text + "\n\nTo unsubscribe, click here: {$unsubscribe}"
         }
-        response = requests.put(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/content", json=payload, headers=headers)
-        response.raise_for_status()
+
+        try:
+            response = requests.put(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/content", json=payload, headers=headers)
+            print(f"Debug: Content upload response: {response.status_code} - {response.text}")
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            error_detail = f"Content upload failed - HTTP {response.status_code}: {response.text}"
+            raise Exception(error_detail)
 
     def send_campaign(self, api_token: str, campaign_id: str):
         """Send the campaign."""
@@ -212,9 +262,17 @@ class MailerlitePlugin(Plugin):
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
-        payload = {"schedule": {"delivery": "instant"}}
-        response = requests.post(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/actions/schedule", json=payload, headers=headers)
-        response.raise_for_status()
+        payload = {
+            "type": "instant"
+        }
+
+        try:
+            response = requests.post(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/actions/schedule", json=payload, headers=headers)
+            print(f"Debug: Send campaign response: {response.status_code} - {response.text}")
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            error_detail = f"Campaign send failed - HTTP {response.status_code}: {response.text}"
+            raise Exception(error_detail)
 
     def send_test_email(self, api_token: str, campaign_id: str, test_email: str):
         """Send a test email for the campaign."""
@@ -224,8 +282,14 @@ class MailerlitePlugin(Plugin):
             "Accept": "application/json"
         }
         payload = {"emails": [test_email]}
-        response = requests.post(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/actions/send-test", json=payload, headers=headers)
-        response.raise_for_status()
+
+        try:
+            response = requests.post(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/actions/send-test", json=payload, headers=headers)
+            print(f"Debug: Test email response: {response.status_code} - {response.text}")
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            error_detail = f"Test email failed - HTTP {response.status_code}: {response.text}"
+            raise Exception(error_detail)
 
 if __name__ == "__main__":
     st.write("MailerLite Campaign Plugin standalone test")
