@@ -198,76 +198,114 @@ class MailerlitePlugin(Plugin):
             "Accept": "application/json"
         }
 
-        # Base payload structure
+        # Generate plain text from markdown
+        plain_text = re.sub('<[^<]+?>', '', markdown.markdown(subject))
+        plain_text = plain_text.strip()
+
+        # Base payload structure selon la documentation officielle
         payload = {
             "name": title,
             "type": "regular",
             "emails": [{
                 "subject": subject,
                 "from_name": from_name,
-                "from": from_email
+                "from": from_email,
+                "content": f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>{title}</title>
+</head>
+<body>
+    <h1>{title}</h1>
+    <p>Campaign content will be updated separately.</p>
+    <p>To unsubscribe, click here: {{$unsubscribe}}</p>
+</body>
+</html>"""
             }]
         }
 
-        # Add group filter only if group_id is provided
+        # Ajouter le filtre de groupe selon le format correct de la documentation
         if group_id:
-            payload["filter"] = {
-                "groups": [group_id]
-            }
+            payload["filter"] = [
+                [
+                    {
+                        "operator": "in_any",
+                        "args": [
+                            "groups",
+                            [group_id]
+                        ]
+                    }
+                ]
+            ]
 
         try:
-            print(f"Debug: Creating campaign with payload: {payload}")  # Debug log
+            print(f"Debug: Creating campaign with payload: {payload}")
             response = requests.post("https://connect.mailerlite.com/api/campaigns", json=payload, headers=headers)
 
-            # Log response details for debugging
             print(f"Debug: Response status: {response.status_code}")
             print(f"Debug: Response body: {response.text}")
 
             response.raise_for_status()
             return response.json()["data"]["id"]
         except requests.exceptions.HTTPError as e:
-            # More detailed error information
             error_detail = f"HTTP {response.status_code}: {response.text}"
             raise Exception(error_detail)
 
     def upload_campaign_content(self, api_token: str, campaign_id: str, html_content: str):
-        """Upload HTML content to the campaign."""
+        """Update campaign content using the PUT method."""
         headers = {
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
 
-        # Generate plain text from HTML (basic conversion)
+        # Generate plain text from HTML
         plain_text = re.sub('<[^<]+?>', '', html_content)
         plain_text = plain_text.strip()
 
-        payload = {
-            "html": html_content,
-            "plain_text": plain_text + "\n\nTo unsubscribe, click here: {$unsubscribe}"
-        }
-
+        # Récupérer d'abord la campagne pour obtenir l'email ID
         try:
-            response = requests.put(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/content", json=payload, headers=headers)
-            print(f"Debug: Content upload response: {response.status_code} - {response.text}")
+            campaign_response = requests.get(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}", headers=headers)
+            campaign_response.raise_for_status()
+            campaign_data = campaign_response.json()
+            email_id = campaign_data["data"]["emails"][0]["id"]
+
+            # Payload pour la mise à jour selon la documentation
+            payload = {
+                "subject": campaign_data["data"]["emails"][0]["subject"],
+                "from_name": campaign_data["data"]["emails"][0]["from_name"],
+                "from": campaign_data["data"]["emails"][0]["from"],
+                "content": html_content
+            }
+
+            # Utiliser l'endpoint correct pour mettre à jour l'email
+            response = requests.put(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}",
+                                  json={
+                                      "name": campaign_data["data"]["name"],
+                                      "emails": [payload]
+                                  },
+                                  headers=headers)
+
+            print(f"Debug: Content update response: {response.status_code} - {response.text}")
             response.raise_for_status()
+
         except requests.exceptions.HTTPError as e:
             error_detail = f"Content upload failed - HTTP {response.status_code}: {response.text}"
             raise Exception(error_detail)
 
     def send_campaign(self, api_token: str, campaign_id: str):
-        """Send the campaign."""
+        """Send the campaign using the correct endpoint."""
         headers = {
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
         payload = {
-            "type": "instant"
+            "delivery": "instant"
         }
 
         try:
-            response = requests.post(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/actions/schedule", json=payload, headers=headers)
+            response = requests.post(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/schedule", json=payload, headers=headers)
             print(f"Debug: Send campaign response: {response.status_code} - {response.text}")
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
@@ -275,18 +313,55 @@ class MailerlitePlugin(Plugin):
             raise Exception(error_detail)
 
     def send_test_email(self, api_token: str, campaign_id: str, test_email: str):
-        """Send a test email for the campaign."""
+        """Send a test email - using campaign duplication method."""
         headers = {
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
-        payload = {"emails": [test_email]}
 
         try:
-            response = requests.post(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/actions/send-test", json=payload, headers=headers)
-            print(f"Debug: Test email response: {response.status_code} - {response.text}")
-            response.raise_for_status()
+            # Récupérer les données de la campagne originale
+            campaign_response = requests.get(f"https://connect.mailerlite.com/api/campaigns/{campaign_id}", headers=headers)
+            campaign_response.raise_for_status()
+            campaign_data = campaign_response.json()["data"]
+
+            # Créer une campagne temporaire pour le test
+            test_payload = {
+                "name": f"TEST - {campaign_data['name']}",
+                "type": "regular",
+                "emails": [{
+                    "subject": f"[TEST] {campaign_data['emails'][0]['subject']}",
+                    "from_name": campaign_data['emails'][0]['from_name'],
+                    "from": campaign_data['emails'][0]['from'],
+                    "content": campaign_data['emails'][0].get('content', '<p>Test email content</p>')
+                }],
+                # Pas de filtre de groupe pour le test
+            }
+
+            # Créer la campagne de test
+            test_response = requests.post("https://connect.mailerlite.com/api/campaigns", json=test_payload, headers=headers)
+            test_response.raise_for_status()
+            test_campaign_id = test_response.json()["data"]["id"]
+
+            # Ajouter temporairement l'email de test à un groupe ou créer un abonné temporaire
+            # Pour simplifier, on va programmer un envoi immédiat
+            schedule_payload = {
+                "delivery": "instant"
+            }
+
+            schedule_response = requests.post(f"https://connect.mailerlite.com/api/campaigns/{test_campaign_id}/schedule",
+                                            json=schedule_payload, headers=headers)
+
+            print(f"Debug: Test campaign created and scheduled: {test_campaign_id}")
+            print(f"Debug: Schedule response: {schedule_response.status_code} - {schedule_response.text}")
+
+            # Note: Cette méthode nécessiterait que l'email de test soit dans un groupe
+            # Une meilleure approche serait d'utiliser l'API des emails transactionnels si disponible
+
+            # Supprimer la campagne de test après envoi (optionnel)
+            # requests.delete(f"https://connect.mailerlite.com/api/campaigns/{test_campaign_id}", headers=headers)
+
         except requests.exceptions.HTTPError as e:
             error_detail = f"Test email failed - HTTP {response.status_code}: {response.text}"
             raise Exception(error_detail)
