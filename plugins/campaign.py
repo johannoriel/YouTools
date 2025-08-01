@@ -4,9 +4,9 @@ import streamlit as st
 import requests
 import markdown
 import re
-from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 import json
+from lib.mailinglist import BrevoProvider, MailerLiteProvider
 
 # Translations for the plugin
 translations["en"].update({
@@ -18,10 +18,12 @@ translations["en"].update({
     "test_email_label": "Test Email Address",
     "campaign_content_label": "Campaign Content (Markdown)",
     "group_select_label": "Select Recipient Group/List",
-    "create_button": "Create and Send Campaign",
+    "create_button": "Create Campaign",
+    "send_button": "Send Existing Campaign",
     "test_button": "Send Test Campaign",
     "processing": "Processing your request...",
     "success": "Campaign created successfully! Campaign ID: {campaign_id}",
+    "send_success": "Campaign sent successfully! Campaign ID: {campaign_id}",
     "test_success": "Test email sent successfully!",
     "error": "An error occurred: {error}",
     "no_title": "No title found in Markdown content",
@@ -30,6 +32,8 @@ translations["en"].update({
     "from_email_label": "From Email",
     "platform_mailerlite": "MailerLite",
     "platform_brevo": "Brevo",
+    "debug_mode_label": "Enable Debug Messages",
+    "select_campaign_label": "Select Campaign to Send"
 })
 
 translations["fr"].update({
@@ -41,10 +45,12 @@ translations["fr"].update({
     "test_email_label": "Adresse e-mail de test",
     "campaign_content_label": "Contenu de la campagne (Markdown)",
     "group_select_label": "Sélectionner le groupe/liste de destinataires",
-    "create_button": "Créer et envoyer la campagne",
+    "create_button": "Créer la campagne",
+    "send_button": "Envoyer une campagne existante",
     "test_button": "Envoyer une campagne de test",
     "processing": "Traitement de votre demande...",
     "success": "Campagne créée avec succès ! ID de la campagne : {campaign_id}",
+    "send_success": "Campagne envoyée avec succès ! ID de la campagne : {campaign_id}",
     "test_success": "E-mail de test envoyé avec succès !",
     "error": "Une erreur s'est produite : {error}",
     "no_title": "Aucun titre trouvé dans le contenu Markdown",
@@ -53,301 +59,9 @@ translations["fr"].update({
     "from_email_label": "Email de l'expéditeur",
     "platform_mailerlite": "MailerLite",
     "platform_brevo": "Brevo",
+    "debug_mode_label": "Activer les messages de débogage",
+    "select_campaign_label": "Sélectionner une campagne à envoyer"
 })
-
-class EmailProvider(ABC):
-    """Abstract base class for email campaign providers."""
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-
-    @abstractmethod
-    def get_groups(self) -> list:
-        """Fetch recipient groups/lists."""
-        pass
-
-    @abstractmethod
-    def create_and_send_campaign(self, title: str, subject: str, html_content: str,
-                                group_id: str, from_name: str, from_email: str) -> str:
-        """Create and send a campaign."""
-        pass
-
-    @abstractmethod
-    def send_test_campaign(self, title: str, subject: str, html_content: str,
-                          test_email: str, from_name: str, from_email: str) -> str:
-        """Send a test campaign."""
-        pass
-
-class MailerLiteProvider(EmailProvider):
-    """MailerLite email campaign provider."""
-
-    def __init__(self, api_token: str):
-        super().__init__(api_token)
-        self.base_url = "https://connect.mailerlite.com/api"
-        self.headers = {
-            "Authorization": f"Bearer {api_token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-
-    def get_groups(self) -> list:
-        """Fetch subscriber groups from MailerLite API."""
-        try:
-            st.write("🔍 **Making API call to MailerLite groups endpoint...**")
-            response = requests.get(f"{self.base_url}/groups", headers=self.headers)
-            st.write(f"📡 **API Response Status:** {response.status_code}")
-
-            if response.status_code != 200:
-                st.write(f"❌ **API Error Response:** {response.text}")
-
-            response.raise_for_status()
-            groups = response.json().get("data", [])
-            st.write(f"📋 **Raw API Response:** {groups[:2]}...")  # Show first 2 items
-            return [{"id": group["id"], "name": group["name"]} for group in groups]
-        except Exception as e:
-            st.write(f"❌ **Exception in get_groups:** {str(e)}")
-            st.error(t("error").format(error=f"Failed to fetch groups: {str(e)}"))
-            return []
-
-    def create_and_send_campaign(self, title: str, subject: str, html_content: str,
-                                group_id: str, from_name: str, from_email: str) -> str:
-        """Create and send a MailerLite campaign."""
-        try:
-            # Create campaign
-            campaign_payload = {
-                "name": title,
-                "type": "regular",
-                "emails": [{
-                    "subject": subject,
-                    "from_name": from_name,
-                    "from": from_email,
-                    "content": html_content
-                }],
-                "filter": [
-                    [
-                        {
-                            "operator": "in_any",
-                            "args": [
-                                "groups",
-                                [group_id]
-                            ]
-                        }
-                    ]
-                ]
-            }
-
-            st.write(f"📤 **Campaign Payload:**")
-            st.write(f"```json\n{json.dumps(campaign_payload, indent=2)}\n```")
-
-            st.write("🚀 **Making API call to create campaign...**")
-            response = requests.post(f"{self.base_url}/campaigns",
-                                   json=campaign_payload, headers=self.headers)
-
-            st.write(f"📡 **Create Campaign Response Status:** {response.status_code}")
-            st.write(f"📄 **Response Body:** {response.text}")
-
-            response.raise_for_status()
-            campaign_id = response.json()["data"]["id"]
-            st.write(f"✅ **Campaign created with ID:** {campaign_id}")
-
-            # Send campaign
-            st.write("📨 **Scheduling campaign for immediate sending...**")
-            send_payload = {"delivery": "instant"}
-            send_response = requests.post(f"{self.base_url}/campaigns/{campaign_id}/schedule",
-                                        json=send_payload, headers=self.headers)
-
-            st.write(f"📡 **Send Campaign Response Status:** {send_response.status_code}")
-            st.write(f"📄 **Send Response Body:** {send_response.text}")
-
-            send_response.raise_for_status()
-            st.write(f"✅ **Campaign scheduled successfully!**")
-
-            return campaign_id
-
-        except requests.exceptions.HTTPError as e:
-            st.write(f"❌ **HTTP Error in create_and_send_campaign:**")
-            st.write(f"**Status Code:** {response.status_code}")
-            st.write(f"**Response Body:** {response.text}")
-            error_detail = f"MailerLite API Error - HTTP {response.status_code}: {response.text}"
-            raise Exception(error_detail)
-        except Exception as e:
-            st.write(f"❌ **General Exception in create_and_send_campaign:** {str(e)}")
-            raise Exception(f"MailerLite Campaign Error: {str(e)}")
-
-    def send_test_campaign(self, title: str, subject: str, html_content: str,
-                          test_email: str, from_name: str, from_email: str) -> str:
-        """Send a test MailerLite campaign."""
-        try:
-            # Create test campaign without group filter
-            campaign_payload = {
-                "name": f"TEST - {title}",
-                "type": "regular",
-                "emails": [{
-                    "subject": f"[TEST] {subject}",
-                    "from_name": from_name,
-                    "from": from_email,
-                    "content": html_content
-                }]
-                # Note: Pour un vrai test, il faudrait que l'email soit dans un groupe
-            }
-
-            st.write(f"📤 **Test Campaign Payload:**")
-            st.write(f"```json\n{json.dumps(campaign_payload, indent=2)}\n```")
-
-            st.write("🚀 **Making API call to create test campaign...**")
-            response = requests.post(f"{self.base_url}/campaigns",
-                                   json=campaign_payload, headers=self.headers)
-
-            st.write(f"📡 **Test Campaign Response Status:** {response.status_code}")
-            st.write(f"📄 **Response Body:** {response.text}")
-
-            response.raise_for_status()
-            campaign_id = response.json()["data"]["id"]
-            st.write(f"✅ **Test campaign created with ID:** {campaign_id}")
-
-            st.write("⚠️ **Note:** MailerLite test requires the email to be in a subscriber group")
-
-            return campaign_id
-
-        except requests.exceptions.HTTPError as e:
-            st.write(f"❌ **HTTP Error in send_test_campaign:**")
-            st.write(f"**Status Code:** {response.status_code}")
-            st.write(f"**Response Body:** {response.text}")
-            error_detail = f"MailerLite Test Error - HTTP {response.status_code}: {response.text}"
-            raise Exception(error_detail)
-        except Exception as e:
-            st.write(f"❌ **General Exception in send_test_campaign:** {str(e)}")
-            raise Exception(f"MailerLite Test Error: {str(e)}")
-
-
-class BrevoProvider(EmailProvider):
-    """Brevo (Sendinblue) email campaign provider."""
-
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        self.base_url = "https://api.brevo.com/v3"
-        self.headers = {
-            "api-key": api_key,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-
-    def get_groups(self) -> list:
-        """Fetch contact lists from Brevo API."""
-        try:
-            st.write("🔍 **Making API call to Brevo lists endpoint...**")
-            response = requests.get(f"{self.base_url}/contacts/lists", headers=self.headers)
-            st.write(f"📡 **API Response Status:** {response.status_code}")
-
-            if response.status_code != 200:
-                st.write(f"❌ **API Error Response:** {response.text}")
-
-            response.raise_for_status()
-            lists = response.json().get("lists", [])
-            st.write(f"📋 **Raw API Response:** {lists[:2]}...")  # Show first 2 items
-            return [{"id": str(lst["id"]), "name": lst["name"]} for lst in lists]
-        except Exception as e:
-            st.write(f"❌ **Exception in get_groups:** {str(e)}")
-            st.error(t("error").format(error=f"Failed to fetch lists: {str(e)}"))
-            return []
-
-    def create_and_send_campaign(self, title: str, subject: str, html_content: str,
-                                group_id: str, from_name: str, from_email: str) -> str:
-        """Create and send a Brevo campaign."""
-        try:
-            # Schedule sending for immediate delivery
-            scheduled_at = (datetime.now() + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
-            st.write(f"⏰ **Scheduled sending time:** {scheduled_at}")
-
-            campaign_payload = {
-                "name": title,
-                "subject": subject,
-                "sender": {
-                    "name": from_name,
-                    "email": from_email
-                },
-                "type": "classic",
-                "htmlContent": html_content,
-                "recipients": {
-                    "listIds": [int(group_id)]
-                },
-                "scheduledAt": scheduled_at
-            }
-
-            st.write(f"📤 **Campaign Payload:**")
-            st.write(f"```json\n{json.dumps(campaign_payload, indent=2)}\n```")
-
-            st.write("🚀 **Making API call to create campaign...**")
-            response = requests.post(f"{self.base_url}/emailCampaigns",
-                                   json=campaign_payload, headers=self.headers)
-
-            st.write(f"📡 **Create Campaign Response Status:** {response.status_code}")
-            st.write(f"📋 **Response Headers:** {dict(response.headers)}")
-            st.write(f"📄 **Response Body:** {response.text}")
-
-            response.raise_for_status()
-            campaign_id = response.json()["id"]
-            st.write(f"✅ **Campaign created with ID:** {campaign_id}")
-
-            return str(campaign_id)
-
-        except requests.exceptions.HTTPError as e:
-            st.write(f"❌ **HTTP Error in create_and_send_campaign:**")
-            st.write(f"**Status Code:** {response.status_code}")
-            st.write(f"**Response Body:** {response.text}")
-            error_detail = f"Brevo API Error - HTTP {response.status_code}: {response.text}"
-            raise Exception(error_detail)
-        except Exception as e:
-            st.write(f"❌ **General Exception in create_and_send_campaign:** {str(e)}")
-            raise Exception(f"Brevo Campaign Error: {str(e)}")
-
-    def send_test_campaign(self, title: str, subject: str, html_content: str,
-                          test_email: str, from_name: str, from_email: str) -> str:
-        """Send a test email via Brevo."""
-        try:
-            # Use Brevo's transactional email API for test
-            test_payload = {
-                "sender": {
-                    "name": from_name,
-                    "email": from_email
-                },
-                "to": [
-                    {
-                        "email": test_email
-                    }
-                ],
-                "subject": f"[TEST] {subject}",
-                "htmlContent": html_content
-            }
-
-            st.write(f"📤 **Test Email Payload:**")
-            st.write(f"```json\n{json.dumps(test_payload, indent=2)}\n```")
-
-            st.write("🚀 **Making API call to send test email...**")
-            response = requests.post(f"{self.base_url}/smtp/email",
-                                   json=test_payload, headers=self.headers)
-
-            st.write(f"📡 **Test Email Response Status:** {response.status_code}")
-            st.write(f"📋 **Response Headers:** {dict(response.headers)}")
-            st.write(f"📄 **Response Body:** {response.text}")
-
-            response.raise_for_status()
-
-            response_data = response.json() if response.text else {}
-            message_id = response_data.get("messageId", "test-sent-no-id")
-            st.write(f"✅ **Test email sent with Message ID:** {message_id}")
-
-            return str(message_id)
-
-        except requests.exceptions.HTTPError as e:
-            st.write(f"❌ **HTTP Error in send_test_campaign:**")
-            st.write(f"**Status Code:** {response.status_code}")
-            st.write(f"**Response Body:** {response.text}")
-            error_detail = f"Brevo Test Error - HTTP {response.status_code}: {response.text}"
-            raise Exception(error_detail)
-        except Exception as e:
-            st.write(f"❌ **General Exception in send_test_campaign:** {str(e)}")
-            raise Exception(f"Brevo Test Error: {str(e)}")
 
 class CampaignPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
@@ -387,6 +101,11 @@ class CampaignPlugin(Plugin):
                 "type": "text",
                 "label": t("from_email_label"),
                 "default": "your_email@example.com"
+            },
+            "debug_mode": {
+                "type": "checkbox",
+                "label": t("debug_mode_label"),
+                "default": False
             }
         }
 
@@ -404,6 +123,11 @@ class CampaignPlugin(Plugin):
         test_email = plugin_config.get("test_email", "")
         config_from_name = plugin_config.get("from_name", "Your Name")
         config_from_email = plugin_config.get("from_email", "your_email@example.com")
+        debug_mode = plugin_config.get("debug_mode", False)
+
+        # Debug mode checkbox
+        st.subheader("⚙️ Configuration")
+        debug_mode = st.checkbox(t("debug_mode_label"), value=debug_mode)
 
         # Platform selection in UI (overrides config)
         st.subheader("🔧 Platform Selection")
@@ -431,7 +155,8 @@ class CampaignPlugin(Plugin):
             )
 
         # Show current sender info
-        st.info(f"📧 **Current Sender:** {from_name} <{from_email}>")
+        if debug_mode:
+            st.info(f"📧 **Current Sender:** {from_name} <{from_email}>")
 
         # Initialize the appropriate provider
         provider = None
@@ -440,15 +165,17 @@ class CampaignPlugin(Plugin):
         if platform == "mailerlite":
             api_token = plugin_config.get("mailerlite_api_token", "")
             if api_token:
-                st.write(f"✅ **MailerLite API Token:** `{api_token[:10]}...{api_token[-4:]}`")
-                provider = MailerLiteProvider(api_token)
+                if debug_mode:
+                    st.write(f"✅ **MailerLite API Token:** `{api_token[:10]}...{api_token[-4:]}`")
+                provider = MailerLiteProvider(api_token, debug=debug_mode)
             else:
                 st.error("❌ **MailerLite API Token not configured**")
         elif platform == "brevo":
             api_key = plugin_config.get("brevo_api_key", "")
             if api_key:
-                st.write(f"✅ **Brevo API Key:** `{api_key[:10]}...{api_key[-4:]}`")
-                provider = BrevoProvider(api_key)
+                if debug_mode:
+                    st.write(f"✅ **Brevo API Key:** `{api_key[:10]}...{api_key[-4:]}`")
+                provider = BrevoProvider(api_key, debug=debug_mode)
             else:
                 st.error("❌ **Brevo API Key not configured**")
 
@@ -456,8 +183,8 @@ class CampaignPlugin(Plugin):
             st.error(t("error").format(error=f"Please configure API credentials for {platform}"))
             return
 
-        # Display current platform
-        st.success(f"🚀 **Active Platform:** {t(f'platform_{platform}')}")
+        if debug_mode:
+            st.success(f"🚀 **Active Platform:** {t(f'platform_{platform}')}")
 
         # Input for campaign content (Markdown)
         st.subheader("📝 Campaign Content")
@@ -488,13 +215,16 @@ class CampaignPlugin(Plugin):
         # Fetch groups/lists from the selected provider
         st.subheader("👥 Recipient Groups/Lists")
         with st.spinner("🔄 Fetching groups/lists..."):
-            st.write(f"🔍 **Fetching groups from {platform}...**")
+            if debug_mode:
+                st.write(f"🔍 **Fetching groups from {platform}...**")
             groups = provider.get_groups()
-            st.write(f"📊 **Found {len(groups)} groups/lists**")
+            if debug_mode:
+                st.write(f"📊 **Found {len(groups)} groups/lists**")
 
         if groups:
             for group in groups:
-                st.write(f"  • **{group['name']}** (ID: {group['id']})")
+                if debug_mode:
+                    st.write(f"  • **{group['name']}** (ID: {group['id']})")
 
         group_options = [(group["name"], group["id"]) for group in groups] if groups else []
         selected_group = st.selectbox(
@@ -503,8 +233,27 @@ class CampaignPlugin(Plugin):
             format_func=lambda x: x[0]
         ) if group_options else None
 
-        if selected_group:
+        if selected_group and debug_mode:
             st.info(f"🎯 **Selected Group:** {selected_group[0]} (ID: {selected_group[1]})")
+
+        # Fetch existing campaigns
+        st.subheader("📚 Existing Campaigns")
+        with st.spinner("🔄 Fetching existing campaigns..."):
+            if debug_mode:
+                st.write(f"🔍 **Fetching campaigns from {platform}...**")
+            campaigns = provider.get_campaigns()
+            if debug_mode:
+                st.write(f"📊 **Found {len(campaigns)} campaigns**")
+
+        campaign_options = [(campaign["name"], campaign["id"]) for campaign in campaigns] if campaigns else []
+        selected_campaign = st.selectbox(
+            t("select_campaign_label"),
+            options=campaign_options,
+            format_func=lambda x: x[0]
+        ) if campaign_options else None
+
+        if selected_campaign and debug_mode:
+            st.info(f"🎯 **Selected Campaign:** {selected_campaign[0]} (ID: {selected_campaign[1]})")
 
         # Test email configuration
         st.subheader("🧪 Test Email Configuration")
@@ -514,75 +263,110 @@ class CampaignPlugin(Plugin):
             help="Current config value: " + test_email
         )
 
-        # Create two columns for buttons
+        # Create three columns for buttons
         st.subheader("🚀 Actions")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
-            # Button to create and send campaign
+            # Button to create campaign
             if st.button(t("create_button"), type="primary"):
-                st.write("🚀 **Starting campaign creation process...**")
+                if debug_mode:
+                    st.write("🚀 **Starting campaign creation process...**")
 
                 if not title or not subject or not selected_group:
                     st.error("❌ **Validation Error:** Missing title, subject, or group selection")
                 else:
                     with st.spinner(t("processing")):
                         try:
-                            st.write(f"📝 **Converting Markdown to HTML...**")
+                            if debug_mode:
+                                st.write(f"📝 **Converting Markdown to HTML...**")
                             html_content = markdown.markdown(campaign_content)
-                            st.write(f"✅ **HTML Content Length:** {len(html_content)} characters")
+                            if debug_mode:
+                                st.write(f"✅ **HTML Content Length:** {len(html_content)} characters")
+                                st.write(f"📧 **Creating campaign with:**")
+                                st.write(f"  • **Platform:** {platform}")
+                                st.write(f"  • **Title:** {title}")
+                                st.write(f"  • **Subject:** {subject}")
+                                st.write(f"  • **From:** {from_name} <{from_email}>")
+                                st.write(f"  • **Group ID:** {selected_group[1]}")
 
-                            st.write(f"📧 **Creating campaign with:**")
-                            st.write(f"  • **Platform:** {platform}")
-                            st.write(f"  • **Title:** {title}")
-                            st.write(f"  • **Subject:** {subject}")
-                            st.write(f"  • **From:** {from_name} <{from_email}>")
-                            st.write(f"  • **Group ID:** {selected_group[1]}")
-
-                            # Create and send campaign
-                            campaign_id = provider.create_and_send_campaign(
+                            # Create campaign
+                            campaign_id = provider.create_campaign(
                                 title, subject, html_content,
                                 selected_group[1], from_name, from_email
                             )
-                            st.write(f"✅ **Campaign Created Successfully!**")
+                            if debug_mode:
+                                st.write(f"✅ **Campaign Created Successfully!**")
                             st.success(t("success").format(campaign_id=campaign_id))
                         except Exception as e:
-                            st.write(f"❌ **Campaign Creation Failed:**")
-                            st.write(f"**Error Details:** {str(e)}")
+                            if debug_mode:
+                                st.write(f"❌ **Campaign Creation Failed:**")
+                                st.write(f"**Error Details:** {str(e)}")
                             st.error(t("error").format(error=str(e)))
 
         with col2:
+            # Button to send existing campaign
+            if st.button(t("send_button")):
+                if debug_mode:
+                    st.write("🚀 **Starting campaign sending process...**")
+
+                if not selected_campaign:
+                    st.error("❌ **Validation Error:** No campaign selected")
+                else:
+                    with st.spinner(t("processing")):
+                        try:
+                            if debug_mode:
+                                st.write(f"📧 **Sending campaign with:**")
+                                st.write(f"  • **Platform:** {platform}")
+                                st.write(f"  • **Campaign ID:** {selected_campaign[1]}")
+
+                            # Send existing campaign
+                            provider.send_campaign(selected_campaign[1])
+                            if debug_mode:
+                                st.write(f"✅ **Campaign Sent Successfully!**")
+                            st.success(t("send_success").format(campaign_id=selected_campaign[1]))
+                        except Exception as e:
+                            if debug_mode:
+                                st.write(f"❌ **Campaign Sending Failed:**")
+                                st.write(f"**Error Details:** {str(e)}")
+                            st.error(t("error").format(error=str(e)))
+
+        with col3:
             # Button to send test campaign
             if st.button(t("test_button")):
-                st.write("🧪 **Starting test email process...**")
+                if debug_mode:
+                    st.write("🧪 **Starting test email process...**")
 
                 if not test_email_input or not title or not subject:
                     st.error("❌ **Validation Error:** Missing test email, title, or subject")
                 else:
                     with st.spinner(t("processing")):
                         try:
-                            st.write(f"📝 **Converting Markdown to HTML...**")
+                            if debug_mode:
+                                st.write(f"📝 **Converting Markdown to HTML...**")
                             html_content = markdown.markdown(campaign_content)
-                            st.write(f"✅ **HTML Content Length:** {len(html_content)} characters")
-
-                            st.write(f"📧 **Sending test email with:**")
-                            st.write(f"  • **Platform:** {platform}")
-                            st.write(f"  • **Title:** {title}")
-                            st.write(f"  • **Subject:** {subject}")
-                            st.write(f"  • **From:** {from_name} <{from_email}>")
-                            st.write(f"  • **Test Email:** {test_email_input}")
+                            if debug_mode:
+                                st.write(f"✅ **HTML Content Length:** {len(html_content)} characters")
+                                st.write(f"📧 **Sending test email with:**")
+                                st.write(f"  • **Platform:** {platform}")
+                                st.write(f"  • **Title:** {title}")
+                                st.write(f"  • **Subject:** {subject}")
+                                st.write(f"  • **From:** {from_name} <{from_email}>")
+                                st.write(f"  • **Test Email:** {test_email_input}")
 
                             # Send test email
                             test_id = provider.send_test_campaign(
                                 title, subject, html_content,
                                 test_email_input, from_name, from_email
                             )
-                            st.write(f"✅ **Test Email Process Completed!**")
-                            st.write(f"**Test ID/Message ID:** {test_id}")
+                            if debug_mode:
+                                st.write(f"✅ **Test Email Process Completed!**")
+                                st.write(f"**Test ID/Message ID:** {test_id}")
                             st.success(t("test_success"))
                         except Exception as e:
-                            st.write(f"❌ **Test Email Failed:**")
-                            st.write(f"**Error Details:** {str(e)}")
+                            if debug_mode:
+                                st.write(f"❌ **Test Email Failed:**")
+                                st.write(f"**Error Details:** {str(e)}")
                             st.error(t("error").format(error=str(e)))
 
     def extract_title(self, markdown_content: str) -> str:
