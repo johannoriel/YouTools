@@ -18,22 +18,24 @@ translations["en"].update({
     "test_email_label": "Test Email Address",
     "campaign_content_label": "Campaign Content (Markdown)",
     "group_select_label": "Select Recipient Group/List",
-    "create_button": "Create Campaign",
+    "create_button": "Create Campaigns",
     "send_button": "Send Existing Campaign",
     "test_button": "Send Test Campaign",
+    "debug_preprocess_button": "Debug Preprocess",
     "processing": "Processing your request...",
     "success": "Campaign created successfully! Campaign ID: {campaign_id}",
     "send_success": "Campaign sent successfully! Campaign ID: {campaign_id}",
     "test_success": "Test email sent successfully!",
     "error": "An error occurred: {error}",
-    "no_title": "No title found in Markdown content",
-    "no_subject": "No subject found in Markdown content",
+    "no_title": "No series title found in Markdown content",
+    "no_campaigns": "No campaigns found in Markdown content",
     "from_name_label": "From Name",
     "from_email_label": "From Email",
     "platform_mailerlite": "MailerLite",
     "platform_brevo": "Brevo",
     "debug_mode_label": "Enable Debug Messages",
-    "select_campaign_label": "Select Campaign to Send"
+    "select_campaign_label": "Select Campaign to Send",
+    "campaign_content_help": "Markdown syntax: First line '# Series Title', then footer content until next '# Campaign Title'. Each '# Campaign Title' starts a new campaign. Comments between %%...%% are ignored."
 })
 
 translations["fr"].update({
@@ -45,22 +47,24 @@ translations["fr"].update({
     "test_email_label": "Adresse e-mail de test",
     "campaign_content_label": "Contenu de la campagne (Markdown)",
     "group_select_label": "Sélectionner le groupe/liste de destinataires",
-    "create_button": "Créer la campagne",
+    "create_button": "Créer les campagnes",
     "send_button": "Envoyer une campagne existante",
     "test_button": "Envoyer une campagne de test",
+    "debug_preprocess_button": "Déboguer le prétraitement",
     "processing": "Traitement de votre demande...",
     "success": "Campagne créée avec succès ! ID de la campagne : {campaign_id}",
     "send_success": "Campagne envoyée avec succès ! ID de la campagne : {campaign_id}",
     "test_success": "E-mail de test envoyé avec succès !",
     "error": "Une erreur s'est produite : {error}",
-    "no_title": "Aucun titre trouvé dans le contenu Markdown",
-    "no_subject": "Aucun sujet trouvé dans le contenu Markdown",
+    "no_title": "Aucun titre de série trouvé dans le contenu Markdown",
+    "no_campaigns": "Aucune campagne trouvée dans le contenu Markdown",
     "from_name_label": "Nom de l'expéditeur",
     "from_email_label": "Email de l'expéditeur",
     "platform_mailerlite": "MailerLite",
     "platform_brevo": "Brevo",
     "debug_mode_label": "Activer les messages de débogage",
-    "select_campaign_label": "Sélectionner une campagne à envoyer"
+    "select_campaign_label": "Sélectionner une campagne à envoyer",
+    "campaign_content_help": "Syntaxe Markdown : Première ligne '# Titre de la série', puis contenu du footer jusqu'au prochain '# Titre de la campagne'. Chaque '# Titre de la campagne' commence une nouvelle campagne. Les commentaires entre %%...%% sont ignorés."
 })
 
 class CampaignPlugin(Plugin):
@@ -112,6 +116,41 @@ class CampaignPlugin(Plugin):
     def get_tabs(self):
         """Define plugin tabs in the interface."""
         return [{"name": t("email_campaign_tab"), "plugin": "emailcampaignplugin"}]
+
+    def preprocess(self, markdown_content: str) -> tuple[str, str, list[dict]]:
+        """Preprocess Markdown content to extract series title, footer, and campaigns."""
+        # Remove comments (%%...%%)
+        content = re.sub(r'%%.*?%%', '', markdown_content, flags=re.DOTALL)
+
+        # Extract series title (first line starting with #)
+        series_title_match = re.match(r'^# (.+)$', content, re.MULTILINE)
+        series_title = series_title_match.group(1) if series_title_match else ""
+
+        # Split content by level-1 headings
+        sections = re.split(r'^# .+$', content, flags=re.MULTILINE)[1:]  # Skip first empty section if any
+        headers = re.findall(r'^# (.+)$', content, re.MULTILINE)
+
+        # Extract footer (content before first level-1 heading after series title)
+        footer = ""
+        if sections:
+            footer = sections[0].strip()
+            sections = sections[1:]  # Remove footer section
+            headers = headers[1:] if headers else []  # Remove series title
+
+        # Process campaigns
+        campaigns = []
+        for header, section in zip(headers, sections):
+            campaign_content = section.strip()
+            if campaign_content:
+                # Convert campaign content to HTML and append footer
+                html_content = markdown.markdown(campaign_content + "\n\n" + footer)
+                campaigns.append({
+                    "title": f"{series_title} - {header}",
+                    "subject": header,
+                    "html_content": html_content
+                })
+
+        return series_title, footer, campaigns
 
     def run(self, config):
         """Main plugin logic."""
@@ -191,26 +230,42 @@ class CampaignPlugin(Plugin):
         campaign_content = st.text_area(
             t("campaign_content_label"),
             height=300,
-            value="# Campaign Title\n\n## Subject: My Campaign Subject\n\nYour campaign content here..."
+            value="# Series Title\n\nFooter content here...\n\n%%Comment%%\n\n# Campaign 1\nContent 1\n\n# Campaign 2\nContent 2",
+            help=t("campaign_content_help")
         )
 
-        # Extract title and subject from Markdown
-        title = self.extract_title(campaign_content)
-        subject = self.extract_subject(campaign_content)
+        # Debug preprocess button
+        if st.button(t("debug_preprocess_button")) and debug_mode:
+            series_title, footer, campaigns = self.preprocess(campaign_content)
+            st.subheader("🔍 Preprocess Results")
+            if series_title:
+                st.write(f"**Series Title:** {series_title}")
+            else:
+                st.warning(t("no_title"))
+            st.write(f"**Footer:**\n{footer}")
+            st.write(f"**Campaigns ({len(campaigns)}):**")
+            for i, campaign in enumerate(campaigns, 1):
+                st.write(f"**Campaign {i}:**")
+                st.write(f"  • **Title:** {campaign['title']}")
+                st.write(f"  • **Subject:** {campaign['subject']}")
+                st.write(f"  • **HTML Content Length:** {len(campaign['html_content'])} characters")
+
+        # Extract series title and campaigns
+        series_title, footer, campaigns = self.preprocess(campaign_content)
 
         # Display extracted values
         st.subheader("📋 Extracted Information")
         col1, col2 = st.columns(2)
         with col1:
-            if title:
-                st.success(f"**📌 Campaign Title:** {title}")
+            if series_title:
+                st.success(f"**📌 Series Title:** {series_title}")
             else:
                 st.warning("⚠️ " + t("no_title"))
         with col2:
-            if subject:
-                st.success(f"**📧 Subject:** {subject}")
+            if campaigns:
+                st.success(f"**📧 Campaigns Found:** {len(campaigns)}")
             else:
-                st.warning("⚠️ " + t("no_subject"))
+                st.warning("⚠️ " + t("no_campaigns"))
 
         # Fetch groups/lists from the selected provider
         st.subheader("👥 Recipient Groups/Lists")
@@ -241,11 +296,11 @@ class CampaignPlugin(Plugin):
         with st.spinner("🔄 Fetching existing campaigns..."):
             if debug_mode:
                 st.write(f"🔍 **Fetching campaigns from {platform}...**")
-            campaigns = provider.get_campaigns()
+            campaigns_existing = provider.get_campaigns()
             if debug_mode:
-                st.write(f"📊 **Found {len(campaigns)} campaigns**")
+                st.write(f"📊 **Found {len(campaigns_existing)} campaigns**")
 
-        campaign_options = [(campaign["name"], campaign["id"]) for campaign in campaigns] if campaigns else []
+        campaign_options = [(campaign["name"], campaign["id"]) for campaign in campaigns_existing] if campaigns_existing else []
         selected_campaign = st.selectbox(
             t("select_campaign_label"),
             options=campaign_options,
@@ -268,36 +323,34 @@ class CampaignPlugin(Plugin):
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            # Button to create campaign
+            # Button to create campaigns
             if st.button(t("create_button"), type="primary"):
                 if debug_mode:
                     st.write("🚀 **Starting campaign creation process...**")
 
-                if not title or not subject or not selected_group:
-                    st.error("❌ **Validation Error:** Missing title, subject, or group selection")
+                if not series_title or not campaigns or not selected_group:
+                    st.error("❌ **Validation Error:** Missing series title, campaigns, or group selection")
                 else:
                     with st.spinner(t("processing")):
                         try:
-                            if debug_mode:
-                                st.write(f"📝 **Converting Markdown to HTML...**")
-                            html_content = markdown.markdown(campaign_content)
-                            if debug_mode:
-                                st.write(f"✅ **HTML Content Length:** {len(html_content)} characters")
-                                st.write(f"📧 **Creating campaign with:**")
-                                st.write(f"  • **Platform:** {platform}")
-                                st.write(f"  • **Title:** {title}")
-                                st.write(f"  • **Subject:** {subject}")
-                                st.write(f"  • **From:** {from_name} <{from_email}>")
-                                st.write(f"  • **Group ID:** {selected_group[1]}")
+                            for campaign in campaigns:
+                                if debug_mode:
+                                    st.write(f"📧 **Creating campaign with:**")
+                                    st.write(f"  • **Platform:** {platform}")
+                                    st.write(f"  • **Title:** {campaign['title']}")
+                                    st.write(f"  • **Subject:** {campaign['subject']}")
+                                    st.write(f"  • **From:** {from_name} <{from_email}>")
+                                    st.write(f"  • **Group ID:** {selected_group[1]}")
+                                    st.write(f"  • **HTML Content Length:** {len(campaign['html_content'])} characters")
 
-                            # Create campaign
-                            campaign_id = provider.create_campaign(
-                                title, subject, html_content,
-                                selected_group[1], from_name, from_email
-                            )
-                            if debug_mode:
-                                st.write(f"✅ **Campaign Created Successfully!**")
-                            st.success(t("success").format(campaign_id=campaign_id))
+                                # Create campaign
+                                campaign_id = provider.create_campaign(
+                                    campaign['title'], campaign['subject'], campaign['html_content'],
+                                    selected_group[1], from_name, from_email
+                                )
+                                if debug_mode:
+                                    st.write(f"✅ **Campaign Created Successfully!**")
+                                st.success(t("success").format(campaign_id=campaign_id))
                         except Exception as e:
                             if debug_mode:
                                 st.write(f"❌ **Campaign Creation Failed:**")
@@ -337,32 +390,30 @@ class CampaignPlugin(Plugin):
                 if debug_mode:
                     st.write("🧪 **Starting test email process...**")
 
-                if not test_email_input or not title or not subject:
-                    st.error("❌ **Validation Error:** Missing test email, title, or subject")
+                if not test_email_input or not campaigns:
+                    st.error("❌ **Validation Error:** Missing test email or campaigns")
                 else:
                     with st.spinner(t("processing")):
                         try:
-                            if debug_mode:
-                                st.write(f"📝 **Converting Markdown to HTML...**")
-                            html_content = markdown.markdown(campaign_content)
-                            if debug_mode:
-                                st.write(f"✅ **HTML Content Length:** {len(html_content)} characters")
-                                st.write(f"📧 **Sending test email with:**")
-                                st.write(f"  • **Platform:** {platform}")
-                                st.write(f"  • **Title:** {title}")
-                                st.write(f"  • **Subject:** {subject}")
-                                st.write(f"  • **From:** {from_name} <{from_email}>")
-                                st.write(f"  • **Test Email:** {test_email_input}")
+                            for campaign in campaigns:
+                                if debug_mode:
+                                    st.write(f"📧 **Sending test email with:**")
+                                    st.write(f"  • **Platform:** {platform}")
+                                    st.write(f"  • **Title:** {campaign['title']}")
+                                    st.write(f"  • **Subject:** {campaign['subject']}")
+                                    st.write(f"  • **From:** {from_name} <{from_email}>")
+                                    st.write(f"  • **Test Email:** {test_email_input}")
+                                    st.write(f"  • **HTML Content Length:** {len(campaign['html_content'])} characters")
 
-                            # Send test email
-                            test_id = provider.send_test_campaign(
-                                title, subject, html_content,
-                                test_email_input, from_name, from_email
-                            )
-                            if debug_mode:
-                                st.write(f"✅ **Test Email Process Completed!**")
-                                st.write(f"**Test ID/Message ID:** {test_id}")
-                            st.success(t("test_success"))
+                                # Send test email
+                                test_id = provider.send_test_campaign(
+                                    campaign['title'], campaign['subject'], campaign['html_content'],
+                                    test_email_input, from_name, from_email
+                                )
+                                if debug_mode:
+                                    st.write(f"✅ **Test Email Process Completed!**")
+                                    st.write(f"**Test ID/Message ID:** {test_id}")
+                                st.success(t("test_success"))
                         except Exception as e:
                             if debug_mode:
                                 st.write(f"❌ **Test Email Failed:**")
