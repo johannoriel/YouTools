@@ -46,9 +46,8 @@ class EmailProvider(ABC):
         pass
 
     @abstractmethod
-    def send_test_campaign(self, title: str, subject: str, html_content: str,
-                          test_email: str, from_name: str, from_email: str) -> str:
-        """Send a test campaign."""
+    def send_test_campaign(self, campaign_id: str, test_email: str) -> str:
+        """Send a test of an existing campaign."""
         pass
 
 class MailerLiteProvider(EmailProvider):
@@ -183,37 +182,27 @@ class MailerLiteProvider(EmailProvider):
             st.error(f"Failed to fetch campaigns: {str(e)}")
             return []
 
-    def send_test_campaign(self, title: str, subject: str, html_content: str,
-                         test_email: str, from_name: str, from_email: str) -> str:
-        """Send a test MailerLite campaign."""
+    def send_test_campaign(self, campaign_id: str, test_email: str) -> str:
+        """Send a test of an existing MailerLite campaign."""
         try:
-            campaign_payload = {
-                "name": f"TEST - {title}",
-                "type": "regular",
-                "emails": [{
-                    "subject": f"[TEST] {subject}",
-                    "from_name": from_name,
-                    "from": from_email,
-                    "content": html_content
-                }]
+            test_payload = {
+                "emails": [test_email]
             }
 
             self._debug_write(f"📤 **Test Campaign Payload:**")
-            self._debug_write(f"```json\n{json.dumps(campaign_payload, indent=2)}\n```")
+            self._debug_write(f"```json\n{json.dumps(test_payload, indent=2)}\n```")
 
-            self._debug_write("🚀 **Making API call to create test campaign...**")
-            response = requests.post(f"{self.base_url}/campaigns",
-                                  json=campaign_payload, headers=self.headers)
+            self._debug_write("🚀 **Making API call to send test campaign...**")
+            response = requests.post(f"{self.base_url}/campaigns/{campaign_id}/actions/test",
+                                  json=test_payload, headers=self.headers)
 
             self._debug_write(f"📡 **Test Campaign Response Status:** {response.status_code}")
             self._debug_write(f"📄 **Response Body:** {response.text}")
 
             response.raise_for_status()
-            campaign_id = response.json()["data"]["id"]
-            self._debug_write(f"✅ **Test campaign created with ID:** {campaign_id}")
-            self._debug_write("⚠️ **Note:** MailerLite test requires the email to be in a subscriber group")
+            self._debug_write(f"✅ **Test email sent to {test_email}**")
 
-            return campaign_id
+            return f"test-{campaign_id}"
 
         except requests.exceptions.HTTPError as e:
             self._debug_write(f"❌ **HTTP Error in send_test_campaign:**")
@@ -352,29 +341,18 @@ class BrevoProvider(EmailProvider):
             st.error(f"Failed to fetch campaigns: {str(e)}")
             return []
 
-    def send_test_campaign(self, title: str, subject: str, html_content: str,
-                         test_email: str, from_name: str, from_email: str) -> str:
-        """Send a test email via Brevo."""
+    def send_test_campaign(self, campaign_id: str, test_email: str) -> str:
+        """Send a test of an existing Brevo campaign."""
         try:
             test_payload = {
-                "sender": {
-                    "name": from_name,
-                    "email": from_email
-                },
-                "to": [
-                    {
-                        "email": test_email
-                    }
-                ],
-                "subject": f"[TEST] {subject}",
-                "htmlContent": html_content
+                "emailTo": [test_email]
             }
 
             self._debug_write(f"📤 **Test Email Payload:**")
             self._debug_write(f"```json\n{json.dumps(test_payload, indent=2)}\n```")
 
             self._debug_write("🚀 **Making API call to send test email...**")
-            response = requests.post(f"{self.base_url}/smtp/email",
+            response = requests.post(f"{self.base_url}/emailCampaigns/{campaign_id}/sendTest",
                                   json=test_payload, headers=self.headers)
 
             self._debug_write(f"📡 **Test Email Response Status:** {response.status_code}")
@@ -382,11 +360,9 @@ class BrevoProvider(EmailProvider):
             self._debug_write(f"📄 **Response Body:** {response.text}")
 
             response.raise_for_status()
-            response_data = response.json() if response.text else {}
-            message_id = response_data.get("messageId", "test-sent-no-id")
-            self._debug_write(f"✅ **Test email sent with Message ID:** {message_id}")
+            self._debug_write(f"✅ **Test email sent to {test_email}**")
 
-            return str(message_id)
+            return f"test-{campaign_id}"
 
         except requests.exceptions.HTTPError as e:
             self._debug_write(f"❌ **HTTP Error in send_test_campaign:**")

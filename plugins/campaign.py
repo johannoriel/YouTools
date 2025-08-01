@@ -20,7 +20,7 @@ translations["en"].update({
     "group_select_label": "Select Recipient Group/List",
     "create_button": "Create Campaigns",
     "send_button": "Send Existing Campaign",
-    "test_button": "Send Test Campaign",
+    "test_button": "Send Test Email",
     "debug_preprocess_button": "Debug Preprocess",
     "processing": "Processing your request...",
     "success": "Campaign created successfully! Campaign ID: {campaign_id}",
@@ -35,7 +35,9 @@ translations["en"].update({
     "platform_brevo": "Brevo",
     "debug_mode_label": "Enable Debug Messages",
     "select_campaign_label": "Select Campaign to Send",
-    "campaign_content_help": "Markdown syntax: First line '# Series Title', then footer content until next '# Campaign Title'. Each '# Campaign Title' starts a new campaign. Comments between %%...%% are ignored."
+    "campaign_content_help": "Markdown syntax: First line '# Series Title', then footer content until next '# Campaign Title'. Each '# Campaign Title' starts a new campaign. Comments between %%...%% are ignored.",
+    "html_formatting_label": "Enable HTML Formatting",
+    "html_template_label": "HTML Template"
 })
 
 translations["fr"].update({
@@ -49,7 +51,7 @@ translations["fr"].update({
     "group_select_label": "Sélectionner le groupe/liste de destinataires",
     "create_button": "Créer les campagnes",
     "send_button": "Envoyer une campagne existante",
-    "test_button": "Envoyer une campagne de test",
+    "test_button": "Envoyer un email de test",
     "debug_preprocess_button": "Déboguer le prétraitement",
     "processing": "Traitement de votre demande...",
     "success": "Campagne créée avec succès ! ID de la campagne : {campaign_id}",
@@ -64,7 +66,9 @@ translations["fr"].update({
     "platform_brevo": "Brevo",
     "debug_mode_label": "Activer les messages de débogage",
     "select_campaign_label": "Sélectionner une campagne à envoyer",
-    "campaign_content_help": "Syntaxe Markdown : Première ligne '# Titre de la série', puis contenu du footer jusqu'au prochain '# Titre de la campagne'. Chaque '# Titre de la campagne' commence une nouvelle campagne. Les commentaires entre %%...%% sont ignorés."
+    "campaign_content_help": "Syntaxe Markdown : Première ligne '# Titre de la série', puis contenu du footer jusqu'au prochain '# Titre de la campagne'. Chaque '# Titre de la campagne' commence une nouvelle campagne. Les commentaires entre %%...%% sont ignorés.",
+    "html_formatting_label": "Activer le formatage HTML",
+    "html_template_label": "Modèle HTML"
 })
 
 class CampaignPlugin(Plugin):
@@ -73,6 +77,11 @@ class CampaignPlugin(Plugin):
 
     def get_config_fields(self):
         """Define plugin configuration fields."""
+        default_html_template = """
+        <div style="font-family: Roboto, sans-serif; font-size: 18px; max-width: 600px; margin: 0 auto; padding: 20px;">
+            {content}
+        </div>
+        """
         return {
             "email_platform": {
                 "type": "selectbox",
@@ -110,6 +119,16 @@ class CampaignPlugin(Plugin):
                 "type": "checkbox",
                 "label": t("debug_mode_label"),
                 "default": False
+            },
+            "html_formatting": {
+                "type": "checkbox",
+                "label": t("html_formatting_label"),
+                "default": True
+            },
+            "html_template": {
+                "type": "text",
+                "label": t("html_template_label"),
+                "default": default_html_template
             }
         }
 
@@ -117,7 +136,7 @@ class CampaignPlugin(Plugin):
         """Define plugin tabs in the interface."""
         return [{"name": t("email_campaign_tab"), "plugin": "emailcampaignplugin"}]
 
-    def preprocess(self, markdown_content: str) -> tuple[str, str, list[dict]]:
+    def preprocess(self, markdown_content: str, use_html_formatting: bool = False, html_template: str = "") -> tuple[str, str, list[dict]]:
         """Preprocess Markdown content to extract series title, footer, and campaigns."""
         # Remove comments (%%...%%)
         content = re.sub(r'%%.*?%%', '', markdown_content, flags=re.DOTALL)
@@ -144,6 +163,9 @@ class CampaignPlugin(Plugin):
             if campaign_content:
                 # Convert campaign content to HTML and append footer
                 html_content = markdown.markdown(campaign_content + "\n\n" + footer)
+                # Apply HTML template if enabled
+                if use_html_formatting and html_template:
+                    html_content = html_template.format(content=html_content)
                 campaigns.append({
                     "title": f"{series_title} - {header}",
                     "subject": header,
@@ -163,10 +185,26 @@ class CampaignPlugin(Plugin):
         config_from_name = plugin_config.get("from_name", "Your Name")
         config_from_email = plugin_config.get("from_email", "your_email@example.com")
         debug_mode = plugin_config.get("debug_mode", False)
+        use_html_formatting = plugin_config.get("html_formatting", True)
+        html_template = plugin_config.get("html_template", """
+        <div style="font-family: Roboto, sans-serif; font-size: 18px; max-width: 600px; margin: 0 auto; padding: 20px;">
+            {content}
+        </div>
+        """)
 
         # Debug mode checkbox
         st.subheader("⚙️ Configuration")
         debug_mode = st.checkbox(t("debug_mode_label"), value=debug_mode)
+
+        # HTML formatting checkbox and template
+        use_html_formatting = st.checkbox(t("html_formatting_label"), value=use_html_formatting)
+        if use_html_formatting:
+            html_template = st.text_area(
+                t("html_template_label"),
+                value=html_template,
+                height=150,
+                help="HTML template with {content} placeholder for campaign content"
+            )
 
         # Platform selection in UI (overrides config)
         st.subheader("🔧 Platform Selection")
@@ -236,7 +274,7 @@ class CampaignPlugin(Plugin):
 
         # Debug preprocess button
         if st.button(t("debug_preprocess_button")) and debug_mode:
-            series_title, footer, campaigns = self.preprocess(campaign_content)
+            series_title, footer, campaigns = self.preprocess(campaign_content, use_html_formatting, html_template)
             st.subheader("🔍 Preprocess Results")
             if series_title:
                 st.write(f"**Series Title:** {series_title}")
@@ -251,7 +289,7 @@ class CampaignPlugin(Plugin):
                 st.write(f"  • **HTML Content Length:** {len(campaign['html_content'])} characters")
 
         # Extract series title and campaigns
-        series_title, footer, campaigns = self.preprocess(campaign_content)
+        series_title, footer, campaigns = self.preprocess(campaign_content, use_html_formatting, html_template)
 
         # Display extracted values
         st.subheader("📋 Extracted Information")
@@ -390,30 +428,27 @@ class CampaignPlugin(Plugin):
                 if debug_mode:
                     st.write("🧪 **Starting test email process...**")
 
-                if not test_email_input or not campaigns:
-                    st.error("❌ **Validation Error:** Missing test email or campaigns")
+                if not test_email_input or not selected_campaign:
+                    st.error("❌ **Validation Error:** Missing test email or campaign selection")
                 else:
                     with st.spinner(t("processing")):
                         try:
-                            for campaign in campaigns:
-                                if debug_mode:
-                                    st.write(f"📧 **Sending test email with:**")
-                                    st.write(f"  • **Platform:** {platform}")
-                                    st.write(f"  • **Title:** {campaign['title']}")
-                                    st.write(f"  • **Subject:** {campaign['subject']}")
-                                    st.write(f"  • **From:** {from_name} <{from_email}>")
-                                    st.write(f"  • **Test Email:** {test_email_input}")
-                                    st.write(f"  • **HTML Content Length:** {len(campaign['html_content'])} characters")
+                            if debug_mode:
+                                st.write(f"📧 **Sending test email with:**")
+                                st.write(f"  • **Platform:** {platform}")
+                                st.write(f"  • **Campaign ID:** {selected_campaign[1]}")
+                                st.write(f"  • **From:** {from_name} <{from_email}>")
+                                st.write(f"  • **Test Email:** {test_email_input}")
 
-                                # Send test email
-                                test_id = provider.send_test_campaign(
-                                    campaign['title'], campaign['subject'], campaign['html_content'],
-                                    test_email_input, from_name, from_email
-                                )
-                                if debug_mode:
-                                    st.write(f"✅ **Test Email Process Completed!**")
-                                    st.write(f"**Test ID/Message ID:** {test_id}")
-                                st.success(t("test_success"))
+                            # Send test email for existing campaign
+                            test_id = provider.send_test_campaign(
+                                selected_campaign[1],
+                                test_email_input,
+                            )
+                            if debug_mode:
+                                st.write(f"✅ **Test Email Process Completed!**")
+                                st.write(f"**Test ID/Message ID:** {test_id}")
+                            st.success(t("test_success"))
                         except Exception as e:
                             if debug_mode:
                                 st.write(f"❌ **Test Email Failed:**")
