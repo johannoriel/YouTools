@@ -200,6 +200,31 @@ class CommonPlugin(Plugin):
                 "label": "Linkedin access token",
                 "default": ""
             },
+            "hashnode_api_token": {
+                "type": "text",
+                "label": "Hashnode API token",
+                "default": ""
+            },
+            "hashnode_default_host": {
+                "type": "text",
+                "label": "Hashnode default host",
+                "default": ""
+            },
+            "wordpress_client_id": {
+                "type": "text",
+                "label": "Wordpress client id",
+                "default": ""
+            },
+            "wordpress_client_secret": {
+                "type": "text",
+                "label": "Wordpress client secret",
+                "default": ""
+            },
+            "wordpress_site_id": {
+                "type": "text",
+                "label": "Wordpress site id",
+                "default": ""
+            }
         }
 
     def get_tabs(self):

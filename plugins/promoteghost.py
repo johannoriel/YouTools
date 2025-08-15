@@ -7,7 +7,7 @@ from datetime import datetime as date
 import requests
 import jwt
 import markdown2
-from lib.social_api import GhostAPI, LinkedinAPI
+from lib.social_api import GhostAPI, LinkedinAPI, WordPressAPI
 from widgets.random_article import RandomArticleWidget
 
 translations["en"].update({
@@ -32,7 +32,17 @@ translations["en"].update({
     "linkedin_publish_button": "Publish to LinkedIn",
     "linkedin_processing": "Publishing to LinkedIn...",
     "linkedin_success": "Published successfully! Post ID: {result}",
-    "linkedin_error": "Publishing failed: {error}"
+    "linkedin_error": "Publishing failed: {error}",
+    "wordpress_tab": "WordPress Publisher",
+    "wordpress_header": "Publish to WordPress",
+    "wordpress_publish_button": "Publish to WordPress",
+    "wordpress_processing": "Publishing to WordPress...",
+    "wordpress_success": "Published successfully! Post ID: {result}",
+    "wordpress_error": "Publishing failed: {error}",
+    "wordpress_get_token_button": "Get WordPress Access Token",
+    "wordpress_auth_code_label": "Authorization Code",
+    "wordpress_token_success": "Access token retrieved successfully!",
+    "wordpress_token_error": "Failed to retrieve access token: {error}"
 })
 
 translations["fr"].update({
@@ -57,7 +67,17 @@ translations["fr"].update({
     "linkedin_publish_button": "Publier sur LinkedIn",
     "linkedin_processing": "Publication sur LinkedIn...",
     "linkedin_success": "Publié avec succès ! ID du post : {result}",
-    "linkedin_error": "Échec de la publication : {error}"
+    "linkedin_error": "Échec de la publication : {error}",
+    "wordpress_tab": "Publicateur WordPress",
+    "wordpress_header": "Publier sur WordPress",
+    "wordpress_publish_button": "Publier sur WordPress",
+    "wordpress_processing": "Publication sur WordPress...",
+    "wordpress_success": "Publié avec succès ! ID du post : {result}",
+    "wordpress_error": "Échec de la publication : {error}",
+    "wordpress_get_token_button": "Obtenir le jeton d'accès WordPress",
+    "wordpress_auth_code_label": "Code d'autorisation",
+    "wordpress_token_success": "Jeton d'accès récupéré avec succès !",
+    "wordpress_token_error": "Échec de la récupération du jeton : {error}"
 })
 
 class PromoteghostPlugin(Plugin):
@@ -65,6 +85,7 @@ class PromoteghostPlugin(Plugin):
         super().__init__(name, plugin_manager)
         self.ghost_api = GhostAPI(plugin_manager.config)
         self.linkedin_api = LinkedinAPI(plugin_manager.config)
+        self.wordpress_api = WordPressAPI(plugin_manager.config)
         self.work_dir = self.work_dir()
 
     def get_config_fields(self):
@@ -88,6 +109,26 @@ class PromoteghostPlugin(Plugin):
             Mots-clés : {keywords}
 
             L'article doit être structuré avec une introduction, 3 sections principales et une conclusion. Utilise un ton professionnel et intègre les mots-clés naturellement."""
+            },
+            "wordpress_client_id": {
+                "type": "text",
+                "label": "WordPress Client ID",
+                "default": "your_client_id"
+            },
+            "wordpress_client_secret": {
+                "type": "text",
+                "label": "WordPress Client Secret",
+                "default": "your_client_secret"
+            },
+            "wordpress_site_id": {
+                "type": "text",
+                "label": "WordPress Site ID",
+                "default": "your_site_id"
+            },
+            "wordpress_redirect_uri": {
+                "type": "text",
+                "label": "WordPress Redirect URI",
+                "default": "https://your-app.com/callback"
             }
         }
 
@@ -95,7 +136,8 @@ class PromoteghostPlugin(Plugin):
         return [
             {"name": t("ghost_tab"), "plugin": "ghostplugin"},
             {"name": t("randomarticle_tab"), "plugin": "randomarticle"},
-            {"name": t("linkedin_tab"), "plugin": "linkedinplugin"}
+            {"name": t("linkedin_tab"), "plugin": "linkedinplugin"},
+            {"name": t("wordpress_tab"), "plugin": "wordpressplugin"}
         ]
 
     def _markdown_to_text(self, markdown_content: str) -> str:
@@ -113,7 +155,7 @@ class PromoteghostPlugin(Plugin):
         return text
 
     def run(self, config):
-        tab1, tab2, tab3 = st.tabs([t("ghost_tab"), t("randomarticle_tab"), t("linkedin_tab")])
+        tab1, tab2, tab3, tab4 = st.tabs([t("ghost_tab"), t("randomarticle_tab"), t("linkedin_tab"), t("wordpress_tab")])
 
         # Ghost Publisher Tab
         with tab1:
@@ -288,3 +330,108 @@ class PromoteghostPlugin(Plugin):
                             st.error(t("linkedin_error").format(error="Unknown error"))
                     except Exception as e:
                         st.error(t("linkedin_error").format(error=str(e)))
+
+        # WordPress Publisher Tab
+        with tab4:
+            st.header(t("wordpress_header"))
+
+            # Token retrieval section
+            st.subheader("WordPress Authentication")
+            code = st.text_input("Code")
+            if st.button("Set token"):
+                token = self.wordpress_api._get_access_token(code)
+                if token:
+                    self.plugin_manager.config['common']['wordpress_access_token'] = token
+                    self.plugin_manager.save_config(config)
+                    st.success("Token saved successfully")
+            if st.button(t("wordpress_get_token_button"), key="wordpress_get_token"):
+                with st.spinner("Retrieving WordPress access token..."):
+                    try:
+                        response = self.wordpress_api._get_access_token()
+                        if response:
+                            st.success(t("wordpress_token_success"))
+                            self.plugin_manager.config['common']['wordpress_access_token'] = response
+                            self.plugin_manager.save_config(config)
+                            st.write(response)
+                        else:
+                            st.error(t("wordpress_token_error").format(error="Unknown error"))
+                    except Exception as e:
+                        st.error(t("wordpress_token_error").format(error=str(e)))
+
+            default_title = "New Post"
+            default_content = ""
+            default_image_path = None
+            default_url = ""
+
+            article_path = os.path.join(self.work_dir, "article.md")
+            image_path = os.path.join(self.work_dir, "image.png")
+            url_path = os.path.join(self.work_dir, "url.txt")
+            if os.path.exists(article_path):
+                with open(article_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    lines = content.split("\n", 1)
+                    if lines[0].startswith("# "):
+                        default_title = lines[0][2:].strip()
+                        default_content = lines[1] if len(lines) > 1 else ""
+                    else:
+                        default_content = content
+                if os.path.exists(image_path):
+                    default_image_path = image_path
+                if os.path.exists(url_path):
+                    with open(url_path, "r", encoding="utf-8") as f:
+                        default_url = f.read().strip()
+
+            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="wordpress_load_generated"):
+                st.session_state["wordpress_title"] = default_title
+                st.session_state["wordpress_content"] = default_content
+                st.session_state["wordpress_image_path"] = default_image_path
+                st.session_state["wordpress_url"] = default_url
+
+            post_title = st.text_input(
+                t("ghost_title_label"),
+                value=st.session_state.get("wordpress_title", default_title),
+                key="wordpress_title"
+            )
+            include_url = st.checkbox(t("ghost_include_url"), value=False, key="wordpress_include_url")
+            markdown_content = st.text_area(
+                t("ghost_input_label"),
+                value=st.session_state.get("wordpress_content", default_content) + (f"\n\nSource: {st.session_state.get('wordpress_url', default_url)}" if include_url and st.session_state.get('wordpress_url', default_url) else ""),
+                height=300,
+                key="wordpress_content"
+            )
+
+            st.subheader(t("ghost_image_label"))
+            uploaded_image = st.file_uploader("Upload an image (WordPress)", type=["png", "jpg", "jpeg", "gif"], key="wordpress_image_upload")
+            selected_image_path = st.session_state.get("wordpress_image_path", default_image_path)
+
+            if uploaded_image:
+                selected_image_path = os.path.join(self.work_dir, "wordpress_uploaded_image.png")
+                with open(selected_image_path, "wb") as f:
+                    f.write(uploaded_image.getbuffer())
+                st.session_state["wordpress_image_path"] = selected_image_path
+
+            if selected_image_path:
+                st.image(selected_image_path, caption="Selected Image (WordPress)", use_container_width=True)
+
+            publish_immediately = st.checkbox(t("ghost_publish_checkbox"), key="wordpress_publish_immediately")
+
+            if st.button(t("wordpress_publish_button"), key="wordpress_publish"):
+                with st.spinner(t("wordpress_processing")):
+                    try:
+                        html_content = markdown2.markdown(markdown_content)
+                        response = self.wordpress_api.post(
+                            post_title,
+                            html_content,
+                            publish_immediately,
+                            feature_image=selected_image_path
+                        )
+                        if response:
+                            post_id = response.get('id', 'N/A')
+                            st.success(t("wordpress_success").format(result=post_id))
+                            for key in ["wordpress_title", "wordpress_content", "wordpress_image_path", "wordpress_url"]:
+                                if key in st.session_state:
+                                    del st.session_state[key]
+                        else:
+                            st.error(t("wordpress_error").format(error="Unknown error"))
+                    except Exception as e:
+                        st.error(t("wordpress_error").format(error=str(e)))

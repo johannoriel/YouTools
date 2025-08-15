@@ -14,6 +14,7 @@ import json
 import pytz
 from langdetect import detect
 from googlesearch import search
+import urllib
 
 
 class TwitterAPI:
@@ -1003,4 +1004,150 @@ class LinkedinAPI:
             return response.json()
         except Exception as e:
             st.error(f"LinkedIn API Error (post_comment): {str(e)}")
+            return None
+
+
+class WordPressAPI:
+    def __init__(self, config):
+        self.client_id = config['common']['wordpress_client_id']
+        self.client_secret = config['common']['wordpress_client_secret']
+        self.base_url = "https://public-api.wordpress.com"
+        self.access_token = config['common'].get('wordpress_access_token')
+        self.redirect_uri = config['common'].get('wordpress_redirect_uri', 'http://localhost:8501/')
+        self.site_id = config['common'].get('wordpress_site_id')  # Optional, needed for site-specific actions
+
+    def _get_access_token(self, code: Optional[str] = None) -> Optional[str]:
+        """
+        Retrieves an access token using authorization code or returns authorization URL.
+        :param code: Authorization code from OAuth2 redirect (optional).
+        :return: Access token if code is provided, authorization URL if not, or None if the request fails.
+        """
+        try:
+            # If no code is provided, generate and return the authorization URL
+            if not code:
+                state = os.urandom(16).hex()  # Generate random state for CSRF protection
+                auth_url = (
+                    f"https://public-api.wordpress.com/oauth2/authorize?"
+                    f"client_id={self.client_id}&"
+                    f"redirect_uri={urllib.parse.quote(self.redirect_uri)}&"
+                    f"response_type=code&"
+                    f"scope=posts&"
+                    f"state={state}"
+                )
+                st.session_state["wordpress_oauth_state"] = state  # Store state for verification
+                return auth_url
+
+            # Verify state parameter to prevent CSRF
+            if "wordpress_oauth_state" not in st.session_state:
+                st.error("State parameter missing. Possible CSRF attack.")
+                return None
+
+            # If code is provided, exchange it for an access token
+            token_url = "https://public-api.wordpress.com/oauth2/token"
+            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+            payload = {
+                'grant_type': 'authorization_code',
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+                'code': code,
+                'redirect_uri': self.redirect_uri
+            }
+
+            response = requests.post(token_url, data=payload, headers=headers)
+            response.raise_for_status()
+            token_data = response.json()
+            self.access_token = token_data.get('access_token')
+            if self.access_token:
+                # Clear state from session after successful token retrieval
+                del st.session_state["wordpress_oauth_state"]
+            return self.access_token
+        except requests.exceptions.HTTPError as e:
+            error_details = ""
+            try:
+                error_details = e.response.json()
+            except:
+                error_details = e.response.text
+            st.error(f"WordPress API Authentication Error: {e.response.status_code}")
+            st.error(f"Error details: {error_details}")
+            return None
+        except Exception as e:
+            st.error(f"WordPress API Authentication Error: {str(e)}")
+            return None
+
+    def post(self, title: str, content: str, publish_immediately: bool = True, feature_image: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Publishes a post on WordPress.com.
+        :param title: Post title.
+        :param content: Post content (HTML or plain text).
+        :param publish_immediately: Whether to publish immediately or save as draft.
+        :param feature_image: Path to the image file (optional).
+        :return: API response or None if the request fails.
+        """
+        try:
+            if not self.access_token:
+                st.error("No access token available. Please authenticate first.")
+                return None
+
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+                'Content-Type': 'application/json'
+            }
+
+            # Determine the endpoint based on whether site_id is provided
+            if self.site_id:
+                post_url = f"{self.base_url}/rest/v1.1/sites/{self.site_id}/posts/new"
+            else:
+                st.error("WordPress site ID is missing in configuration.")
+                return None
+
+            # Upload image if provided
+            feature_image_id = None
+            if feature_image and os.path.exists(feature_image):
+                ext = os.path.splitext(feature_image)[1].lower()
+                if ext not in ['.png', '.jpg', '.jpeg', '.gif']:
+                    st.error("Unsupported image format. Use PNG, JPEG, or GIF.")
+                    return None
+
+                with open(feature_image, 'rb') as f:
+                    files = {
+                        'media[]': (os.path.basename(feature_image), f, f'image/{ext.lstrip(".")}')
+                    }
+                    image_response = requests.post(
+                        f"{self.base_url}/rest/v1.1/sites/{self.site_id}/media/new",
+                        headers={'Authorization': f'Bearer {self.access_token}'},
+                        files=files
+                    )
+                    image_response.raise_for_status()
+                    feature_image_id = image_response.json().get('media', [{}])[0].get('ID')
+
+            # Prepare post data
+            body = {
+                'title': title,
+                'content': content,
+                'status': 'publish' if publish_immediately else 'draft'
+            }
+            if feature_image_id:
+                body['featured_image'] = feature_image_id
+
+            # Create post
+            response = requests.post(post_url, headers=headers, json=body)
+            response.raise_for_status()
+            post_data = response.json()
+            return {
+                'id': post_data.get('ID'),
+                'title': post_data.get('title'),
+                'url': post_data.get('URL'),
+                'status': post_data.get('status')
+            }
+        except requests.exceptions.HTTPError as e:
+            error_details = ""
+            try:
+                error_details = e.response.json()
+            except:
+                error_details = e.response.text
+            st.error(f"WordPress API HTTP Error: {e.response.status_code}")
+            st.error(f"Error details: {error_details}")
+            return None
+        except Exception as e:
+            st.error(f"WordPress API Error (post): {str(e)}")
             return None
