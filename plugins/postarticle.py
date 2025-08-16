@@ -99,7 +99,7 @@ translations["fr"].update({
     "substack_no_drafts": "Aucun brouillon disponible."
 })
 
-class PromoteghostPlugin(Plugin):
+class PostarticlePlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
         self.ghost_api = GhostAPI(plugin_manager.config)
@@ -115,16 +115,6 @@ class PromoteghostPlugin(Plugin):
 
     def get_config_fields(self):
         return {
-            "ghost_api_key": {
-                "type": "text",
-                "label": t("ghost_config_api_key"),
-                "default": t("ghost_config_api_key_default")
-            },
-            "ghost_url": {
-                "type": "text",
-                "label": t("ghost_config_url"),
-                "default": t("ghost_config_url_default")
-            },
             "randompost_prompt": {
                 "type": "textarea",
                 "label": t("randomarticle_prompt"),
@@ -135,41 +125,6 @@ class PromoteghostPlugin(Plugin):
 
             L'article doit être structuré avec une introduction, 3 sections principales et une conclusion. Utilise un ton professionnel et intègre les mots-clés naturellement."""
             },
-            "wordpress_client_id": {
-                "type": "text",
-                "label": "WordPress Client ID",
-                "default": "your_client_id"
-            },
-            "wordpress_client_secret": {
-                "type": "text",
-                "label": "WordPress Client Secret",
-                "default": "your_client_secret"
-            },
-            "wordpress_site_id": {
-                "type": "text",
-                "label": "WordPress Site ID",
-                "default": "your_site_id"
-            },
-            "wordpress_redirect_uri": {
-                "type": "text",
-                "label": "WordPress Redirect URI",
-                "default": "http://localhost:8501"
-            },
-            "substack_email": {
-                "type": "text",
-                "label": "Substack Email",
-                "default": "your_email@example.com"
-            },
-            "substack_password": {
-                "type": "password",
-                "label": "Substack Password",
-                "default": "your_password"
-            },
-            "substack_publication_url": {
-                "type": "text",
-                "label": "Substack Publication URL",
-                "default": "https://your-publication.substack.com"
-            }
         }
 
     def get_tabs(self):
@@ -196,10 +151,15 @@ class PromoteghostPlugin(Plugin):
         return text
 
     def run(self, config):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([t("ghost_tab"), t("randomarticle_tab"), t("linkedin_tab"), t("wordpress_tab"), t("substack_tab")])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([t("randomarticle_tab"), t("ghost_tab"), t("linkedin_tab"), t("wordpress_tab"), t("substack_tab")])
 
         # Ghost Publisher Tab
         with tab1:
+            from widgets.random_article import RandomArticleWidget
+            RandomArticleWidget("randomarticle", "randomarticle", self.plugin_manager).display(config)
+
+        # Random Article Tab
+        with tab2:
             st.header(t("ghost_header"))
             editor = ArticleEditorWidget("ghosteditor", "ghost", self.plugin_manager)
             result = editor.display()
@@ -223,11 +183,6 @@ class PromoteghostPlugin(Plugin):
                             st.error(t("ghost_error").format(error="Unknown error"))
                     except Exception as e:
                         st.error(t("ghost_error").format(error=str(e)))
-
-        # Random Article Tab
-        with tab2:
-            from widgets.random_article import RandomArticleWidget
-            RandomArticleWidget("randomarticle", "randomarticle", self.plugin_manager).display(config)
 
         # LinkedIn Publisher Tab
         with tab3:
