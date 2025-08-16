@@ -224,7 +224,17 @@ class CommonPlugin(Plugin):
                 "type": "text",
                 "label": "Wordpress site id",
                 "default": ""
-            }
+            },
+            "substack_login_email": {
+                "type": "text",
+                "label": "Substack login email",
+                "default": ""
+            },
+            "substack_login_password": {
+                "type": "text",
+                "label": "Substack login password",
+                "default": ""
+            },
         }
 
     def get_tabs(self):

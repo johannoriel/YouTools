@@ -128,7 +128,7 @@ class PromoteghostPlugin(Plugin):
             "wordpress_redirect_uri": {
                 "type": "text",
                 "label": "WordPress Redirect URI",
-                "default": "https://your-app.com/callback"
+                "default": "http://localhost:8501"
             }
         }
 
@@ -335,28 +335,43 @@ class PromoteghostPlugin(Plugin):
         with tab4:
             st.header(t("wordpress_header"))
 
+            # Check for authorization code in query parameters
+            query_params = st.query_params
+            auth_code = query_params.get("code")
+            state = query_params.get("state")
+
+            # Handle OAuth redirect
+            if auth_code and state :
+                if st.button("Retrieve Token"):
+                    with st.spinner("Retrieving WordPress access token..."):
+                        try:
+                            token = self.wordpress_api._get_access_token(code=auth_code, state=state)
+                            if token:
+                                self.plugin_manager.config['common']['wordpress_access_token'] = token
+                                self.plugin_manager.save_config(config)
+                                st.success(t("wordpress_token_success"))
+                                st.success("OK token")
+                            else:
+                                st.error(t("wordpress_token_error").format(error="Failed to retrieve token"))
+                        except Exception as e:
+                            st.error(t("wordpress_token_error").format(error=str(e)))
+                            raise
+
             # Token retrieval section
             st.subheader("WordPress Authentication")
-            code = st.text_input("Code")
-            if st.button("Set token"):
-                token = self.wordpress_api._get_access_token(code)
-                if token:
-                    self.plugin_manager.config['common']['wordpress_access_token'] = token
-                    self.plugin_manager.save_config(config)
-                    st.success("Token saved successfully")
-            if st.button(t("wordpress_get_token_button"), key="wordpress_get_token"):
-                with st.spinner("Retrieving WordPress access token..."):
+            if not self.wordpress_api.access_token or st.button("Refresh Token"):
+                with st.spinner("Generating WordPress authorization URL..."):
                     try:
-                        response = self.wordpress_api._get_access_token()
-                        if response:
-                            st.success(t("wordpress_token_success"))
-                            self.plugin_manager.config['common']['wordpress_access_token'] = response
-                            self.plugin_manager.save_config(config)
-                            st.write(response)
+                        auth_url = self.wordpress_api._get_access_token()
+                        if auth_url:
+                            st.markdown(f"[Click here to authorize WordPress]({auth_url})")
                         else:
-                            st.error(t("wordpress_token_error").format(error="Unknown error"))
+                            st.error(t("wordpress_token_error1").format(error="Failed to generate authorization URL"))
                     except Exception as e:
-                        st.error(t("wordpress_token_error").format(error=str(e)))
+                        st.error(t("wordpress_token_error1").format(error=str(e)))
+                        st.write("Go to https://developer.wordpress.com/apps and https://developer.wordpress.com/docs/oauth2/ to get ids")
+            else:
+                st.success("WordPress is authenticated. You can now publish posts.")
 
             default_title = "New Post"
             default_content = ""

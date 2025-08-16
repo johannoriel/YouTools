@@ -1016,7 +1016,7 @@ class WordPressAPI:
         self.redirect_uri = config['common'].get('wordpress_redirect_uri', 'http://localhost:8501/')
         self.site_id = config['common'].get('wordpress_site_id')  # Optional, needed for site-specific actions
 
-    def _get_access_token(self, code: Optional[str] = None) -> Optional[str]:
+    def _get_access_token(self, code: Optional[str] = None, state: Optional[str] = None) -> Optional[str]:
         """
         Retrieves an access token using authorization code or returns authorization URL.
         :param code: Authorization code from OAuth2 redirect (optional).
@@ -1034,11 +1034,10 @@ class WordPressAPI:
                     f"scope=posts&"
                     f"state={state}"
                 )
-                st.session_state["wordpress_oauth_state"] = state  # Store state for verification
                 return auth_url
 
             # Verify state parameter to prevent CSRF
-            if "wordpress_oauth_state" not in st.session_state:
+            if not state:
                 st.error("State parameter missing. Possible CSRF attack.")
                 return None
 
@@ -1050,16 +1049,15 @@ class WordPressAPI:
                 'client_id': self.client_id,
                 'client_secret': self.client_secret,
                 'code': code,
+                'state': state,
                 'redirect_uri': self.redirect_uri
             }
+            st.write(payload)
 
             response = requests.post(token_url, data=payload, headers=headers)
             response.raise_for_status()
             token_data = response.json()
             self.access_token = token_data.get('access_token')
-            if self.access_token:
-                # Clear state from session after successful token retrieval
-                del st.session_state["wordpress_oauth_state"]
             return self.access_token
         except requests.exceptions.HTTPError as e:
             error_details = ""
