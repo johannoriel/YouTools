@@ -2,6 +2,7 @@ from lib.global_vars import translations, t
 from app import Widget
 import streamlit as st
 from streamlit_ace import st_ace
+from streamlit_lexical import streamlit_lexical
 import os
 import markdown2
 
@@ -42,19 +43,27 @@ class ArticleEditorWidget(Widget):
         image_path = os.path.join(self.work_dir, "image.png")
         url_path = os.path.join(self.work_dir, "url.txt")
         if os.path.exists(article_path):
-            with open(article_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                lines = content.split("\n", 1)
-                if lines[0].startswith("# "):
-                    default_title = lines[0][2:].strip()
-                    default_content = lines[1] if len(lines) > 1 else ""
-                else:
-                    default_content = content
-            if os.path.exists(image_path):
-                default_image_path = image_path
-            if os.path.exists(url_path):
+            try:
+                with open(article_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    lines = content.split("\n", 1)
+                    if lines[0].startswith("# "):
+                        default_title = lines[0][2:].strip()
+                        default_content = lines[1] if len(lines) > 1 else ""
+                    else:
+                        default_content = content
+            except Exception as e:
+                st.warning(f"Failed to read article.md: {str(e)}")
+                default_content = ""
+        if os.path.exists(image_path):
+            default_image_path = image_path
+        if os.path.exists(url_path):
+            try:
                 with open(url_path, "r", encoding="utf-8") as f:
                     default_url = f.read().strip()
+            except Exception as e:
+                st.warning(f"Failed to read url.txt: {str(e)}")
+                default_url = ""
 
         # Button to load generated article
         if os.path.exists(article_path) and st.button(t("editor_load_generated"), key=f"{self.prefix}_load_generated"):
@@ -69,16 +78,28 @@ class ArticleEditorWidget(Widget):
             value=st.session_state.get(f"{self.prefix}_title", default_title),
             key=f"{self.prefix}_title"
         )
-        include_url = st.checkbox(t("editor_include_url"), value=False, key=f"{self.prefix}_include_url")
-        markdown_content = st_ace(
-            value=st.session_state.get(f"{self.prefix}_content", default_content) + (
-                f"\n\nSource: {st.session_state.get(f'{self.prefix}_url', default_url)}"
-                if include_url and st.session_state.get(f'{self.prefix}_url', default_url) else ""
-            ),
-            language="markdown",
+        #include_url = st.checkbox(t("editor_include_url"), value=False, key=f"{self.prefix}_include_url")
+
+        # Ensure content is always a string
+        content_value = st.session_state.get(f"{self.prefix}_content", default_content) or ""
+        source_url = st.session_state.get(f"{self.prefix}_url", default_url) or ""
+        #if include_url and source_url:
+        #    content_value += f"\n\nSource: {source_url}"
+        #    st.write(f"Source: {source_url}")
+
+
+        if st.button("URL", key=f"{self.prefix}_url_button"):
+            st.session_state[f"{self.prefix}_content"] += f"\n\nSource: {source_url}"
+
+        col1, col2 = st.columns(2)
+        markdown_content = col1.text_area(
+            label="Markdown Content",
+            value=content_value,
             height=300,
             key=f"{self.prefix}_content"
         )
+        cont = col2.container(height=300)
+        cont.markdown(markdown_content)
 
         # Image uploader
         st.subheader(t("editor_image_label"))
@@ -96,7 +117,7 @@ class ArticleEditorWidget(Widget):
             st.session_state[f"{self.prefix}_image_path"] = selected_image_path
 
         if selected_image_path:
-            st.image(selected_image_path, caption="Selected Image", use_container_width=True)
+            st.image(selected_image_path, caption="Selected Image", width=300)
 
         # Include image checkbox
         include_image = st.checkbox(
