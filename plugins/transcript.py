@@ -11,6 +11,8 @@ from widgets.prompt_manager import PromptsManagerWidget
 from widgets.file_selector import FileSelectorWidget
 from pytubefix import Playlist
 import re
+from widgets.recentvideos import RecentVideosWidget
+
 
 # Ajout des traductions
 translations["en"].update({
@@ -708,18 +710,20 @@ class TranscriptPlugin(Plugin):
             st.info(t("prompt_transcript_no_result"))
 
     def run(self, config):
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "Local", "Remote", t("prompt_management"), t("playlist_tab"), t("batch_tab"), t("prompt_transcript_tab")
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "Local", "Remote", "Recent", t("prompt_management"), t("playlist_tab"), t("batch_tab"), t("prompt_transcript_tab")
         ])
         with tab1:
             self.run_local(config)
         with tab2:
             self.run_remote(config)
         with tab3:
-            PromptsManagerWidget("transcript", "prompt_manager", self.plugin_manager).display("prompts")
+            RecentVideosWidget("recentvideos", "rvw", self.plugin_manager).display(config)
         with tab4:
-            self.run_playlist(config)
+            PromptsManagerWidget("transcript", "prompt_manager", self.plugin_manager).display("prompts")
         with tab5:
-            self.run_batch(config)
+            self.run_playlist(config)
         with tab6:
+            self.run_batch(config)
+        with tab7:
             self.run_prompt_transcript(config)

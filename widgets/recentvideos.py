@@ -4,6 +4,7 @@ import streamlit as st
 import os
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import CouldNotRetrieveTranscript
+from widgets.yt_transcript import YoutubeTranscriptWidget
 from lib.youtube_api import YoutubeAPI
 from typing import Dict, Optional
 
@@ -31,18 +32,22 @@ translations["fr"].update({
     "recent_videos_transcript_error": "Une erreur s'est produite lors de la récupération du transcript : ",
 })
 
-
 class RecentVideosWidget(Widget):
     def __init__(self, name, prefix, plugin_manager):
         super().__init__(name, prefix, plugin_manager)
 
     def get_transcript(self, video_id, language):
+        ytt = self.yt_transcript_widget = YoutubeTranscriptWidget(f"{self.prefix}transcript", f"{self.prefix}transcript", self.plugin_manager)
+        return ytt.fetch_transcript(f"https://www.youtube.com/watch?v={video_id}"), ""
         try:
+            st.write(f"Fetching {video_id} transcript in {language}...")
             transcript = YouTubeTranscriptApi.get_transcript(
                 video_id, languages=[language])
+            st.success(f"Transcript fetched successfully!")
         except CouldNotRetrieveTranscript:
             try:
                 transcript = YouTubeTranscriptApi.get_transcript(video_id)
+                st.success(f"Transcript fetched successfully after retry!")
             except Exception as e:
                 return f"{t('recent_videos_transcript_error')}{str(e)}", "N/A"
         full_transcript = " ".join([entry['text'] for entry in transcript])
