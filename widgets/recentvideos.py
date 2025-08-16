@@ -5,6 +5,7 @@ import os
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import CouldNotRetrieveTranscript
 from lib.youtube_api import YoutubeAPI
+from typing import Dict, Optional
 
 translations["en"].update({
     "recent_videos_header": "10 Latest Videos",
@@ -150,3 +151,35 @@ class RecentVideosWidget(Widget):
             if not transcript.startswith(t('recent_videos_transcript_error')):
                 self.save_transcript(transcript, video_id, work_directory)
                 st.success(t("recent_videos_save_success"))
+
+    def choose_simple(self, config) -> Optional[Dict[str, str]]:
+        youtube_api = YoutubeAPI(config)
+        language = config['common']['language']
+
+        if 'channel_id' not in config['common'] or not config['common']['channel_id']:
+            st.info(t("recent_videos_configure_channel_id"))
+            return None
+
+        if 'all_videos' not in st.session_state:
+            st.session_state.all_videos = youtube_api.get_channel_videos(
+                config['common']['channel_id'])
+
+        video_options = {video['title']: video for video in st.session_state.all_videos[:10]}
+        selected_video = st.selectbox(
+            t("recent_videos_header"),
+            list(video_options.keys()),
+            key=f"{self.prefix}_video_select"
+        )
+
+        selected_video_data = video_options[selected_video]
+        transcript, _ = self.get_transcript(selected_video_data['video_id'], language)
+        if transcript.startswith(t('recent_videos_transcript_error')):
+            st.error(transcript)
+            return None
+
+        return {
+            "title": selected_video_data['title'],
+            "url": selected_video_data['url'],
+            "keywords": selected_video_data['keywords'],
+            "content": transcript
+        }

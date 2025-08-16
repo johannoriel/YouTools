@@ -223,7 +223,7 @@ class YoutubeAPI:
                 video_ids = [item['snippet']['resourceId']['videoId']
                              for item in playlist_response['items']]
                 video_details = self.youtube.videos().list(
-                    part='contentDetails',
+                    part='contentDetails,snippet',
                     id=','.join(video_ids)
                 ).execute()
                 self.track_quota_usage(1)
@@ -238,6 +238,12 @@ class YoutubeAPI:
 
                     # Déterminer si la vidéo est un Short
                     is_short = self._is_short_video(duration)
+                    video_detail = next((v for v in video_details['items'] if v['id'] == video_id), {})
+                    keywords = video_detail.get('snippet', {}).get('tags', [])
+                    if not keywords:
+                        description = video_detail.get('snippet', {}).get('description', '')
+                        # Simple keyword extraction: split description and take unique words
+                        keywords = list(set(word.strip().lower() for word in description.split() if len(word) > 3))
 
                     video = {
                         'video_id': video_id,
@@ -248,7 +254,8 @@ class YoutubeAPI:
                         'published_at': item['snippet']['publishedAt'],
                         'status': item['status']['privacyStatus'],
                         'duration': duration,
-                        'is_short': is_short
+                        'is_short': is_short,
+                        'keywords': keywords,
                     }
                     videos.append(video)
 
