@@ -13,7 +13,9 @@ translations["en"].update({
     "editor_include_url": "Include Source URL",
     "editor_image_label": "Feature Image",
     "editor_publish_checkbox": "Publish immediately",
-    "editor_include_image": "Include Image in Post"
+    "editor_include_image": "Include Image in Post",
+    "editor_translate_button": "Translate to French",
+    "translate_prompt": "Traduisez l'article suivant en français sans ajouter de commentaires, fournissez uniquement le texte traduit :"
 })
 
 translations["fr"].update({
@@ -23,7 +25,9 @@ translations["fr"].update({
     "editor_include_url": "Inclure l'URL Source",
     "editor_image_label": "Image de mise en avant",
     "editor_publish_checkbox": "Publier immédiatement",
-    "editor_include_image": "Inclure l'image dans le post"
+    "editor_include_image": "Inclure l'image dans le post",
+    "editor_translate_button": "Traduire en anglais",
+    "translate_prompt": "Translate the following article into English without adding any comments, just provide the translated text:"
 })
 
 class ArticleEditorWidget(Widget):
@@ -71,6 +75,16 @@ class ArticleEditorWidget(Widget):
             st.session_state[f"{self.prefix}_content"] = default_content
             st.session_state[f"{self.prefix}_image_path"] = default_image_path
             st.session_state[f"{self.prefix}_url"] = default_url
+        content_value = st.session_state.get(f"{self.prefix}_content", default_content) or ""
+        source_url = st.session_state.get(f"{self.prefix}_url", default_url) or ""
+
+
+        if st.button(t("editor_translate_button"), key=f"{self.prefix}_translate"):
+            if content_value:
+                prompt = t("translate_prompt")
+                translated_content = self.process_with_llm(prompt, content_value)
+                st.session_state[f"{self.prefix}_content"] = translated_content
+                st.session_state[f"{self.prefix}_title"] = self.process_with_llm(t("translate_prompt"),st.session_state.get(f"{self.prefix}_title", default_title))
 
         # Input fields
         post_title = st.text_input(
@@ -78,15 +92,6 @@ class ArticleEditorWidget(Widget):
             value=st.session_state.get(f"{self.prefix}_title", default_title),
             key=f"{self.prefix}_title"
         )
-        #include_url = st.checkbox(t("editor_include_url"), value=False, key=f"{self.prefix}_include_url")
-
-        # Ensure content is always a string
-        content_value = st.session_state.get(f"{self.prefix}_content", default_content) or ""
-        source_url = st.session_state.get(f"{self.prefix}_url", default_url) or ""
-        #if include_url and source_url:
-        #    content_value += f"\n\nSource: {source_url}"
-        #    st.write(f"Source: {source_url}")
-
 
         if st.button("URL", key=f"{self.prefix}_url_button"):
             st.session_state[f"{self.prefix}_content"] += f"\n\nSource: {source_url}"
