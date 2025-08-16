@@ -1149,3 +1149,214 @@ class WordPressAPI:
         except Exception as e:
             st.error(f"WordPress API Error (post): {str(e)}")
             return None
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from substack import Api
+from substack.post import Post
+from substack.exceptions import SubstackAPIException
+import streamlit as st
+
+class SubstackAPI:
+    def __init__(self, config):
+        self.email = config['common']['substack_email']
+        self.password = config['common']['substack_password']
+        self.publication_url = config['common']['substack_publication_url']
+        self.cookies_path = "substack_cookies.json"
+        self.selenium_cookies_path = "selenium_cookies.json"
+        self.api = None
+
+    def _renew_cookie(self, email: str, password: str) -> None:
+        """
+        Log in to Substack using Selenium and save cookies in JSON format.
+        """
+        chrome_options = Options()
+        chrome_options.add_argument("--start-maximized")
+        chrome_options.add_argument("--headless")  # Run in headless mode for automation
+        service = Service("/usr/bin/chromedriver")  # Adjust path if needed
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+
+        try:
+            driver.get("https://substack.com/sign-in")
+            wait = WebDriverWait(driver, 20)
+            email_field = wait.until(EC.presence_of_element_located((By.NAME, "email")))
+            email_field.send_keys(email)
+
+            sign_in_link = wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "Sign in with password")))
+            sign_in_link.click()
+
+            password_field = wait.until(EC.presence_of_element_located((By.NAME, "password")))
+            password_field.send_keys(password)
+            password_field.send_keys(Keys.RETURN)
+
+            time.sleep(5)  # Wait for login to complete
+            cookies = driver.get_cookies()
+            with open(self.cookies_path, "w") as file:
+                json.dump(cookies, file)
+            print("Cookies saved to 'substack_cookies.json'.")
+
+            # Convert Selenium cookies (list of dicts) to {name: value}
+            cookie_dict = {c["name"]: c["value"] for c in cookies}
+            with open(self.selenium_cookies_path, "w") as f:
+                json.dump(cookie_dict, f)
+
+        finally:
+            driver.quit()
+
+    def _initialize_api(self) -> None:
+        """
+        Initialize the Substack API with cookies, renewing if necessary.
+        """
+        try:
+            # Check if cookies exist and are valid
+            if not os.path.exists(self.cookies_path) or not self._is_cookie_valid():
+                self._renew_cookie(self.email, self.password)
+            if self.api is not None:
+                return
+            # Initialize API with cookies
+            self.api = Api(
+                cookies_path=self.selenium_cookies_path,
+                publication_url=self.publication_url
+            )
+            print("Successfully authenticated with Substack API")
+        except Exception as e:
+            st.error(f"Substack API Authentication Error: {str(e)}")
+            raise
+
+    def _is_cookie_valid(self) -> bool:
+        """
+        Test if the stored cookies are still valid by attempting a simple API call.
+        """
+        try:
+            if not os.path.exists(self.selenium_cookies_path):
+                return False
+            temp_api = Api(cookies_path=self.selenium_cookies_path, publication_url=self.publication_url)
+            temp_api.get_user_profile()  # Simple API call to test authentication
+            return True
+        except SubstackAPIException:
+            return False
+
+    def retry_on_error(self, func, max_retries=3, delay=1):
+        """
+        Retry function on Substack API errors with exponential backoff.
+        """
+        for attempt in range(max_retries):
+            try:
+                return func()
+            except SubstackAPIException as e:
+                if attempt < max_retries - 1:
+                    time.sleep(delay * (2 ** attempt))
+                    # Renew cookies on failure
+                    self._renew_cookie(self.email, self.password)
+                    self._initialize_api()
+                    continue
+                raise
+
+    def post(self, title: str, content: str, publish_immediately: bool = False, feature_image: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Creates a Substack post from markdown content, with optional image.
+        :param title: Post title.
+        :param content: Markdown content.
+        :param publish_immediately: Whether to publish immediately or save as draft.
+        :param feature_image: Path to the image file (optional).
+        :return: Draft or published post details.
+        """
+        try:
+            self._initialize_api()
+            # Get user ID
+            profile = self.retry_on_error(lambda: self.api.get_user_profile())
+            user_id = profile.get("id")
+            if not user_id:
+                raise ValueError("Could not get user ID from profile")
+
+            # Create post object
+            post = Post(title=title, subtitle="", user_id=user_id)
+
+            # Convert markdown to Substack-compatible blocks
+            lines = content.split("\n")
+            for line in lines:
+                line = line.strip()
+                if line:
+                    if line.startswith("# "):
+                        post.add({"type": "heading", "content": line[2:]})
+                    elif line.startswith("!["):
+                        # Handle markdown image: ![alt](url)
+                        import re
+                        match = re.match(r"!\[(.*?)\]\((.*?)\)", line)
+                        if match:
+                            alt, src = match.groups()
+                            post.add({"type": "captionedImage", "src": src, "caption": alt})
+                    else:
+                        post.add({"type": "paragraph", "content": line})
+
+            # Add local image if provided
+            if feature_image and os.path.exists(feature_image):
+                image = self.retry_on_error(lambda: self.api.get_image(feature_image))
+                post.add({"type": "captionedImage", "src": image.get("url")})
+
+            # Save as draft
+            draft = self.retry_on_error(lambda: self.api.post_draft(post.get_draft()))
+            draft_id = draft.get("id")
+            if not draft_id:
+                raise ValueError("Failed to create draft - no ID returned")
+
+            result = {"id": draft_id, "title": title, "status": "draft"}
+
+            # Publish immediately if requested
+            if publish_immediately:
+                self.retry_on_error(lambda: self.api.prepublish_draft(draft_id))
+                published = self.retry_on_error(lambda: self.api.publish_draft(draft_id))
+                result["status"] = "published"
+                result["url"] = published.get("url", "")
+
+            return result
+
+        except Exception as e:
+            st.error(f"Substack API Error (post): {str(e)}")
+            return None
+
+    def list_drafts(self) -> List[Dict[str, Any]]:
+        """
+        Lists all draft posts for the current publication.
+        :return: List of draft post details.
+        """
+        try:
+            self._initialize_api()
+            drafts = self.retry_on_error(lambda: self.api.get_drafts())
+            formatted_drafts = []
+            for draft in drafts:
+                formatted_drafts.append({
+                    "id": draft.get("id"),
+                    "title": draft.get("title"),
+                    "created_at": draft.get("created_at"),
+                    "url": draft.get("url", ""),
+                })
+            return formatted_drafts
+        except Exception as e:
+            st.error(f"Substack API Error (list_drafts): {str(e)}")
+            return []
+
+    def publish_draft(self, draft_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Publishes a draft post by ID.
+        :param draft_id: ID of the draft to publish.
+        :return: Published post details or None if the request fails.
+        """
+        try:
+            self._initialize_api()
+            self.retry_on_error(lambda: self.api.prepublish_draft(draft_id))
+            published = self.retry_on_error(lambda: self.api.publish_draft(draft_id))
+            return {
+                "id": draft_id,
+                "title": published.get("title", ""),
+                "status": "published",
+                "url": published.get("url", "")
+            }
+        except Exception as e:
+            st.error(f"Substack API Error (publish_draft): {str(e)}")
+            return None

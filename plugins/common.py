@@ -225,15 +225,20 @@ class CommonPlugin(Plugin):
                 "label": "Wordpress site id",
                 "default": ""
             },
-            "substack_login_email": {
+            "substack_email": {
                 "type": "text",
-                "label": "Substack login email",
-                "default": ""
+                "label": "Substack Email",
+                "default": "your_email@example.com"
             },
-            "substack_login_password": {
+            "substack_password": {
+                "type": "password",
+                "label": "Substack Password",
+                "default": "your_password"
+            },
+            "substack_publication_url": {
                 "type": "text",
-                "label": "Substack login password",
-                "default": ""
+                "label": "Substack Publication URL",
+                "default": "https://your-publication.substack.com"
             },
         }
 

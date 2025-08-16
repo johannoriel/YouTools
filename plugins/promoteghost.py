@@ -7,7 +7,7 @@ from datetime import datetime as date
 import requests
 import jwt
 import markdown2
-from lib.social_api import GhostAPI, LinkedinAPI, WordPressAPI
+from lib.social_api import GhostAPI, LinkedinAPI, WordPressAPI, SubstackAPI
 from widgets.random_article import RandomArticleWidget
 
 translations["en"].update({
@@ -42,7 +42,22 @@ translations["en"].update({
     "wordpress_get_token_button": "Get WordPress Access Token",
     "wordpress_auth_code_label": "Authorization Code",
     "wordpress_token_success": "Access token retrieved successfully!",
-    "wordpress_token_error": "Failed to retrieve access token: {error}"
+    "wordpress_token_error": "Failed to retrieve access token: {error}",
+    "substack_tab": "Substack Publisher",
+    "substack_header": "Publish to Substack",
+    "substack_publish_button": "Publish to Substack",
+    "substack_processing": "Publishing to Substack...",
+    "substack_success": "Published successfully! Post ID: {result}",
+    "substack_error": "Publishing failed: {error}",
+    "substack_auth_status": "Substack Authentication Status",
+    "substack_authenticated": "Substack is authenticated. You can now publish posts.",
+    "substack_not_authenticated": "Substack is not authenticated. Please check your credentials.",
+    "substack_reauth_button": "Re-authenticate Substack",
+    "substack_reauth_processing": "Re-authenticating Substack...",
+    "substack_drafts_label": "Select Draft Post",
+    "substack_publish_draft_button": "Publish Selected Draft",
+    "substack_refresh_drafts_button": "Refresh Drafts List",
+    "substack_no_drafts": "No draft posts available."
 })
 
 translations["fr"].update({
@@ -77,7 +92,22 @@ translations["fr"].update({
     "wordpress_get_token_button": "Obtenir le jeton d'accès WordPress",
     "wordpress_auth_code_label": "Code d'autorisation",
     "wordpress_token_success": "Jeton d'accès récupéré avec succès !",
-    "wordpress_token_error": "Échec de la récupération du jeton : {error}"
+    "wordpress_token_error": "Échec de la récupération du jeton : {error}",
+    "substack_tab": "Publicateur Substack",
+    "substack_header": "Publier sur Substack",
+    "substack_publish_button": "Publier sur Substack",
+    "substack_processing": "Publication sur Substack...",
+    "substack_success": "Publié avec succès ! ID du post : {result}",
+    "substack_error": "Échec de la publication : {error}",
+    "substack_auth_status": "État de l'authentification Substack",
+    "substack_authenticated": "Substack est authentifié. Vous pouvez maintenant publier des posts.",
+    "substack_not_authenticated": "Substack n'est pas authentifié. Veuillez vérifier vos identifiants.",
+    "substack_reauth_button": "Ré-authentifier Substack",
+    "substack_reauth_processing": "Ré-authentification sur Substack...",
+    "substack_drafts_label": "Sélectionner un brouillon",
+    "substack_publish_draft_button": "Publier le brouillon sélectionné",
+    "substack_refresh_drafts_button": "Rafraîchir la liste des brouillons",
+    "substack_no_drafts": "Aucun brouillon disponible."
 })
 
 class PromoteghostPlugin(Plugin):
@@ -86,7 +116,13 @@ class PromoteghostPlugin(Plugin):
         self.ghost_api = GhostAPI(plugin_manager.config)
         self.linkedin_api = LinkedinAPI(plugin_manager.config)
         self.wordpress_api = WordPressAPI(plugin_manager.config)
+        self.substack_api = SubstackAPI(plugin_manager.config)
         self.work_dir = self.work_dir()
+        # Initialize Substack authentication status in session state
+        if "substack_authenticated" not in st.session_state:
+            st.session_state["substack_authenticated"] = self.substack_api._is_cookie_valid()
+        if "substack_drafts" not in st.session_state:
+            st.session_state["substack_drafts"] = []
 
     def get_config_fields(self):
         return {
@@ -129,6 +165,21 @@ class PromoteghostPlugin(Plugin):
                 "type": "text",
                 "label": "WordPress Redirect URI",
                 "default": "http://localhost:8501"
+            },
+            "substack_email": {
+                "type": "text",
+                "label": "Substack Email",
+                "default": "your_email@example.com"
+            },
+            "substack_password": {
+                "type": "password",
+                "label": "Substack Password",
+                "default": "your_password"
+            },
+            "substack_publication_url": {
+                "type": "text",
+                "label": "Substack Publication URL",
+                "default": "https://your-publication.substack.com"
             }
         }
 
@@ -137,7 +188,8 @@ class PromoteghostPlugin(Plugin):
             {"name": t("ghost_tab"), "plugin": "ghostplugin"},
             {"name": t("randomarticle_tab"), "plugin": "randomarticle"},
             {"name": t("linkedin_tab"), "plugin": "linkedinplugin"},
-            {"name": t("wordpress_tab"), "plugin": "wordpressplugin"}
+            {"name": t("wordpress_tab"), "plugin": "wordpressplugin"},
+            {"name": t("substack_tab"), "plugin": "substackplugin"}
         ]
 
     def _markdown_to_text(self, markdown_content: str) -> str:
@@ -155,7 +207,7 @@ class PromoteghostPlugin(Plugin):
         return text
 
     def run(self, config):
-        tab1, tab2, tab3, tab4 = st.tabs([t("ghost_tab"), t("randomarticle_tab"), t("linkedin_tab"), t("wordpress_tab")])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([t("ghost_tab"), t("randomarticle_tab"), t("linkedin_tab"), t("wordpress_tab"), t("substack_tab")])
 
         # Ghost Publisher Tab
         with tab1:
@@ -341,7 +393,7 @@ class PromoteghostPlugin(Plugin):
             state = query_params.get("state")
 
             # Handle OAuth redirect
-            if auth_code and state :
+            if auth_code and state:
                 if st.button("Retrieve Token"):
                     with st.spinner("Retrieving WordPress access token..."):
                         try:
@@ -366,9 +418,9 @@ class PromoteghostPlugin(Plugin):
                         if auth_url:
                             st.markdown(f"[Click here to authorize WordPress]({auth_url})")
                         else:
-                            st.error(t("wordpress_token_error1").format(error="Failed to generate authorization URL"))
+                            st.error(t("wordpress_token_error").format(error="Failed to generate authorization URL"))
                     except Exception as e:
-                        st.error(t("wordpress_token_error1").format(error=str(e)))
+                        st.error(t("wordpress_token_error").format(error=str(e)))
                         st.write("Go to https://developer.wordpress.com/apps and https://developer.wordpress.com/docs/oauth2/ to get ids")
             else:
                 st.success("WordPress is authenticated. You can now publish posts.")
@@ -450,3 +502,138 @@ class PromoteghostPlugin(Plugin):
                             st.error(t("wordpress_error").format(error="Unknown error"))
                     except Exception as e:
                         st.error(t("wordpress_error").format(error=str(e)))
+
+        # Substack Publisher Tab
+        with tab5:
+            st.header(t("substack_header"))
+
+            # Authentication status
+            st.subheader(t("substack_auth_status"))
+            if st.session_state.get("substack_authenticated", False):
+                st.success(t("substack_authenticated"))
+            else:
+                st.error(t("substack_not_authenticated"))
+
+            # Re-authentication button
+            if st.button(t("substack_reauth_button"), key="substack_reauth"):
+                with st.spinner(t("substack_reauth_processing")):
+                    try:
+                        self.substack_api._renew_cookie(self.substack_api.email, self.substack_api.password)
+                        self.substack_api._initialize_api()
+                        st.session_state["substack_authenticated"] = self.substack_api._is_cookie_valid()
+                        if st.session_state["substack_authenticated"]:
+                            st.success("Substack re-authenticated successfully!")
+                        else:
+                            st.error("Substack re-authentication failed.")
+                    except Exception as e:
+                        st.error(f"Substack re-authentication error: {str(e)}")
+                        st.session_state["substack_authenticated"] = False
+
+            # Draft posts section
+            st.subheader(t("substack_drafts_label"))
+            if st.button(t("substack_refresh_drafts_button"), key="substack_refresh_drafts"):
+                with st.spinner("Refreshing Substack drafts..."):
+                    try:
+                        st.session_state["substack_drafts"] = self.substack_api.list_drafts()
+                    except Exception as e:
+                        st.error(f"Failed to refresh drafts: {str(e)}")
+
+            drafts = st.session_state.get("substack_drafts", [])
+            draft_options = {f"{d['title']} (ID: {d['id']})": d['id'] for d in drafts} if drafts else {}
+            if draft_options:
+                selected_draft = st.selectbox(t("substack_drafts_label"), options=[""] + list(draft_options.keys()), key="substack_draft_select")
+                if selected_draft and st.button(t("substack_publish_draft_button"), key="substack_publish_draft"):
+                    with st.spinner(t("substack_processing")):
+                        try:
+                            draft_id = draft_options[selected_draft]
+                            response = self.substack_api.publish_draft(draft_id)
+                            if response:
+                                st.success(t("substack_success").format(result=response.get('id', 'N/A')))
+                                # Refresh drafts list after publishing
+                                st.session_state["substack_drafts"] = self.substack_api.list_drafts()
+                            else:
+                                st.error(t("substack_error").format(error="Unknown error"))
+                        except Exception as e:
+                            st.error(t("substack_error").format(error=str(e)))
+            else:
+                st.info(t("substack_no_drafts"))
+
+            # New post section
+            default_title = "New Post"
+            default_content = ""
+            default_image_path = None
+            default_url = ""
+
+            article_path = os.path.join(self.work_dir, "article.md")
+            image_path = os.path.join(self.work_dir, "image.png")
+            url_path = os.path.join(self.work_dir, "url.txt")
+            if os.path.exists(article_path):
+                with open(article_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    lines = content.split("\n", 1)
+                    if lines[0].startswith("# "):
+                        default_title = lines[0][2:].strip()
+                        default_content = lines[1] if len(lines) > 1 else ""
+                    else:
+                        default_content = content
+                if os.path.exists(image_path):
+                    default_image_path = image_path
+                if os.path.exists(url_path):
+                    with open(url_path, "r", encoding="utf-8") as f:
+                        default_url = f.read().strip()
+
+            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="substack_load_generated"):
+                st.session_state["substack_title"] = default_title
+                st.session_state["substack_content"] = default_content
+                st.session_state["substack_image_path"] = default_image_path
+                st.session_state["substack_url"] = default_url
+
+            post_title = st.text_input(
+                t("ghost_title_label"),
+                value=st.session_state.get("substack_title", default_title),
+                key="substack_title"
+            )
+            include_url = st.checkbox(t("ghost_include_url"), value=False, key="substack_include_url")
+            markdown_content = st.text_area(
+                t("ghost_input_label"),
+                value=st.session_state.get("substack_content", default_content) + (f"\n\nSource: {st.session_state.get('substack_url', default_url)}" if include_url and st.session_state.get('substack_url', default_url) else ""),
+                height=300,
+                key="substack_content"
+            )
+
+            st.subheader(t("ghost_image_label"))
+            uploaded_image = st.file_uploader("Upload an image (Substack)", type=["png", "jpg", "jpeg"], key="substack_image_upload")
+            selected_image_path = st.session_state.get("substack_image_path", default_image_path)
+
+            if uploaded_image:
+                selected_image_path = os.path.join(self.work_dir, "substack_uploaded_image.png")
+                with open(selected_image_path, "wb") as f:
+                    f.write(uploaded_image.getbuffer())
+                st.session_state["substack_image_path"] = selected_image_path
+
+            if selected_image_path:
+                st.image(selected_image_path, caption="Selected Image (Substack)", use_container_width=True)
+
+            publish_immediately = st.checkbox(t("ghost_publish_checkbox"), key="substack_publish_immediately")
+
+            if st.button(t("substack_publish_button"), key="substack_publish"):
+                with st.spinner(t("substack_processing")):
+                    try:
+                        response = self.substack_api.post(
+                            post_title,
+                            markdown_content,
+                            publish_immediately,
+                            feature_image=selected_image_path
+                        )
+                        if response:
+                            post_id = response.get('id', 'N/A')
+                            st.success(t("substack_success").format(result=post_id))
+                            # Refresh drafts list after creating a new post
+                            st.session_state["substack_drafts"] = self.substack_api.list_drafts()
+                            for key in ["substack_title", "substack_content", "substack_image_path", "substack_url"]:
+                                if key in st.session_state:
+                                    del st.session_state[key]
+                        else:
+                            st.error(t("substack_error").format(error="Unknown error"))
+                    except Exception as e:
+                        st.error(t("substack_error").format(error=str(e)))

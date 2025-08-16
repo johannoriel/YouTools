@@ -47,3 +47,4 @@ fuzzywuzzy
 python-Levenshtein
 streamlit-lexical
 sib_api_v3_sdk
+python-substack

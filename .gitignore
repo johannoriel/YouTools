@@ -23,3 +23,5 @@ widgets/.ropeproject
 lib/.ropeproject
 plugins/.ropeproject
 products.db
+selenium_cookies.json
+substack_cookies.json
