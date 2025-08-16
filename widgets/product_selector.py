@@ -57,71 +57,74 @@ class ProductSelectorWidget(Widget):
 
     def display(self) -> Optional[Dict[str, Any]]:
         """Display the product selector and return the selected product."""
-        # Initialize ProductsDB
-        products_db = ProductsDB()
-        products = products_db.get_all_products()
 
-        if not products:
-            st.warning(t("productselector_no_products"))
-            return None
+        with st.container(key=f"{self.prefix}_container", border=True):
 
-        # Get all unique product types
-        all_types = self._parse_product_types(products)
+            # Initialize ProductsDB
+            products_db = ProductsDB()
+            products = products_db.get_all_products()
 
-        if not all_types:
-            st.warning("No product types found in the database.")
-            return None
+            if not products:
+                st.warning(t("productselector_no_products"))
+                return None
 
-        # Multiselect for product types
-        if not st.session_state[f'{self.prefix}_selected_types']:
-            st.session_state[f'{self.prefix}_selected_types'] = all_types
+            # Get all unique product types
+            all_types = self._parse_product_types(products)
 
-        selected_types = st.multiselect(
-            t("productselector_select_types"),
-            options=all_types,
-            default=st.session_state[f'{self.prefix}_selected_types'],
-            key=f"{self.prefix}_types_select"
-        )
-        st.session_state[f'{self.prefix}_selected_types'] = selected_types
+            if not all_types:
+                st.warning("No product types found in the database.")
+                return None
 
-        # Button to select all types
-        if st.button(t("productselector_select_all_types"), key=f"{self.prefix}_select_all_types"):
-            st.session_state[f'{self.prefix}_selected_types'] = all_types
-            st.rerun()
+            # Multiselect for product types
+            if not st.session_state[f'{self.prefix}_selected_types']:
+                st.session_state[f'{self.prefix}_selected_types'] = all_types
 
-        # Filter products based on selected types
-        filtered_products = self._filter_products_by_types(products, selected_types)
+            selected_types = st.multiselect(
+                t("productselector_select_types"),
+                options=all_types,
+                default=st.session_state[f'{self.prefix}_selected_types'],
+                key=f"{self.prefix}_types_select"
+            )
+            st.session_state[f'{self.prefix}_selected_types'] = selected_types
 
-        if not filtered_products:
-            st.warning(t("productselector_no_products"))
-            return None
+            # Button to select all types
+            if st.button(t("productselector_select_all_types"), key=f"{self.prefix}_select_all_types"):
+                st.session_state[f'{self.prefix}_selected_types'] = all_types
+                st.rerun()
 
-        # Initialize selected product if not set
-        if not st.session_state[f'{self.prefix}_selected_product'] or \
-           st.session_state[f'{self.prefix}_selected_product'] not in filtered_products:
-            st.session_state[f'{self.prefix}_selected_product'] = random.choice(filtered_products)
+            # Filter products based on selected types
+            filtered_products = self._filter_products_by_types(products, selected_types)
 
-        # Create a list of product titles for the selectbox
-        product_titles = [product['title'] for product in filtered_products]
-        selected_product_title = st.session_state[f'{self.prefix}_selected_product']['title']
-        default_index = product_titles.index(selected_product_title) if selected_product_title in product_titles else 0
+            if not filtered_products:
+                st.warning(t("productselector_no_products"))
+                return None
 
-        # Selectbox to choose a product
-        selected_title = st.selectbox(
-            t("productselector_select_product"),
-            options=product_titles,
-            index=default_index,
-            key=f"{self.prefix}_product_select"
-        )
+            # Initialize selected product if not set
+            if not st.session_state[f'{self.prefix}_selected_product'] or \
+            st.session_state[f'{self.prefix}_selected_product'] not in filtered_products:
+                st.session_state[f'{self.prefix}_selected_product'] = random.choice(filtered_products)
 
-        # Button to choose a new random product
-        if st.button(t("productselector_random_product"), key=f"{self.prefix}_random_product"):
-            st.session_state[f'{self.prefix}_selected_product'] = random.choice(filtered_products)
-            st.rerun()
+            # Create a list of product titles for the selectbox
+            product_titles = [product['title'] for product in filtered_products]
+            selected_product_title = st.session_state[f'{self.prefix}_selected_product']['title']
+            default_index = product_titles.index(selected_product_title) if selected_product_title in product_titles else 0
 
-        # Update selected product based on user choice
-        selected_product = next((p for p in filtered_products if p['title'] == selected_title), filtered_products[0])
-        if selected_product['title'] != st.session_state[f'{self.prefix}_selected_product']['title']:
-            st.session_state[f'{self.prefix}_selected_product'] = selected_product
+            # Selectbox to choose a product
+            selected_title = st.selectbox(
+                t("productselector_select_product"),
+                options=product_titles,
+                index=default_index,
+                key=f"{self.prefix}_product_select"
+            )
 
-        return selected_product
+            # Button to choose a new random product
+            if st.button(t("productselector_random_product"), key=f"{self.prefix}_random_product"):
+                st.session_state[f'{self.prefix}_selected_product'] = random.choice(filtered_products)
+                st.rerun()
+
+            # Update selected product based on user choice
+            selected_product = next((p for p in filtered_products if p['title'] == selected_title), filtered_products[0])
+            if selected_product['title'] != st.session_state[f'{self.prefix}_selected_product']['title']:
+                st.session_state[f'{self.prefix}_selected_product'] = selected_product
+
+            return selected_product

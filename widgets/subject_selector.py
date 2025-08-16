@@ -173,6 +173,7 @@ class SubjectSelectorWidget(Widget):
             chapters=product_stats['chapters'],
             subchapters=product_stats['subchapters']
         ))
+        st.write(f"URL: {selected_product['url']}")
         with st.expander("Product Excerpt"):
             show_all_product = st.checkbox(t("subjectselector_show_all"), key=f"{self.prefix}_show_all_product")
             excerpt_length = None if show_all_product else 3000
@@ -313,6 +314,7 @@ class SubjectSelectorWidget(Widget):
                 st.session_state[f'{self.prefix}_selected_content'] = {
                     'title': title,
                     'content': content,
+                    'url' : selected_product['url'],
                     'keywords': st.session_state[f'{self.prefix}_selected_content']['keywords']
                 }
 

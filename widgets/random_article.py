@@ -88,7 +88,7 @@ class RandomArticleWidget(Widget):
         # Save URL
         output_url_path = os.path.join(work_dir, "url.txt")
         with open(output_url_path, "w", encoding="utf-8") as f:
-            f.write(product.get('url', ''))
+            f.write(product.get('url', 'https://none.org'))
 
         return result
 
