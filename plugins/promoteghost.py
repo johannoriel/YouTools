@@ -9,14 +9,12 @@ import jwt
 import markdown2
 from lib.social_api import GhostAPI, LinkedinAPI, WordPressAPI, SubstackAPI
 from widgets.random_article import RandomArticleWidget
+from widgets.article_editor import ArticleEditorWidget
 
 translations["en"].update({
     "ghost_tab": "Ghost Publisher",
     "ghost_header": "Publish to Ghost",
-    "ghost_title_label": "Post Title",
-    "ghost_input_label": "Enter your Markdown content",
     "ghost_publish_button": "Publish to Ghost",
-    "ghost_publish_checkbox": "Publish immediately",
     "ghost_processing": "Publishing to Ghost...",
     "ghost_success": "Published successfully! Post ID: {result}",
     "ghost_error": "Publishing failed: {error}",
@@ -24,9 +22,6 @@ translations["en"].update({
     "ghost_config_url": "Ghost Admin URL",
     "ghost_config_api_key_default": "your_api_key",
     "ghost_config_url_default": "https://your-site.com/ghost/api/admin/",
-    "ghost_image_label": "Feature Image",
-    "ghost_load_generated": "Load Generated Article",
-    "ghost_include_url": "Include Source URL",
     "linkedin_tab": "LinkedIn Publisher",
     "linkedin_header": "Publish to LinkedIn",
     "linkedin_publish_button": "Publish to LinkedIn",
@@ -63,10 +58,7 @@ translations["en"].update({
 translations["fr"].update({
     "ghost_tab": "Publicateur Ghost",
     "ghost_header": "Publier sur Ghost",
-    "ghost_title_label": "Titre du post",
-    "ghost_input_label": "Entrez votre contenu Markdown",
     "ghost_publish_button": "Publier sur Ghost",
-    "ghost_publish_checkbox": "Publier immédiatement",
     "ghost_processing": "Publication sur Ghost...",
     "ghost_success": "Publié avec succès ! ID du post : {result}",
     "ghost_error": "Échec de la publication : {error}",
@@ -74,9 +66,6 @@ translations["fr"].update({
     "ghost_config_url": "URL Admin Ghost",
     "ghost_config_api_key_default": "votre_clé_api",
     "ghost_config_url_default": "https://votre-site.com/ghost/api/admin/",
-    "ghost_image_label": "Image de mise en avant",
-    "ghost_load_generated": "Charger l'Article Généré",
-    "ghost_include_url": "Inclure l'URL Source",
     "linkedin_tab": "Publicateur LinkedIn",
     "linkedin_header": "Publier sur LinkedIn",
     "linkedin_publish_button": "Publier sur LinkedIn",
@@ -212,73 +201,17 @@ class PromoteghostPlugin(Plugin):
         # Ghost Publisher Tab
         with tab1:
             st.header(t("ghost_header"))
-
-            default_title = "New Post"
-            default_content = ""
-            default_image_path = None
-            default_url = ""
-
-            article_path = os.path.join(self.work_dir, "article.md")
-            image_path = os.path.join(self.work_dir, "image.png")
-            url_path = os.path.join(self.work_dir, "url.txt")
-            if os.path.exists(article_path):
-                with open(article_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    lines = content.split("\n", 1)
-                    if lines[0].startswith("# "):
-                        default_title = lines[0][2:].strip()
-                        default_content = lines[1] if len(lines) > 1 else ""
-                    else:
-                        default_content = content
-                if os.path.exists(image_path):
-                    default_image_path = image_path
-                if os.path.exists(url_path):
-                    with open(url_path, "r", encoding="utf-8") as f:
-                        default_url = f.read().strip()
-
-            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="ghost_load_generated"):
-                st.session_state["ghost_title"] = default_title
-                st.session_state["ghost_content"] = default_content
-                st.session_state["ghost_image_path"] = default_image_path
-                st.session_state["ghost_url"] = default_url
-
-            post_title = st.text_input(
-                t("ghost_title_label"),
-                value=st.session_state.get("ghost_title", default_title),
-                key="ghost_title"
-            )
-            include_url = st.checkbox(t("ghost_include_url"), value=False, key="ghost_include_url")
-            markdown_content = st.text_area(
-                t("ghost_input_label"),
-                value=st.session_state.get("ghost_content", default_content) + (f"\n\nSource: {st.session_state.get('ghost_url', default_url)}" if include_url and st.session_state.get('ghost_url', default_url) else ""),
-                height=300,
-                key="ghost_content"
-            )
-
-            st.subheader(t("ghost_image_label"))
-            uploaded_image = st.file_uploader("Upload an image (Ghost)", type=["png", "jpg", "jpeg"], key="ghost_image_upload")
-            selected_image_path = st.session_state.get("ghost_image_path", default_image_path)
-
-            if uploaded_image:
-                selected_image_path = os.path.join(self.work_dir, "ghost_uploaded_image.png")
-                with open(selected_image_path, "wb") as f:
-                    f.write(uploaded_image.getbuffer())
-                st.session_state["ghost_image_path"] = selected_image_path
-
-            if selected_image_path:
-                st.image(selected_image_path, caption="Selected Image (Ghost)", use_container_width=True)
-
-            publish_immediately = st.checkbox(t("ghost_publish_checkbox"), key="ghost_publish_immediately")
+            editor = ArticleEditorWidget("ghosteditor", "ghost", self.plugin_manager)
+            result = editor.display()
 
             if st.button(t("ghost_publish_button"), key="ghost_publish"):
                 with st.spinner(t("ghost_processing")):
                     try:
-                        html_content = markdown2.markdown(markdown_content)
                         response = self.ghost_api.post(
-                            post_title,
-                            html_content,
-                            publish_immediately,
-                            feature_image=selected_image_path
+                            result["title"],
+                            result["html_content"],
+                            result["publish_immediately"],
+                            feature_image=result["image_path"]
                         )
                         if response:
                             post_id = response.get('posts', [{}])[0].get('id', 'N/A')
@@ -299,78 +232,20 @@ class PromoteghostPlugin(Plugin):
         # LinkedIn Publisher Tab
         with tab3:
             st.header(t("linkedin_header"))
+            editor = ArticleEditorWidget("linkedineditor", "linkedin", self.plugin_manager)
+            result = editor.display()
 
-            default_title = "New Post"
-            default_content = ""
-            default_image_path = None
-            default_url = ""
-
-            article_path = os.path.join(self.work_dir, "article.md")
-            image_path = os.path.join(self.work_dir, "image.png")
-            url_path = os.path.join(self.work_dir, "url.txt")
-            if os.path.exists(article_path):
-                with open(article_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    lines = content.split("\n", 1)
-                    if lines[0].startswith("# "):
-                        default_title = lines[0][2:].strip()
-                        default_content = lines[1] if len(lines) > 1 else ""
-                    else:
-                        default_content = content
-                if os.path.exists(image_path):
-                    default_image_path = image_path
-                if os.path.exists(url_path):
-                    with open(url_path, "r", encoding="utf-8") as f:
-                        default_url = f.read().strip()
-
-            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="linkedin_load_generated"):
-                st.session_state["linkedin_title"] = default_title
-                st.session_state["linkedin_content"] = default_content
-                st.session_state["linkedin_image_path"] = default_image_path
-                st.session_state["linkedin_url"] = default_url
-
-            post_title = st.text_input(
-                t("ghost_title_label"),
-                value=st.session_state.get("linkedin_title", default_title),
-                key="linkedin_title"
-            )
-            include_url = st.checkbox(t("ghost_include_url"), value=False, key="linkedin_include_url")
-            markdown_content = st.text_area(
-                t("ghost_input_label"),
-                value=st.session_state.get("linkedin_content", default_content) + (f"\n\nSource: {st.session_state.get('linkedin_url', default_url)}" if include_url and st.session_state.get('linkedin_url', default_url) else ""),
-                height=300,
-                key="linkedin_content"
-            )
-
-            st.subheader(t("ghost_image_label"))
-            uploaded_image = st.file_uploader("Upload an image (LinkedIn)", type=["png", "jpg", "jpeg", "gif"], key="linkedin_image_upload")
-            selected_image_path = st.session_state.get("linkedin_image_path", default_image_path)
-
-            if uploaded_image:
-                selected_image_path = os.path.join(self.work_dir, "linkedin_uploaded_image.png")
-                with open(selected_image_path, "wb") as f:
-                    f.write(uploaded_image.getbuffer())
-                st.session_state["linkedin_image_path"] = selected_image_path
-
-            if selected_image_path:
-                st.image(selected_image_path, caption="Selected Image (LinkedIn)", use_container_width=True)
-
-            include_image = st.checkbox("Include Image in Post", value=True if selected_image_path else False, key="linkedin_include_image")
-            source_url = st.session_state.get('linkedin_url', default_url)
-            st.write(source_url)
+            source_url = st.session_state.get('linkedin_url', '')
 
             if st.button(t("linkedin_publish_button"), key="linkedin_publish"):
                 with st.spinner(t("linkedin_processing")):
                     try:
-                        # Convert markdown to plain text
-                        plain_content = self._markdown_to_text(markdown_content)
-
-                        feature_image = selected_image_path if include_image and selected_image_path else None
+                        plain_content = self._markdown_to_text(result["markdown_content"])
                         response = self.linkedin_api.post_article(
-                            post_title,
+                            result["title"],
                             plain_content,
                             source_url=source_url,
-                            feature_image=feature_image
+                            feature_image=result["image_path"]
                         )
                         if response:
                             post_id = response.get('id', 'N/A')
@@ -402,12 +277,10 @@ class PromoteghostPlugin(Plugin):
                                 self.plugin_manager.config['common']['wordpress_access_token'] = token
                                 self.plugin_manager.save_config(config)
                                 st.success(t("wordpress_token_success"))
-                                st.success("OK token")
                             else:
                                 st.error(t("wordpress_token_error").format(error="Failed to retrieve token"))
                         except Exception as e:
                             st.error(t("wordpress_token_error").format(error=str(e)))
-                            raise
 
             # Token retrieval section
             st.subheader("WordPress Authentication")
@@ -425,72 +298,17 @@ class PromoteghostPlugin(Plugin):
             else:
                 st.success("WordPress is authenticated. You can now publish posts.")
 
-            default_title = "New Post"
-            default_content = ""
-            default_image_path = None
-            default_url = ""
-
-            article_path = os.path.join(self.work_dir, "article.md")
-            image_path = os.path.join(self.work_dir, "image.png")
-            url_path = os.path.join(self.work_dir, "url.txt")
-            if os.path.exists(article_path):
-                with open(article_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    lines = content.split("\n", 1)
-                    if lines[0].startswith("# "):
-                        default_title = lines[0][2:].strip()
-                        default_content = lines[1] if len(lines) > 1 else ""
-                    else:
-                        default_content = content
-                if os.path.exists(image_path):
-                    default_image_path = image_path
-                if os.path.exists(url_path):
-                    with open(url_path, "r", encoding="utf-8") as f:
-                        default_url = f.read().strip()
-
-            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="wordpress_load_generated"):
-                st.session_state["wordpress_title"] = default_title
-                st.session_state["wordpress_content"] = default_content
-                st.session_state["wordpress_image_path"] = default_image_path
-                st.session_state["wordpress_url"] = default_url
-
-            post_title = st.text_input(
-                t("ghost_title_label"),
-                value=st.session_state.get("wordpress_title", default_title),
-                key="wordpress_title"
-            )
-            include_url = st.checkbox(t("ghost_include_url"), value=False, key="wordpress_include_url")
-            markdown_content = st.text_area(
-                t("ghost_input_label"),
-                value=st.session_state.get("wordpress_content", default_content) + (f"\n\nSource: {st.session_state.get('wordpress_url', default_url)}" if include_url and st.session_state.get('wordpress_url', default_url) else ""),
-                height=300,
-                key="wordpress_content"
-            )
-
-            st.subheader(t("ghost_image_label"))
-            uploaded_image = st.file_uploader("Upload an image (WordPress)", type=["png", "jpg", "jpeg", "gif"], key="wordpress_image_upload")
-            selected_image_path = st.session_state.get("wordpress_image_path", default_image_path)
-
-            if uploaded_image:
-                selected_image_path = os.path.join(self.work_dir, "wordpress_uploaded_image.png")
-                with open(selected_image_path, "wb") as f:
-                    f.write(uploaded_image.getbuffer())
-                st.session_state["wordpress_image_path"] = selected_image_path
-
-            if selected_image_path:
-                st.image(selected_image_path, caption="Selected Image (WordPress)", use_container_width=True)
-
-            publish_immediately = st.checkbox(t("ghost_publish_checkbox"), key="wordpress_publish_immediately")
+            editor = ArticleEditorWidget("wordpresseditor", "wordpress", self.plugin_manager)
+            result = editor.display()
 
             if st.button(t("wordpress_publish_button"), key="wordpress_publish"):
                 with st.spinner(t("wordpress_processing")):
                     try:
-                        html_content = markdown2.markdown(markdown_content)
                         response = self.wordpress_api.post(
-                            post_title,
-                            html_content,
-                            publish_immediately,
-                            feature_image=selected_image_path
+                            result["title"],
+                            result["html_content"],
+                            result["publish_immediately"],
+                            feature_image=result["image_path"]
                         )
                         if response:
                             post_id = response.get('id', 'N/A')
@@ -549,7 +367,6 @@ class PromoteghostPlugin(Plugin):
                             response = self.substack_api.publish_draft(draft_id)
                             if response:
                                 st.success(t("substack_success").format(result=response.get('id', 'N/A')))
-                                # Refresh drafts list after publishing
                                 st.session_state["substack_drafts"] = self.substack_api.list_drafts()
                             else:
                                 st.error(t("substack_error").format(error="Unknown error"))
@@ -559,76 +376,21 @@ class PromoteghostPlugin(Plugin):
                 st.info(t("substack_no_drafts"))
 
             # New post section
-            default_title = "New Post"
-            default_content = ""
-            default_image_path = None
-            default_url = ""
-
-            article_path = os.path.join(self.work_dir, "article.md")
-            image_path = os.path.join(self.work_dir, "image.png")
-            url_path = os.path.join(self.work_dir, "url.txt")
-            if os.path.exists(article_path):
-                with open(article_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    lines = content.split("\n", 1)
-                    if lines[0].startswith("# "):
-                        default_title = lines[0][2:].strip()
-                        default_content = lines[1] if len(lines) > 1 else ""
-                    else:
-                        default_content = content
-                if os.path.exists(image_path):
-                    default_image_path = image_path
-                if os.path.exists(url_path):
-                    with open(url_path, "r", encoding="utf-8") as f:
-                        default_url = f.read().strip()
-
-            if os.path.exists(article_path) and st.button(t("ghost_load_generated"), key="substack_load_generated"):
-                st.session_state["substack_title"] = default_title
-                st.session_state["substack_content"] = default_content
-                st.session_state["substack_image_path"] = default_image_path
-                st.session_state["substack_url"] = default_url
-
-            post_title = st.text_input(
-                t("ghost_title_label"),
-                value=st.session_state.get("substack_title", default_title),
-                key="substack_title"
-            )
-            include_url = st.checkbox(t("ghost_include_url"), value=False, key="substack_include_url")
-            markdown_content = st.text_area(
-                t("ghost_input_label"),
-                value=st.session_state.get("substack_content", default_content) + (f"\n\nSource: {st.session_state.get('substack_url', default_url)}" if include_url and st.session_state.get('substack_url', default_url) else ""),
-                height=300,
-                key="substack_content"
-            )
-
-            st.subheader(t("ghost_image_label"))
-            uploaded_image = st.file_uploader("Upload an image (Substack)", type=["png", "jpg", "jpeg"], key="substack_image_upload")
-            selected_image_path = st.session_state.get("substack_image_path", default_image_path)
-
-            if uploaded_image:
-                selected_image_path = os.path.join(self.work_dir, "substack_uploaded_image.png")
-                with open(selected_image_path, "wb") as f:
-                    f.write(uploaded_image.getbuffer())
-                st.session_state["substack_image_path"] = selected_image_path
-
-            if selected_image_path:
-                st.image(selected_image_path, caption="Selected Image (Substack)", use_container_width=True)
-
-            publish_immediately = st.checkbox(t("ghost_publish_checkbox"), key="substack_publish_immediately")
+            editor = ArticleEditorWidget("substackeditor", "substack", self.plugin_manager)
+            result = editor.display()
 
             if st.button(t("substack_publish_button"), key="substack_publish"):
                 with st.spinner(t("substack_processing")):
                     try:
                         response = self.substack_api.post(
-                            post_title,
-                            markdown_content,
-                            publish_immediately,
-                            feature_image=selected_image_path
+                            result["title"],
+                            result["markdown_content"],
+                            result["publish_immediately"],
+                            feature_image=result["image_path"]
                         )
                         if response:
                             post_id = response.get('id', 'N/A')
                             st.success(t("substack_success").format(result=post_id))
-                            # Refresh drafts list after creating a new post
                             st.session_state["substack_drafts"] = self.substack_api.list_drafts()
                             for key in ["substack_title", "substack_content", "substack_image_path", "substack_url"]:
                                 if key in st.session_state:
