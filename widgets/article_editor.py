@@ -15,7 +15,9 @@ translations["en"].update({
     "editor_publish_checkbox": "Publish immediately",
     "editor_include_image": "Include Image in Post",
     "editor_translate_button": "Translate to French",
-    "translate_prompt": "Traduisez l'article suivant en français sans ajouter de commentaires, fournissez uniquement le texte traduit :"
+    "translate_prompt": "Traduisez l'article suivant en français sans ajouter de commentaires, fournissez uniquement le texte traduit :",
+    "editor_save_button": "Save Article",
+    "editor_save_success": "Article saved successfully!"
 })
 
 translations["fr"].update({
@@ -27,7 +29,9 @@ translations["fr"].update({
     "editor_publish_checkbox": "Publier immédiatement",
     "editor_include_image": "Inclure l'image dans le post",
     "editor_translate_button": "Traduire en anglais",
-    "translate_prompt": "Translate the following article into English without adding any comments, just provide the translated text:"
+    "translate_prompt": "Translate the following article into English without adding any comments, just provide the translated text:",
+    "editor_save_button": "Sauvegarder l'Article",
+    "editor_save_success": "Article sauvegardé avec succès !"
 })
 
 class ArticleEditorWidget(Widget):
@@ -78,13 +82,12 @@ class ArticleEditorWidget(Widget):
         content_value = st.session_state.get(f"{self.prefix}_content", default_content) or ""
         source_url = st.session_state.get(f"{self.prefix}_url", default_url) or ""
 
-
         if st.button(t("editor_translate_button"), key=f"{self.prefix}_translate"):
             if content_value:
                 prompt = t("translate_prompt")
                 translated_content = self.process_with_llm(prompt, content_value)
                 st.session_state[f"{self.prefix}_content"] = translated_content
-                st.session_state[f"{self.prefix}_title"] = self.process_with_llm(t("translate_prompt"),st.session_state.get(f"{self.prefix}_title", default_title))
+                st.session_state[f"{self.prefix}_title"] = self.process_with_llm(t("translate_prompt"), st.session_state.get(f"{self.prefix}_title", default_title))
 
         # Input fields
         post_title = st.text_input(
@@ -130,6 +133,19 @@ class ArticleEditorWidget(Widget):
             value=True if selected_image_path else False,
             key=f"{self.prefix}_include_image"
         )
+
+        # Save button
+        if st.button(t("editor_save_button"), key=f"{self.prefix}_save"):
+            try:
+                # Save article content
+                with open(article_path, "w", encoding="utf-8") as f:
+                    f.write(f"# {post_title}\n{markdown_content}")
+                # Save source URL
+                with open(url_path, "w", encoding="utf-8") as f:
+                    f.write(source_url)
+                st.success(t("editor_save_success"))
+            except Exception as e:
+                st.error(f"Failed to save article: {str(e)}")
 
         # Publish immediately checkbox
         publish_immediately = st.checkbox(t("editor_publish_checkbox"), key=f"{self.prefix}_publish_immediately")
