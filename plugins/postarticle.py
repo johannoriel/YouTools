@@ -109,7 +109,15 @@ class PostarticlePlugin(Plugin):
         self.work_dir = self.work_dir()
         # Initialize Substack authentication status in session state
         if "substack_authenticated" not in st.session_state:
-            st.session_state["substack_authenticated"] = self.substack_api._is_cookie_valid()
+            # Use the first publication URL as default for cookie validation
+            publication_urls = self.plugin_manager.config['common'].get('substack_publication_url', '')
+            if isinstance(publication_urls, str):
+                publication_urls = [url.strip() for url in publication_urls.split(';') if url.strip()]
+            default_publication_url = publication_urls[0] if publication_urls else None
+            if default_publication_url:
+                st.session_state["substack_authenticated"] = self.substack_api._is_cookie_valid(default_publication_url)
+            else:
+                st.session_state["substack_authenticated"] = False
         if "substack_drafts" not in st.session_state:
             st.session_state["substack_drafts"] = []
 
@@ -280,6 +288,23 @@ class PostarticlePlugin(Plugin):
         with tab5:
             st.header(t("substack_header"))
 
+            # Récupérer la liste des URLs de publication depuis la configuration
+            publication_urls = self.plugin_manager.config['common'].get('substack_publication_url', '')
+            if isinstance(publication_urls, str):
+                publication_urls = [url.strip() for url in publication_urls.split(';') if url.strip()]
+            if not publication_urls:
+                st.error("No Substack publication URLs configured.")
+                return
+
+            # Sélecteur pour choisir la publication
+            st.subheader("Select Publication")
+            selected_publication = st.selectbox(
+                "Choose a Substack publication",
+                options=publication_urls,
+                index=0,  # Par défaut, sélectionner la première URL
+                key="substack_publication_select"
+            )
+
             # Authentication status
             st.subheader(t("substack_auth_status"))
             if st.session_state.get("substack_authenticated", False):
@@ -291,9 +316,9 @@ class PostarticlePlugin(Plugin):
             if st.button(t("substack_reauth_button"), key="substack_reauth"):
                 with st.spinner(t("substack_reauth_processing")):
                     try:
-                        self.substack_api._renew_cookie(self.substack_api.email, self.substack_api.password)
-                        self.substack_api._initialize_api()
-                        st.session_state["substack_authenticated"] = self.substack_api._is_cookie_valid()
+                        #self.substack_api._renew_cookie(self.substack_api.email, self.substack_api.password, selected_publication)
+                        self.substack_api._initialize_api(publication_url=selected_publication, force=True)
+                        st.session_state["substack_authenticated"] = self.substack_api._is_cookie_valid(selected_publication)
                         if st.session_state["substack_authenticated"]:
                             st.success("Substack re-authenticated successfully!")
                         else:
@@ -307,7 +332,7 @@ class PostarticlePlugin(Plugin):
             if st.button(t("substack_refresh_drafts_button"), key="substack_refresh_drafts"):
                 with st.spinner("Refreshing Substack drafts..."):
                     try:
-                        st.session_state["substack_drafts"] = self.substack_api.list_drafts()
+                        st.session_state["substack_drafts"] = self.substack_api.list_drafts(publication_url=selected_publication)
                     except Exception as e:
                         st.error(f"Failed to refresh drafts: {str(e)}")
 
@@ -319,10 +344,10 @@ class PostarticlePlugin(Plugin):
                     with st.spinner(t("substack_processing")):
                         try:
                             draft_id = draft_options[selected_draft]
-                            response = self.substack_api.publish_draft(draft_id)
+                            response = self.substack_api.publish_draft(draft_id, publication_url=selected_publication)
                             if response:
                                 st.success(t("substack_success").format(result=response.get('id', 'N/A')))
-                                st.session_state["substack_drafts"] = self.substack_api.list_drafts()
+                                st.session_state["substack_drafts"] = self.substack_api.list_drafts(publication_url=selected_publication)
                             else:
                                 st.error(t("substack_error").format(error="Unknown error"))
                         except Exception as e:
@@ -341,12 +366,13 @@ class PostarticlePlugin(Plugin):
                             result["title"],
                             result["markdown_content"],
                             result["publish_immediately"],
-                            feature_image=result["image_path"]
+                            feature_image=result["image_path"],
+                            publication_url=selected_publication
                         )
                         if response:
                             post_id = response.get('id', 'N/A')
                             st.success(t("substack_success").format(result=post_id))
-                            st.session_state["substack_drafts"] = self.substack_api.list_drafts()
+                            st.session_state["substack_drafts"] = self.substack_api.list_drafts(publication_url=selected_publication)
                             for key in ["substack_title", "substack_content", "substack_image_path", "substack_url"]:
                                 if key in st.session_state:
                                     del st.session_state[key]
