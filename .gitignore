@@ -11,7 +11,6 @@ imggen_prompt_history.json
 .aider*
 youtube_database.db
 youtube_database.db-journal
-tests
 bench_results.db
 config.save.json
 canva_token.json
@@ -25,3 +24,7 @@ plugins/.ropeproject
 products.db
 selenium_cookies.json
 substack_cookies.json
+experimentations
+selenium_cookies*.json
+substack_cookies*.json
+youtube_database (Copie).db

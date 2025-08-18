@@ -6,26 +6,48 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from lib.global_vars import t, translations
-from app import Plugin
+from app import Plugin, unit_test
 import streamlit as st
 import torch
+import pandas as pd  # For test result tables
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
     "channel_id": "YouTube Channel ID",
     "work_directory": "Work Directory",
+    "test_directory": "Test Directory",
+    "test_mode": "Test Mode",
+    "run_tests": "Run Tests",
+    "test_results": "Test Results",
+    "no_tests_run": "No tests have been run yet. Click 'Run Tests' in the sidebar.",
     "preferred_language": "Preferred Language for Transcriptions",
     "upload_finished": "Upload finished ! ID of the video",
     "notification_sound": "Notification sound file",
     "play_sound": "Play notification sound",
+    "test_header": "Test Plugin - Simple Addition",
+    "test_num1_label": "Enter first number",
+    "test_num2_label": "Enter second number",
+    "test_add_button": "Add Numbers",
+    "test_result": "Result: {result}",
 })
+
 translations["fr"].update({
     "channel_id": "ID de la chaîne YouTube",
     "work_directory": "Répertoire de travail",
+    "test_directory": "Répertoire de test",
+    "test_mode": "Mode de test",
+    "run_tests": "Exécuter les tests",
+    "test_results": "Résultats des Tests",
+    "no_tests_run": "Aucun test n'a été lancé. Cliquez sur 'Lancer les Tests' dans la barre latérale.",
     "preferred_language": "Langue préférée pour les transcriptions",
     "upload_finished": "Upload terminé ! ID de la vidéo",
     "notification_sound": "Fichier son de notification",
     "play_sound": "Jouer le son de notification",
+    "test_header": "Plugin de Test - Addition Simple",
+    "test_num1_label": "Entrez le premier nombre",
+    "test_num2_label": "Entrez le second nombre",
+    "test_add_button": "Ajouter les Nombres",
+    "test_result": "Résultat : {result}",
 })
 
 yt_categories = {
@@ -63,17 +85,25 @@ yt_categories = {
     "44": "Trailers"
 }
 
-
 def get_category_id(category_name):
     for id, name in yt_categories.items():
         if name.lower() == category_name.lower():
             return id
     return "22"  # Default to "People & Blogs" if not found
 
-
 class CommonPlugin(Plugin):
     def get_config_fields(self):
         return {
+            "work_directory": {
+                "type": "text",
+                "label": t("work_directory"),
+                "default": "/home/joriel/Vidéos"
+            },
+            "test_directory": {
+                "type": "text",
+                "label": t("test_directory"),
+                "default": "/home/joriel/Vidéos/Test"
+            },
             "notification_sound": {
                 "type": "text",
                 "label": t("notification_sound"),
@@ -84,20 +114,15 @@ class CommonPlugin(Plugin):
                 "label": t("channel_id"),
                 "default": ""
             },
-            "project_number": {  # Nouveau champ pour la clé du projet
+            "project_number": {
                 "type": "text",
                 "label": "YouTube project number",
                 "default": ""
             },
-            "youtube_api_key": {  # Nouveau champ pour la clé API
+            "youtube_api_key": {
                 "type": "text",
                 "label": "YouTube API Key",
                 "default": ""
-            },
-            "work_directory": {
-                "type": "text",
-                "label": t("work_directory"),
-                "default": "/home/joriel/Vidéos"
             },
             "language": {
                 "type": "select",
@@ -245,24 +270,46 @@ class CommonPlugin(Plugin):
     def get_tabs(self):
         return [{"name": "Commun", "plugin": "common"}]
 
+    def has_tests(self) -> bool:
+        return True
+
+    def add_numbers(self, a: int, b: int) -> int:
+        """Testable method for simple addition."""
+        return a + b
+
+    def run(self, config):
+        st.header(t("test_header"))
+
+        num1 = st.number_input(t("test_num1_label"), value=0)
+        num2 = st.number_input(t("test_num2_label"), value=0)
+
+        if st.button(t("test_add_button")):
+            result = self.add_numbers(num1, num2)
+            st.success(t("test_result").format(result=result))
+
+        # Original common plugin functionality
+        st.header("Common Plugin")
+        st.write(f"Channel: {config['common']['channel_id']}")
+        st.write(f"{t('work_directory')}: {config['common']['work_directory']}")
+        torch.cuda.empty_cache()
+        st.write("CUDA memory reset")
+        self.play_notification_sound()
+
     def play_notification_sound(self):
         """Joue un son MP3 prédéfini si configuré"""
-        sound_file = os.path.expanduser(
-            self.get_config('notification_sound'))
+        sound_file = os.path.expanduser(self.get_config('notification_sound'))
         if sound_file and os.path.exists(sound_file):
             st.audio(sound_file, format='audio/mp3', autoplay=True)
         elif sound_file:
             st.warning(f"Sound file not found: {sound_file}")
 
-    def run(self, config):
-        st.header("Common Plugin")
-        st.write(f"Channel: {config['common']['channel_id']}")
-        st.write(
-            f"{t('work_directory')}: {config['common']['work_directory']}")
-        torch.cuda.empty_cache()
-        st.write("CUDA memory reset")
-        self.play_notification_sound()
+    @unit_test
+    def test_add_basic(self):
+        assert self.add_numbers(2, 3) == 5, "2 + 3 should equal 5"
 
+    @unit_test
+    def test_add_zero(self):
+        assert self.add_numbers(0, 0) == 0, "0 + 0 should equal 0"
 
 SCOPES = [
     'https://www.googleapis.com/auth/youtube.force-ssl',
@@ -271,7 +318,6 @@ SCOPES = [
     'https://www.googleapis.com/auth/cloud-platform.read-only',
     'https://www.googleapis.com/auth/monitoring.read',
 ]
-
 
 def get_credentials():
     creds = None
@@ -300,7 +346,6 @@ def get_credentials():
             token.write(creds.to_json())
 
     return creds
-
 
 def upload_video(filename, title, description, category, keywords, privacy_status):
     credentials = get_credentials()
@@ -337,7 +382,6 @@ def upload_video(filename, title, description, category, keywords, privacy_statu
     st.success(t('upload_finished')+f" : {response['id']}")
     return response['id']
 
-
 def list_video_files2(directory, prefix_exclude=None, extensions=('.mkv', '.mp4')):
     def rename_file_without_spaces(file, directory):
         if ' ' in file:
@@ -350,7 +394,7 @@ def list_video_files2(directory, prefix_exclude=None, extensions=('.mkv', '.mp4'
 
     video_files = []
     for file in os.listdir(directory):
-        if file.lower().endswith(tuple(extensions)):  # Convert list to tuple
+        if file.lower().endswith(tuple(extensions)):
             file = rename_file_without_spaces(file, directory)
             if prefix_exclude:
                 if not any(file.startswith(prefix) for prefix in prefix_exclude):
@@ -365,7 +409,6 @@ def list_video_files2(directory, prefix_exclude=None, extensions=('.mkv', '.mp4'
     video_files.sort(key=lambda x: x[2], reverse=True)
     return video_files
 
-
 def list_video_files(directory):
     video_files = []
     outfile_videos = []
@@ -373,17 +416,11 @@ def list_video_files(directory):
     short_videos = []
     for file in os.listdir(directory):
         if file.lower().endswith(('.mkv', '.mp4', '.mov', '.ogg')):
-            # Check if the file name contains spaces
             if ' ' in file:
-                # Create a new file name by replacing spaces with underscores
                 new_file = file.replace(' ', '_')
                 old_path = os.path.join(directory, file)
                 new_path = os.path.join(directory, new_file)
-
-                # Rename the file
                 os.rename(old_path, new_path)
-
-                # Use the new file name for further processing
                 file = new_file
 
             full_path = os.path.join(directory, file)
@@ -403,11 +440,9 @@ def list_video_files(directory):
     short_videos.sort(key=lambda x: x[2], reverse=True)
     return video_files, outfile_videos, chroma_videos, short_videos
 
-
 def list_all_video_files(directory):
     l1, l2, l3, l4 = list_video_files(directory)
     return l1+l2+l3+l4
-
 
 def remove_quotes(s):
     if s.startswith('"') and s.endswith('"'):

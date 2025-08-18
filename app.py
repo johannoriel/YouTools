@@ -8,10 +8,21 @@ from lib.global_vars import translations, t
 import torch
 # https://discuss.streamlit.io/t/error-in-torch-with-streamlit/90908/5
 torch.classes.__path__ = []
+import pandas as pd
+import pytest
+import inspect
 
 # Constants
 CONFIG_FILE = "config.json"
 CORE_PLUGINS = {'common', 'llm'}  # Add your essential plugins here
+
+
+# Unit test decorator
+def unit_test(func):
+    """Decorator to mark methods as unit tests."""
+    print(f"Marking {func.__name__} as unit test")
+    func.is_unit_test = True
+    return func
 
 
 def list_directories(directory):
@@ -113,6 +124,9 @@ class Plugin:
     def get_sidebar_config_ui(self, expander, config: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
+    def has_tests(self) -> bool:
+        return False
+
     # Helper
     def process_with_llm(self, prompt: str, sysprompt: str = None, context: str = None, repeat_on_failure: bool = True, number_repeat: int = 2) -> str:
         llm = self.plugin_manager.get_plugin('llm')
@@ -124,8 +138,10 @@ class Plugin:
             prompt, sysprompt, context, repeat_on_failure, number_repeat)
         return response
 
-    # Helper
+    # Helper (modified to support test mode)
     def work_dir(self):
+        if st.session_state.get('test_mode', False):
+            return os.path.expanduser(self.plugin_manager.config['common']['test_directory'])
         return os.path.expanduser(self.plugin_manager.config['common']['work_directory'])
 
 
@@ -208,7 +224,7 @@ class PluginManager:
         for plugin_name, plugin in self.plugins.items():
             tabs = plugin.get_tabs()
             for tab in tabs:
-                tab['id'] = plugin_name
+                tab['id'] = plugin_name if 'id' not in tab else tab['id']
                 tab['starred'] = plugin_name in self.starred_plugins
             # Replace the placeholder with actual tabs
             all_tabs = [t for t in all_tabs if t['plugin']
@@ -233,119 +249,289 @@ class PluginManager:
             plugin.run(config)
 
 
+def parse_pytest_output(reports: List[pytest.TestReport]) -> List[Dict[str, str]]:
+    tests = []
+    print(f"Parsing {len(reports)} test reports")
+    for report in reports:
+        if report.when == 'call' and report.outcome in ('passed', 'failed', 'skipped'):
+            test_name = report.nodeid
+            status = report.outcome.upper()
+            tests.append({'test': test_name, 'status': status})
+            print(f"Test: {test_name}, Status: {status}")
+    return tests
+
+
+def run_all_tests(plugin_manager):
+    print("Starting run_all_tests")
+    results = {}
+    test_dir = 'tests'
+    os.makedirs(test_dir, exist_ok=True)
+    print(f"Ensured test directory exists: {test_dir}")
+
+    # List contents of tests/ directory for debugging
+    test_files = os.listdir(test_dir)
+    print(f"Files in {test_dir}: {test_files}")
+    feature_files = [f for f in test_files if f.endswith('.feature')]
+    print(f"Feature files in {test_dir}: {feature_files}")
+
+    project_root = os.path.abspath(os.path.dirname(__file__))
+    os.environ['PYTHONPATH'] = f"{project_root}:{os.environ.get('PYTHONPATH', '')}"
+    print(f"Set PYTHONPATH to: {os.environ['PYTHONPATH']}")
+
+    # Custom pytest plugin to collect test reports
+    class TestReportCollector:
+        def __init__(self):
+            self.reports = []
+
+        def pytest_runtest_logreport(self, report):
+            self.reports.append(report)
+            print(f"Collected report for {report.nodeid}: {report.outcome}")
+
+    collector = TestReportCollector()
+
+    # Run unit tests for all plugins
+    for plugin_name in plugin_manager.available_plugins:
+        print(f"Processing plugin: {plugin_name}")
+        plugin = plugin_manager.get_plugin(plugin_name)
+        if plugin.has_tests():
+            print(f"Plugin {plugin_name} has tests")
+            test_methods = []
+            for name, method in inspect.getmembers(plugin, predicate=inspect.ismethod):
+                if getattr(method, 'is_unit_test', False):
+                    test_methods.append(name)
+                    print(f"Found unit test method: {name}")
+
+            if test_methods:
+                print(f"Found {len(test_methods)} unit tests for {plugin_name}")
+                # Create a temporary test file
+                test_file = os.path.join(test_dir, f'test_{plugin_name}_unit.py')
+                module_code = f"""
+from plugins.{plugin_name} import {plugin_name.capitalize()}Plugin
+from app import PluginManager
+
+plugin_manager = PluginManager({{}})
+plugin = {plugin_name.capitalize()}Plugin('{plugin_name}', plugin_manager)
+"""
+                for test_name in test_methods:
+                    module_code += f"""
+def test_{test_name}():
+    plugin.{test_name}()
+"""
+                print(f"Writing test module to {test_file}:\n{module_code}")
+                try:
+                    with open(test_file, 'w') as f:
+                        f.write(module_code)
+                    pytest_args = ['-v', '--tb=short', test_file]
+                    print(f"Running pytest with args: {pytest_args}")
+                    result = pytest.main(pytest_args, plugins=[collector])
+                    print(f"Pytest result for {plugin_name} unit tests: {result}")
+                    results[plugin_name] = parse_pytest_output(collector.reports)
+                    print(f"Unit test results for {plugin_name}: {results[plugin_name]}")
+                    collector.reports = []  # Reset for next plugin
+                except Exception as e:
+                    print(f"Error running unit tests for {plugin_name}: {str(e)}")
+                    results[plugin_name] = [{'test': f'Error running unit tests for {plugin_name}', 'status': str(e)}]
+                finally:
+                    if os.path.exists(test_file):
+                        os.remove(test_file)
+                        print(f"Cleaned up {test_file}")
+            else:
+                print(f"No unit tests found for {plugin_name}")
+                results[plugin_name] = []
+
+    # Run BDD tests in tests/ directory
+    print(f"Running BDD tests in {test_dir}")
+    try:
+        pytest_args = ['-v', '--tb=short',  test_dir]
+        print(f"Running pytest with args: {pytest_args}")
+        result = pytest.main(pytest_args, plugins=[collector])
+        print(f"Pytest result for BDD tests: {result}")
+        bdd_results = parse_pytest_output(collector.reports)
+        print(f"BDD test results: {bdd_results}")
+        # Check for BDD report file
+        if os.path.exists('tests/bdd_report.json'):
+            with open('tests/bdd_report.json', 'r') as f:
+                print(f"BDD report content: {f.read()}")
+        else:
+            print("No BDD report generated")
+        # Distribute BDD results to plugins based on naming
+        for plugin_name in plugin_manager.available_plugins:
+            if plugin_name not in results:
+                results[plugin_name] = []
+            plugin_bdd_results = [r for r in bdd_results if f'test_{plugin_name}' in r['test'] or plugin_name in r['test']]
+            results[plugin_name].extend(plugin_bdd_results)
+            print(f"BDD results for {plugin_name}: {plugin_bdd_results}")
+    except Exception as e:
+        print(f"Error running BDD tests: {str(e)}")
+        for plugin_name in plugin_manager.available_plugins:
+            if plugin_name not in results:
+                results[plugin_name] = []
+            results[plugin_name].append({'test': 'Error running BDD tests', 'status': str(e)})
+
+    st.session_state['test_results'] = results
+    print(f"Final test results: {results}")
+    st.success("Tests completed.")
+
+
 def main():
-    # Load configuration
-    load_dotenv()
-    config = load_config()
-    # Initialize language
-    if 'lang' not in st.session_state:
-        st.session_state.lang = config['common']['language']
-
-    if 'presentation_mode' not in st.session_state or ('presentation_mode' in st.session_state and not st.session_state.presentation_mode):
-        st.set_page_config(page_title="YoutTools",
-                           layout="wide", initial_sidebar_state="expanded")
-        st.title(t("page_title"))
-    else:
-        st.set_page_config(page_title="YoutTools", layout="wide",
-                           initial_sidebar_state="collapsed")
-
-    # Initialize plugin manager and load core plugins only
-    plugin_manager = PluginManager(config)
-    plugin_manager.load_core_plugins()
-    plugin_manager.load_starred_plugins(config)
-
-    # Create tabs
-    tabs = [{"id": "configurations", "name": t(
-        "configurations")}] + plugin_manager.get_all_tabs()
-
-    expander = st.sidebar.expander("Configuration", expanded=True)
-
-    # Language selection
-    new_lang = expander.selectbox(
-        "Choose your language / Choisissez votre langue",
-        options=["en", "fr"],
-        index=["en", "fr"].index(st.session_state.lang),
-        key="lang_selector"
-    )
-
-    if new_lang != st.session_state.lang:
-        st.session_state.lang = new_lang
-        st.rerun()
-
-    #Work directory selector
-    expander.subheader(t("work_directory"))
-    current_work_dir = os.path.expanduser(config['common']['work_directory'])
-    directories = list_directories(current_work_dir)
-    parent_dir = os.path.dirname(current_work_dir)
-    dir_options = [current_work_dir, parent_dir] + [d[1] for d in directories]
-    dir_labels = [current_work_dir, "Parent: " + os.path.basename(parent_dir)] + [os.path.basename(d[0]) for d in directories]
-
-    selected_dir = expander.selectbox(
-        t("work_directory"),
-        options=dir_options,
-        format_func=lambda x: dir_labels[dir_options.index(x)],
-        key="work_dir_selector"
-    )
-
-    # Mettre à jour le répertoire si un nouveau dossier est sélectionné
-    if selected_dir != current_work_dir:
-        config['common']['work_directory'] = selected_dir
-        save_config(config)
-        st.rerun()
-
-    # Handle core plugins sidebar configuration
-    core_sidebar_configs = plugin_manager.get_sidebar_config_for_core_plugins(
-        expander, config)
-    for plugin_name, sidebar_config in core_sidebar_configs.items():
-        for key, value in sidebar_config.items():
-            config.setdefault(plugin_name, {})[key] = value
-
-    # Ajouter le bouton "Clean session" dans la barre latérale
-    col1, col2 = expander.columns([1, 1])
-    if col1.button(t("Clean session")):
-        tab = st.session_state.selected_tab_id
-        st.session_state.clear()  # Cela réinitialise st.session_state
-        st.session_state.selected_tab_id = tab
-        st.rerun()  # Relancer l'application pour refléter les changements
-    if col2.button(t("Rerun")):
-        st.rerun()
-
-    # Initialize selected tab
-    if 'selected_tab_id' not in st.session_state:
-        st.session_state.selected_tab_id = "directpublish"
-
-    # Sort and display tabs
-    sorted_tabs = sorted(tabs, key=lambda x: (
-        not x.get('starred', False), x['name']))
-    tab_names = [
-        f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" for tab in sorted_tabs]
-
-    selected_tab_index = [tab["id"] for tab in sorted_tabs].index(
-        st.session_state.selected_tab_id)
-    selected_tab = expander.radio(
-        t("navigation"), tab_names, index=selected_tab_index, key="tab_selector")
-
-    new_selected_tab_id = next(
-        tab["id"] for tab in sorted_tabs if f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" == selected_tab)
-
-    if new_selected_tab_id != st.session_state.selected_tab_id:
-        st.session_state.selected_tab_id = new_selected_tab_id
-        st.rerun()
-
-    # Handle selected tab
-    if st.session_state.selected_tab_id == "configurations":
-        st.header(t("configurations"))
-        all_config_ui = plugin_manager.get_all_config_ui(config)
-
-        for plugin_name, ui_config in all_config_ui.items():
-            config[plugin_name] = ui_config
-
-        if st.button(t("save_button")):
+    try:
+        # Load configuration
+        load_dotenv()
+        config = load_config()
+        # Initialize test_directory if not present
+        if 'test_directory' not in config.get('common', {}):
+            config['common']['test_directory'] = os.path.expanduser('~/test_work_dir')
             save_config(config)
-            st.success(t("success_message"))
-    else:
-        # Load and run only the selected plugin
-        plugin_manager.run_plugin(st.session_state.selected_tab_id, config)
+        # Initialize language
+        if 'lang' not in st.session_state:
+            st.session_state.lang = config['common']['language']
+
+        if 'presentation_mode' not in st.session_state or ('presentation_mode' in st.session_state and not st.session_state.presentation_mode):
+            st.set_page_config(page_title="YoutTools",
+                            layout="wide", initial_sidebar_state="expanded")
+            st.title(t("page_title"))
+        else:
+            st.set_page_config(page_title="YoutTools", layout="wide",
+                            initial_sidebar_state="collapsed")
+
+        # Initialize plugin manager and load core plugins only
+        plugin_manager = PluginManager(config)
+        plugin_manager.load_core_plugins()
+        plugin_manager.load_starred_plugins(config)
+
+        # Create tabs
+        tabs = [{"id": "configurations", "name": t(
+            "configurations")}, {"id": "tests", "name": t("tests")}] + plugin_manager.get_all_tabs()
+
+        expander = st.sidebar.expander("Configuration", expanded=True)
+
+        # Language selection
+        new_lang = expander.selectbox(
+            "Choose your language / Choisissez votre langue",
+            options=["en", "fr"],
+            index=["en", "fr"].index(st.session_state.lang),
+            key="lang_selector"
+        )
+
+        if new_lang != st.session_state.lang:
+            st.session_state.lang = new_lang
+            st.rerun()
+
+        # Work directory selector
+        expander.subheader(t("work_directory"))
+        current_work_dir = os.path.expanduser(config['common']['work_directory'])
+        directories = list_directories(current_work_dir)
+        parent_dir = os.path.dirname(current_work_dir)
+        dir_options = [current_work_dir, parent_dir] + [d[1] for d in directories]
+        dir_labels = [current_work_dir, "Parent: " + os.path.basename(parent_dir)] + [os.path.basename(d[0]) for d in directories]
+
+        selected_dir = expander.selectbox(
+            t("work_directory"),
+            options=dir_options,
+            format_func=lambda x: dir_labels[dir_options.index(x)],
+            key="work_dir_selector"
+        )
+
+        if selected_dir != current_work_dir:
+            config['common']['work_directory'] = selected_dir
+            save_config(config)
+            st.rerun()
+
+        # Test directory selector
+        expander.subheader(t("test_directory"))
+        current_test_dir = os.path.expanduser(config['common']['test_directory'])
+        test_directories = list_directories(current_test_dir)
+        test_parent_dir = os.path.dirname(current_test_dir)
+        test_dir_options = [current_test_dir, test_parent_dir] + [d[1] for d in test_directories]
+        test_dir_labels = [current_test_dir, "Parent: " + os.path.basename(test_parent_dir)] + [os.path.basename(d[0]) for d in test_directories]
+
+        selected_test_dir = expander.selectbox(
+            t("test_directory"),
+            options=test_dir_options,
+            format_func=lambda x: test_dir_labels[test_dir_options.index(x)],
+            key="test_dir_selector"
+        )
+
+        if selected_test_dir != current_test_dir:
+            config['common']['test_directory'] = selected_test_dir
+            save_config(config)
+            st.rerun()
+
+        # Test Mode checkbox
+        test_mode = expander.checkbox(t("test_mode"), value=st.session_state.get('test_mode', False))
+        st.session_state['test_mode'] = test_mode
+
+        # Handle core plugins sidebar configuration
+        core_sidebar_configs = plugin_manager.get_sidebar_config_for_core_plugins(
+            expander, config)
+        for plugin_name, sidebar_config in core_sidebar_configs.items():
+            for key, value in sidebar_config.items():
+                config.setdefault(plugin_name, {})[key] = value
+
+        # Ajouter le bouton "Clean session" dans la barre latérale
+        col1, col2 = expander.columns([1, 1])
+        if col1.button(t("Clean session")):
+            tab = st.session_state.selected_tab_id
+            st.session_state.clear()  # Cela réinitialise st.session_state
+            st.session_state.selected_tab_id = tab
+            st.rerun()  # Relancer l'application pour refléter les changements
+        if col2.button(t("Rerun")):
+            st.rerun()
+
+        # Add "Run Tests" button
+        if expander.button(t("run_tests")):
+            run_all_tests(plugin_manager)
+
+        # Initialize selected tab
+        if 'selected_tab_id' not in st.session_state:
+            st.session_state.selected_tab_id = "directpublish"
+
+        # Sort and display tabs
+        sorted_tabs = sorted(tabs, key=lambda x: (
+            not x.get('starred', False), x['name']))
+        tab_names = [
+            f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" for tab in sorted_tabs]
+
+        selected_tab_index = [tab["id"] for tab in sorted_tabs].index(
+            st.session_state.selected_tab_id)
+        selected_tab = expander.radio(
+            t("navigation"), tab_names, index=selected_tab_index, key="tab_selector")
+
+        new_selected_tab_id = next(
+            tab["id"] for tab in sorted_tabs if f"{'⭐ ' if tab.get('starred', False) else ''}{tab['name']}" == selected_tab)
+
+        if new_selected_tab_id != st.session_state.selected_tab_id:
+            st.session_state.selected_tab_id = new_selected_tab_id
+            st.rerun()
+
+        # Handle selected tab
+        if st.session_state.selected_tab_id == "configurations":
+            st.header(t("configurations"))
+            all_config_ui = plugin_manager.get_all_config_ui(config)
+
+            for plugin_name, ui_config in all_config_ui.items():
+                config[plugin_name] = ui_config
+
+            if st.button(t("save_button")):
+                save_config(config)
+                st.success(t("success_message"))
+        elif st.session_state.selected_tab_id == "tests":
+            st.header(t("test_results"))
+            if 'test_results' in st.session_state and st.session_state['test_results']:
+                for plugin_name, res in st.session_state['test_results'].items():
+                    st.subheader(f"Results for {plugin_name}")
+                    if res:
+                        df = pd.DataFrame(res)
+                        st.table(df)
+                    else:
+                        st.write("No tests found or parsing failed.")
+            else:
+                st.write(t("no_tests_run"))
+        else:
+            # Load and run only the selected plugin
+            plugin_manager.run_plugin(st.session_state.selected_tab_id, config)
+    except Exception as e:
+        st.error(f"Application error: {str(e)}")
 
 
 if __name__ == "__main__":
