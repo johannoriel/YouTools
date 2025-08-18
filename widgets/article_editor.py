@@ -1,7 +1,7 @@
 from lib.global_vars import translations, t
 from app import Widget
 import streamlit as st
-from streamlit_ace import st_ace
+#from streamlit_ace import st_ace
 from streamlit_lexical import streamlit_lexical
 import os
 import markdown2
@@ -100,6 +100,7 @@ class ArticleEditorWidget(Widget):
             st.session_state[f"{self.prefix}_content"] += f"\n\nSource: {source_url}"
 
         col1, col2 = st.columns(2)
+        # TODO : https://overtype.dev/
         markdown_content = col1.text_area(
             label="Markdown Content",
             value=content_value,
