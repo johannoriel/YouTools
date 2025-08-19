@@ -744,161 +744,162 @@ class LinkedinAPI:
             return None
 
     def post_article(self, title: str, content: str, source_url: Optional[str] = None, feature_image: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """
-        Publishes an article using the Posts API (version 2025-07), with optional image upload.
-        :param title: Article title.
-        :param content: Article content (plain text or markdown, max 3000 characters).
-        :param source_url: URL of the article source (optional).
-        :param feature_image: Path to the image file (optional).
-        :return: API response or None if the request fails.
-        """
-        try:
-            # Ensure person_urn is set
-            if not self.person_urn:
-                self.person_urn = self._get_person_urn()
+            """
+            Publishes an article using the Posts API (version 2025-07), with optional image upload.
+            :param title: Article title.
+            :param content: Article content (plain text or markdown, max 3000 characters).
+            :param source_url: URL of the article source (optional).
+            :param feature_image: Path to the image file (optional).
+            :return: API response or None if the request fails.
+            """
+            try:
+                # Ensure person_urn is set
                 if not self.person_urn:
-                    return None
+                    self.person_urn = self._get_person_urn()
+                    if not self.person_urn:
+                        return None
 
-            # Use the latest API version
-            latest_version = "202507"  # Updated to latest version
-            headers = {
-                'Authorization': f'Bearer {self.access_token}',
-                'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': latest_version,  # Use latest version
-                'Content-Type': 'application/json'
-            }
-
-            # Upload image if provided
-            image_urn = None
-            if feature_image and os.path.exists(feature_image):
-                # Validate image file type
-                ext = os.path.splitext(feature_image)[1].lower()
-                if ext not in ['.png', '.jpg', '.jpeg', '.gif']:
-                    st.error("Unsupported image format. Use PNG, JPEG, or GIF.")
-                    return None
-
-                # Initialize image upload with proper headers
-                init_url = f"{self.base_url}/rest/images?action=initializeUpload"
-                init_headers = {
+                # Use the latest API version
+                latest_version = "202507"  # Updated to latest version
+                headers = {
                     'Authorization': f'Bearer {self.access_token}',
                     'X-Restli-Protocol-Version': '2.0.0',
-                    'LinkedIn-Version': latest_version,
+                    'LinkedIn-Version': latest_version,  # Use latest version
                     'Content-Type': 'application/json'
                 }
-                init_body = {
-                    'initializeUploadRequest': {
-                        'owner': self.person_urn
-                    }
-                }
 
-                init_response = requests.post(init_url, headers=init_headers, json=init_body)
-                init_response.raise_for_status()
-                init_data = init_response.json()['value']
-                upload_url = init_data['uploadUrl']
-                image_urn = init_data['image']
+                # Upload image if provided
+                image_urn = None
+                if feature_image and os.path.exists(feature_image):
+                    # Validate image file type
+                    ext = os.path.splitext(feature_image)[1].lower()
+                    if ext not in ['.png', '.jpg', '.jpeg', '.gif']:
+                        st.error("Unsupported image format. Use PNG, JPEG, or GIF.")
+                        return None
 
-                # Upload image file
-                with open(feature_image, 'rb') as f:
-                    upload_headers = {
+                    # Initialize image upload with proper headers
+                    init_url = f"{self.base_url}/rest/images?action=initializeUpload"
+                    init_headers = {
                         'Authorization': f'Bearer {self.access_token}',
-                        'Content-Type': f"image/{ext.lstrip('.')}"
+                        'X-Restli-Protocol-Version': '2.0.0',
+                        'LinkedIn-Version': latest_version,
+                        'Content-Type': 'application/json'
                     }
-                    upload_response = requests.put(upload_url, headers=upload_headers, data=f)
-                    upload_response.raise_for_status()
-
-            # Truncate content to 3000 characters (LinkedIn limit)
-            content = content[:3000]
-
-            # Simplified post body structure for article sharing
-            if source_url:
-                # Post with article/link sharing
-                body = {
-                    'author': self.person_urn,
-                    'commentary': content,
-                    'visibility': 'PUBLIC',
-                    'distribution': {
-                        'feedDistribution': 'MAIN_FEED'
-                    },
-                    'content': {
-                        'article': {
-                            'source': source_url,
-                            'title': title
-                        }
-                    },
-                    'lifecycleState': 'PUBLISHED',
-                    'isReshareDisabledByAuthor': False
-                }
-
-                # Add thumbnail if image was uploaded
-                if image_urn:
-                    body['content']['article']['thumbnail'] = image_urn
-            else:
-                # Simple text post with optional image
-                body = {
-                    'author': self.person_urn,
-                    'commentary': f"{title}\n\n{content}",
-                    'visibility': 'PUBLIC',
-                    'distribution': {
-                        'feedDistribution': 'MAIN_FEED'
-                    },
-                    'lifecycleState': 'PUBLISHED',
-                    'isReshareDisabledByAuthor': False
-                }
-
-                # Add image if uploaded
-                if image_urn:
-                    body['content'] = {
-                        'media': {
-                            'title': title,
-                            'id': image_urn
+                    init_body = {
+                        'initializeUploadRequest': {
+                            'owner': self.person_urn
                         }
                     }
 
-            # Debug: Print the request body
-            print("LinkedIn API Request Body:", json.dumps(body, indent=2))
+                    init_response = requests.post(init_url, headers=init_headers, json=init_body)
+                    init_response.raise_for_status()
+                    init_data = init_response.json()['value']
+                    upload_url = init_data['uploadUrl']
+                    image_urn = init_data['image']
 
-            # Create post
-            response = requests.post(
-                f"{self.base_url}/rest/posts",
-                headers=headers,
-                json=body
-            )
+                    # Upload image file
+                    with open(feature_image, 'rb') as f:
+                        upload_headers = {
+                            'Authorization': f'Bearer {self.access_token}',
+                            'Content-Type': f"image/{ext.lstrip('.')}"
+                        }
+                        upload_response = requests.put(upload_url, headers=upload_headers, data=f)
+                        upload_response.raise_for_status()
 
-            # Debug: Print response details
-            print(f"LinkedIn API Response Status: {response.status_code}")
-            if response.status_code != 201:
-                print(f"LinkedIn API Response Text: {response.text}")
+                # Truncate content to 3000 characters (LinkedIn limit)
+                content = content[:3000]
 
-            response.raise_for_status()
-            post_id = response.headers.get('x-restli-id', 'N/A')
-            return {'id': post_id, 'status': 'success'}
+                # Simplified post body structure for article sharing
+                if source_url:
+                    # Post with article/link sharing
+                    body = {
+                        'author': self.person_urn,
+                        'commentary': content,
+                        'visibility': 'PUBLIC',
+                        'distribution': {
+                            'feedDistribution': 'MAIN_FEED'
+                        },
+                        'content': {
+                            'article': {
+                                'source': source_url,
+                                'title': title
+                            }
+                        },
+                        'lifecycleState': 'PUBLISHED',
+                        'isReshareDisabledByAuthor': False
+                    }
 
-        except requests.exceptions.HTTPError as e:
-            error_details = ""
-            try:
-                error_details = e.response.json()
-            except:
-                error_details = e.response.text
+                    # Add thumbnail if image was uploaded
+                    if image_urn:
+                        body['content']['article']['thumbnail'] = image_urn
+                else:
+                    # Simple text post with optional image
+                    body = {
+                        'author': self.person_urn,
+                        'commentary': f"{title}\n\n{content}",
+                        'visibility': 'PUBLIC',
+                        'distribution': {
+                            'feedDistribution': 'MAIN_FEED'
+                        },
+                        'lifecycleState': 'PUBLISHED',
+                        'isReshareDisabledByAuthor': False
+                    }
 
-            st.error(f"LinkedIn API HTTP Error: {e.response.status_code}")
-            st.error(f"Error details: {error_details}")
+                    # Add image if uploaded
+                    if image_urn:
+                        body['content'] = {
+                            'media': {
+                                'title': title,
+                                'id': image_urn
+                            }
+                        }
 
-            # Common error solutions
-            if e.response.status_code == 422:
-                st.error("Possible causes of 422 error:")
-                st.error("1. Invalid post structure or missing required fields")
-                st.error("2. Content exceeds LinkedIn limits")
-                st.error("3. Invalid person URN or permissions")
-                st.error("4. Outdated API version")
-            elif e.response.status_code == 401:
-                st.error("Authentication error - check your access token")
-            elif e.response.status_code == 403:
-                st.error("Permission error - ensure you have 'w_member_social' permission")
+                # Debug: Print the request body
+                print("LinkedIn API Request Body:", json.dumps(body, indent=2))
 
-            return None
-        except Exception as e:
-            st.error(f"LinkedIn API Error (post_article): {str(e)}")
-            return None
+                # Create post
+                response = requests.post(
+                    f"{self.base_url}/rest/posts",
+                    headers=headers,
+                    json=body
+                )
+
+                # Debug: Print response details
+                print(f"LinkedIn API Response Status: {response.status_code}")
+                if response.status_code != 201:
+                    print(f"LinkedIn API Response Text: {response.text}")
+
+                response.raise_for_status()
+                post_id = response.headers.get('x-restli-id', 'N/A')
+                return {'id': post_id, 'status': 'success'}
+
+            except requests.exceptions.HTTPError as e:
+                error_details = ""
+                try:
+                    error_details = e.response.json()
+                except:
+                    error_details = e.response.text
+
+                st.error(f"LinkedIn API HTTP Error: {e.response.status_code}")
+                st.error(f"Error details: {error_details}")
+
+                # Common error solutions
+                if e.response.status_code == 422:
+                    st.error("Possible causes of 422 error:")
+                    st.error("1. Invalid post structure or missing required fields")
+                    st.error("2. Content exceeds LinkedIn limits")
+                    st.error("3. Invalid person URN or permissions")
+                    st.error("4. Outdated API version")
+                elif e.response.status_code == 401:
+                    st.error("Authentication error - check your access token")
+                elif e.response.status_code == 403:
+                    st.error("Permission error - ensure you have 'w_member_social' permission")
+
+                return None
+            except Exception as e:
+                st.error(f"LinkedIn API Error (post_article): {str(e)}")
+                return None
+
 
     def search_posts(self, query: str, max_results: int = 10, language: str = "fr") -> List[Dict[str, Any]]:
         """

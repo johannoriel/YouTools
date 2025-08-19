@@ -28,6 +28,7 @@ translations["en"].update({
     "linkedin_processing": "Publishing to LinkedIn...",
     "linkedin_success": "Published successfully! Post ID: {result}",
     "linkedin_error": "Publishing failed: {error}",
+    "linkedin_include_source_url": "Include Source URL in Post",
     "wordpress_tab": "WordPress Publisher",
     "wordpress_header": "Publish to WordPress",
     "wordpress_publish_button": "Publish to WordPress",
@@ -72,6 +73,7 @@ translations["fr"].update({
     "linkedin_processing": "Publication sur LinkedIn...",
     "linkedin_success": "Publié avec succès ! ID du post : {result}",
     "linkedin_error": "Échec de la publication : {error}",
+    "linkedin_include_source_url": "Inclure l'URL source dans le post",
     "wordpress_tab": "Publicateur WordPress",
     "wordpress_header": "Publier sur WordPress",
     "wordpress_publish_button": "Publier sur WordPress",
@@ -198,7 +200,9 @@ class PostarticlePlugin(Plugin):
             editor = ArticleEditorWidget("linkedineditor", "linkedin", self.plugin_manager)
             result = editor.display()
 
-            source_url = st.session_state.get('linkedin_url', '')
+            source_url = result["url"]
+            st.write(source_url)
+            include_source_url = st.checkbox(t("linkedin_include_source_url"), value=True, key="linkedin_include_source_url")
 
             if st.button(t("linkedin_publish_button"), key="linkedin_publish"):
                 with st.spinner(t("linkedin_processing")):
@@ -207,7 +211,7 @@ class PostarticlePlugin(Plugin):
                         response = self.linkedin_api.post_article(
                             result["title"],
                             plain_content,
-                            source_url=source_url,
+                            source_url=source_url if include_source_url else None,
                             feature_image=result["image_path"]
                         )
                         if response:
@@ -327,6 +331,32 @@ class PostarticlePlugin(Plugin):
                         st.error(f"Substack re-authentication error: {str(e)}")
                         st.session_state["substack_authenticated"] = False
 
+            # New post section
+            editor = ArticleEditorWidget("substackeditor", "substack", self.plugin_manager)
+            result = editor.display()
+
+            if st.button(t("substack_publish_button"), key="substack_publish"):
+                with st.spinner(t("substack_processing")):
+                    try:
+                        response = self.substack_api.post(
+                            result["title"],
+                            result["markdown_content"],
+                            result["publish_immediately"],
+                            feature_image=result["image_path"],
+                            publication_url=selected_publication
+                        )
+                        if response:
+                            post_id = response.get('id', 'N/A')
+                            st.success(t("substack_success").format(result=post_id))
+                            st.session_state["substack_drafts"] = self.substack_api.list_drafts(publication_url=selected_publication)
+                            for key in ["substack_title", "substack_content", "substack_image_path", "substack_url"]:
+                                if key in st.session_state:
+                                    del st.session_state[key]
+                        else:
+                            st.error(t("substack_error").format(error="Unknown error"))
+                    except Exception as e:
+                        st.error(t("substack_error").format(error=str(e)))
+
             # Draft posts section
             st.subheader(t("substack_drafts_label"))
             if st.button(t("substack_refresh_drafts_button"), key="substack_refresh_drafts"):
@@ -354,29 +384,3 @@ class PostarticlePlugin(Plugin):
                             st.error(t("substack_error").format(error=str(e)))
             else:
                 st.info(t("substack_no_drafts"))
-
-            # New post section
-            editor = ArticleEditorWidget("substackeditor", "substack", self.plugin_manager)
-            result = editor.display()
-
-            if st.button(t("substack_publish_button"), key="substack_publish"):
-                with st.spinner(t("substack_processing")):
-                    try:
-                        response = self.substack_api.post(
-                            result["title"],
-                            result["markdown_content"],
-                            result["publish_immediately"],
-                            feature_image=result["image_path"],
-                            publication_url=selected_publication
-                        )
-                        if response:
-                            post_id = response.get('id', 'N/A')
-                            st.success(t("substack_success").format(result=post_id))
-                            st.session_state["substack_drafts"] = self.substack_api.list_drafts(publication_url=selected_publication)
-                            for key in ["substack_title", "substack_content", "substack_image_path", "substack_url"]:
-                                if key in st.session_state:
-                                    del st.session_state[key]
-                        else:
-                            st.error(t("substack_error").format(error="Unknown error"))
-                    except Exception as e:
-                        st.error(t("substack_error").format(error=str(e)))
