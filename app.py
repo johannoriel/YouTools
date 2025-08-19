@@ -418,7 +418,6 @@ def main():
             st.rerun()
 
         # Work directory selector
-        expander.subheader(t("work_directory"))
         current_work_dir = os.path.expanduser(config['common']['work_directory'])
         directories = list_directories(current_work_dir)
         parent_dir = os.path.dirname(current_work_dir)
@@ -438,7 +437,6 @@ def main():
             st.rerun()
 
         # Test directory selector
-        expander.subheader(t("test_directory"))
         current_test_dir = os.path.expanduser(config['common']['test_directory'])
         test_directories = list_directories(current_test_dir)
         test_parent_dir = os.path.dirname(current_test_dir)
