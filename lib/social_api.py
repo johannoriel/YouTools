@@ -1333,7 +1333,9 @@ class SubstackAPI:
             for line in lines:
                 line = line.strip()
                 if line:
-                    if line.startswith("# "):
+                    if line.startswith("## "):
+                        post.add({"type": "heading", "level": 2, "content": line[3:]})
+                    elif line.startswith("# "):
                         post.add({"type": "heading", "content": line[2:]})
                     elif line.startswith("!["):
                         # Handle markdown image: ![alt](url)
@@ -1342,7 +1344,49 @@ class SubstackAPI:
                             alt, src = match.groups()
                             post.add({"type": "captionedImage", "src": src, "caption": alt})
                     else:
-                        post.add({"type": "paragraph", "content": line})
+                        # Handle bold (**text**), italic (*text*), and links ([text](url)) within paragraphs
+                        paragraph_content = []
+                        current_text = line
+                        current_pos = 0
+
+                        # Process all Markdown patterns iteratively
+                        patterns = [
+                              (r"\*\*(.*?)\*\*", lambda m: {"content": m.group(1), "marks": [{"type": "strong"}]}),  # Bold
+                              (r"(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)", lambda m: {"content": m.group(1), "marks": [{"type": "em"}]}),  # Italic (non-greedy, avoid bold)
+                              (r"\[(.*?)\]\((.*?)\)", lambda m: {"content": m.group(1), "marks": [{"type": "link", "href": m.group(2)}]})  # Link
+                        ]
+
+                        while current_text:
+                            earliest_match = None
+                            earliest_start = len(current_text)
+                            earliest_content = None
+                            earliest_end = 0
+
+                            # Find the earliest match among all patterns
+                            for pattern, content_func in patterns:
+                                match = re.search(pattern, current_text)
+                                if match and match.start() < earliest_start:
+                                    earliest_match = match
+                                    earliest_start = match.start()
+                                    earliest_end = match.end()
+                                    earliest_content = content_func(match)
+
+                            if earliest_match:
+                                # Add text before the match
+                                if earliest_start > 0:
+                                    paragraph_content.append({"content": current_text[:earliest_start]})
+                                # Add the matched content
+                                paragraph_content.append(earliest_content)
+                                # Update current_text to continue after the match
+                                current_text = current_text[earliest_end:]
+                            else:
+                                # No more matches, add remaining text
+                                paragraph_content.append({"content": current_text})
+                                current_text = ""
+
+                        # Add paragraph if content exists
+                        if paragraph_content:
+                            post.add({"type": "paragraph", "content": paragraph_content})
 
             # Add local image if provided
             if feature_image and os.path.exists(feature_image):
