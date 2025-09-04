@@ -54,7 +54,7 @@ class ArticleEditorWidget(Widget):
 
         # Load existing article data from disk only for explicit loading
         article_path = os.path.join(self.work_dir, "article.md")
-        image_path = os.path.join(self.work_dir, "image.png")
+        image_path = os.path.join(self.work_dir, "illustration.jpg")
         url_path = os.path.join(self.work_dir, "url.txt")
         if os.path.exists(article_path):
             try:

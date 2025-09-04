@@ -208,6 +208,7 @@ class PostarticlePlugin(Plugin):
                 with st.spinner(t("linkedin_processing")):
                     try:
                         plain_content = self._markdown_to_text(result["markdown_content"])
+                        plain_content = result["markdown_content"]
                         response = self.linkedin_api.post_article(
                             result["title"],
                             plain_content,
@@ -216,7 +217,8 @@ class PostarticlePlugin(Plugin):
                         )
                         if response:
                             post_id = response.get('id', 'N/A')
-                            st.success(t("linkedin_success").format(result=post_id))
+                            len = response.get('character_count', 'N/A')
+                            st.success(t("linkedin_success").format(result=post_id)+ f" ({len} car)")
                             for key in ["linkedin_title", "linkedin_content", "linkedin_image_path", "linkedin_url"]:
                                 if key in st.session_state:
                                     del st.session_state[key]

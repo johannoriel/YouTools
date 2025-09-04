@@ -747,7 +747,7 @@ class LinkedinAPI:
         """
         Publishes an article using the Posts API (version 2025-07), with optional image upload.
         :param title: Article title.
-        :param content: Article content (plain text or markdown, max 3000 characters).
+        :param content: Article content (Markdown, converted to plain text, max 3000 characters).
         :param source_url: URL of the article source (optional).
         :param feature_image: Path to the image file (optional).
         :return: API response or None if the request fails.
@@ -760,11 +760,11 @@ class LinkedinAPI:
                     return None
 
             # Use the latest API version
-            latest_version = "202507"  # Updated to latest version
+            latest_version = "202507"
             headers = {
                 'Authorization': f'Bearer {self.access_token}',
                 'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': latest_version,  # Use latest version
+                'LinkedIn-Version': latest_version,
                 'Content-Type': 'application/json'
             }
 
@@ -777,7 +777,7 @@ class LinkedinAPI:
                     st.error("Unsupported image format. Use PNG, JPEG, or GIF.")
                     return None
 
-                # Initialize image upload with proper headers
+                # Initialize image upload
                 init_url = f"{self.base_url}/rest/images?action=initializeUpload"
                 init_headers = {
                     'Authorization': f'Bearer {self.access_token}',
@@ -806,56 +806,92 @@ class LinkedinAPI:
                     upload_response = requests.put(upload_url, headers=upload_headers, data=f)
                     upload_response.raise_for_status()
 
-            # Truncate content to 3000 characters (LinkedIn limit)
-            content = content[:3000]
+            # Convert Markdown content to plain text
+            def markdown_to_plain_text(markdown_text: str) -> str:
+                """
+                Convert Markdown content to plain text by removing Markdown formatting.
+                """
+                if not markdown_text:
+                    return markdown_text
 
-            # Simplified post body structure for article sharing
+                # Convert Markdown to HTML using markdown2
+                html = markdown2.markdown(markdown_text)
+
+                # Remove HTML tags and clean up
+                text = re.sub(r'<[^>]+>', '', html)  # Remove HTML tags
+                text = re.sub(r'\n\s*\n', '\n', text)  # Remove extra newlines
+                text = text.strip()  # Remove leading/trailing whitespace
+
+                return text
+
+            # Prepare the full text content (title + converted content)
+            plain_content = markdown_to_plain_text(content)
+            full_text = f"{title}\n\n{plain_content}" if title else plain_content
+
+            # Escape special characters that cause issues with LinkedIn API
+            def escape_linkedin_text(text):
+                """
+                Escape special characters that cause LinkedIn API to truncate posts
+                Simple backslash escaping for problematic characters
+                """
+                if not text:
+                    return text
+
+                # Characters that need to be escaped with backslash
+                chars_to_escape = ['(', ')', '[', ']', '{', '}', '@', '_', '~']
+
+                for char in chars_to_escape:
+                    text = text.replace(char, r'\{}'.format(char))
+
+                return text
+
+            # Apply escaping to the full text
+            print("Full_text:\n", repr(full_text))
+            full_text = escape_linkedin_text(full_text)
+            print("Escaped full_text:\n", repr(full_text))
+
+            # Truncate to LinkedIn's limit (3000 characters for commentary)
+            if len(full_text) > 3000:
+                full_text = full_text[:2997] + "..."
+                st.warning(f"Content truncated to 3000 characters (LinkedIn limit)")
+
+            # Build the post body based on content type
+            body = {
+                'author': self.person_urn,
+                'commentary': full_text,
+                'visibility': 'PUBLIC',
+                'distribution': {
+                    'feedDistribution': 'MAIN_FEED'
+                },
+                'lifecycleState': 'PUBLISHED',
+                'isReshareDisabledByAuthor': False
+            }
+
+            # Add content based on what we have
             if source_url:
                 # Post with article/link sharing
-                body = {
-                    'author': self.person_urn,
-                    'commentary': content,
-                    'visibility': 'PUBLIC',
-                    'distribution': {
-                        'feedDistribution': 'MAIN_FEED'
-                    },
-                    'content': {
-                        'article': {
-                            'source': source_url,
-                            'title': title
-                        }
-                    },
-                    'lifecycleState': 'PUBLISHED',
-                    'isReshareDisabledByAuthor': False
+                body['content'] = {
+                    'article': {
+                        'source': source_url,
+                        'title': title or "Shared Article"
+                    }
                 }
-
                 # Add thumbnail if image was uploaded
                 if image_urn:
                     body['content']['article']['thumbnail'] = image_urn
-            else:
-                # Simple text post with optional image
-                body = {
-                    'author': self.person_urn,
-                    'commentary': f"{title}\n\n{content}",
-                    'visibility': 'PUBLIC',
-                    'distribution': {
-                        'feedDistribution': 'MAIN_FEED'
-                    },
-                    'lifecycleState': 'PUBLISHED',
-                    'isReshareDisabledByAuthor': False
-                }
 
-                # Add image if uploaded
-                if image_urn:
-                    body['content'] = {
-                        'media': {
-                            'title': title,
-                            'id': image_urn
-                        }
+            elif image_urn:
+                # Post with image only (no external link)
+                body['content'] = {
+                    'media': {
+                        'title': title or "Image Post",
+                        'id': image_urn
                     }
+                }
+            # If neither source_url nor image, it's a pure text post (no 'content' field needed)
 
-            # Debug: Print the request body
-            print("LinkedIn API Request Body:", json.dumps(body, indent=2))
+            # Debug: Print the request body (remove in production)
+            print("LinkedIn API Request Body:\n", json.dumps(body, indent=2))
 
             # Create post
             response = requests.post(
@@ -870,8 +906,16 @@ class LinkedinAPI:
                 print(f"LinkedIn API Response Text: {response.text}")
 
             response.raise_for_status()
-            post_id = response.headers.get('x-restli-id', 'N/A')
-            return {'id': post_id, 'status': 'success'}
+
+            # Get post ID from response
+            response_data = response.json() if response.content else {}
+            post_id = response.headers.get('x-restli-id') or response_data.get('id', 'N/A')
+
+            return {
+                'id': post_id,
+                'status': 'success',
+                'character_count': len(full_text)
+            }
 
         except requests.exceptions.HTTPError as e:
             error_details = ""
