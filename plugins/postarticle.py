@@ -7,7 +7,9 @@ from datetime import datetime as date
 import requests
 import jwt
 import markdown2
-from lib.social_api import GhostAPI, LinkedinAPI, WordPressAPI, SubstackAPI
+from lib.social_api import GhostAPI, WordPressAPI
+from lib.api_substack import SubstackAPI
+from lib.api_linedin import LinkedinAPI
 from widgets.random_article import RandomArticleWidget
 from widgets.article_editor import ArticleEditorWidget
 
