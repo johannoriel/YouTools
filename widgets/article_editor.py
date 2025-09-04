@@ -3,6 +3,7 @@ from app import Widget
 import streamlit as st
 import os
 import markdown2
+import uuid
 
 translations["en"].update({
     "editor_title_label": "Post Title",
@@ -19,7 +20,8 @@ translations["en"].update({
     "editor_save_button": "Save Article",
     "editor_save_success": "Article saved successfully!",
     "editor_draft_list": "Drafts",
-    "editor_refresh": "Refresh"
+    "editor_refresh": "Refresh",
+    "editor_extract_title": "Extract Title"
 })
 
 translations["fr"].update({
@@ -37,7 +39,8 @@ translations["fr"].update({
     "editor_save_button": "Sauvegarder l'Article",
     "editor_save_success": "Article sauvegardé avec succès !",
     "editor_draft_list": "Brouillons",
-    "editor_refresh": "Rafraîchir"
+    "editor_refresh": "Rafraîchir",
+    "editor_extract_title": "Extraire le Titre"
 })
 
 class ArticleEditorWidget(Widget):
@@ -118,8 +121,8 @@ class ArticleEditorWidget(Widget):
             st.session_state[f"{self.prefix}_image_path"] = default_image_path
             st.session_state[f"{self.prefix}_url"] = default_url
 
-        # Translation buttons and URL button on same line
-        col_trans1, col_trans2, col_url = st.columns(3)
+        # Translation buttons, extract title button, and URL button on same line
+        col_trans1, col_trans2, col_extract, col_url = st.columns(4)
         with col_trans1:
             if st.button(t("editor_translate_button"), key=f"{self.prefix}_translate"):
                 if st.session_state[f"{self.prefix}_content"]:
@@ -134,6 +137,13 @@ class ArticleEditorWidget(Widget):
                     translated_content = self.process_with_llm(prompt, st.session_state[f"{self.prefix}_content"])
                     st.session_state[f"{self.prefix}_content"] = f"*(Article en Français ci-dessous)*\n{translated_content}\n\n---\n{st.session_state[f'{self.prefix}_content']}"
                     st.session_state[f"{self.prefix}_title"] = self.process_with_llm(t("translate_prompt"), st.session_state[f"{self.prefix}_title"])
+        with col_extract:
+            if st.button(t("editor_extract_title"), key=f"{self.prefix}_extract_title"):
+                if st.session_state[f"{self.prefix}_content"]:
+                    lines = st.session_state[f"{self.prefix}_content"].split("\n", 1)
+                    if lines[0].startswith("# "):
+                        st.session_state[f"{self.prefix}_title"] = lines[0][2:].strip()
+                        st.session_state[f"{self.prefix}_content"] = lines[1] if len(lines) > 1 else ""
         with col_url:
             if st.button("URL", key=f"{self.prefix}_url_button"):
                 st.session_state[f"{self.prefix}_content"] += f"\n\nSource: {st.session_state[f'{self.prefix}_url']}"
