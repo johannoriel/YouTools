@@ -50,3 +50,5 @@ sib_api_v3_sdk
 python-substack
 pytest
 pytest-bdd
+spacy
+markdown2

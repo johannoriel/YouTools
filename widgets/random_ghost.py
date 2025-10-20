@@ -129,7 +129,7 @@ class RandomGhostPostWidget(Widget):
                 height=100
             )
             if st.session_state[f'{self.prefix}_generated_post']['image_path']:
-                st.image(st.session_state[f'{self.prefix}_generated_post']['image_path'], caption="Generated Image", use_container_width=True)
+                st.image(st.session_state[f'{self.prefix}_generated_post']['image_path'], caption="Generated Image", width='stretch')
 
             if st.button("Regenerate Image", key=f"{self.prefix}_regenerate_image"):
                 with st.spinner("Regenerating image..."):

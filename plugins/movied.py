@@ -846,7 +846,7 @@ class MoviedPlugin(Plugin):
         st.subheader("Preview")
         if media_path.lower().endswith(IMAGE_EXTENSIONS):
             # Ajuste à la largeur de la colonne
-            st.image(media_path, use_container_width=True)
+            st.image(media_path, width='stretch')
         elif media_path.lower().endswith(VIDEO_EXTENSIONS):
             st.video(media_path, format="video/mp4", autoplay=True, muted=True)
         elif media_path.lower().endswith(AUDIO_EXTENSIONS):

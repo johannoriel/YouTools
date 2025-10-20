@@ -50,6 +50,7 @@ class YoutubeTranscriptWidget(Widget):
         transcript = get_video_transcript(video_id)
         if transcript:
             return transcript
+        st.info("Not found in database...")
 
         # Try YouTube API transcript
         try:
@@ -61,6 +62,8 @@ class YoutubeTranscriptWidget(Widget):
             st.error(t("transcript_error").format(error=str(e)))
 
         # Fallback to Whisper transcription
+        st.info("Not found on youtube transcript... trying to download")
+        return ""
         video_path = None
         try:
             from yt_dlp import YoutubeDL

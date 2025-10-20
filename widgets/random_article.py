@@ -123,4 +123,4 @@ class RandomArticleWidget(Widget):
                 st.markdown(f"**{t('randomarticle_title')}**: {article['title']}")
                 st.markdown(f"**{t('randomarticle_content')}**:\n{article['content'][:1000]}{'...' if len(article['content']) > 1000 else ''}")
                 if generate_image and article['image_path']:
-                    st.image(article['image_path'], caption="Generated Image", use_container_width=True)
+                    st.image(article['image_path'], caption="Generated Image", width='stretch')

@@ -906,11 +906,15 @@ class YoutubeAPI:
         from googleapiclient.errors import HttpError
 
         # Step 1: Try YouTubeTranscriptApi with multiple language fallbacks
+        ytt_api = YouTubeTranscriptApi()  # Create instance
         language_fallbacks = [language, f"{language}-CA", "en", "auto"]
         for lang in language_fallbacks:
             try:
-                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
-                full_transcript = " ".join([entry['text'] for entry in transcript])
+                # Updated to use .fetch() on instance
+                print(f"Trying YouTubeTranscriptApi for lang {lang} ********************************")
+                transcript = ytt_api.fetch(video_id, languages=[lang])
+                # Extract text (works with new FetchedTranscript return type)
+                full_transcript = " ".join([entry.text for entry in transcript])
                 print(f"Transcript retrieved via YouTubeTranscriptApi for lang {lang}")
                 return full_transcript, lang
             except CouldNotRetrieveTranscript as e:
@@ -920,7 +924,8 @@ class YoutubeAPI:
                 print(f"YouTubeTranscriptApi Error for lang {lang}: {str(e)}")
                 continue
 
-        # Step 2: Use YouTube Data API v3 to fetch captions
+        # Step 2: Use YouTube Data API v3 to fetch captions (unchanged)
+        st.info("YoutubeAPI failed, using YouTube Data API v3")
         try:
             # List available captions for the video
             caption_request = self.youtube.captions().list(

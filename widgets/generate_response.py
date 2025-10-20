@@ -150,7 +150,7 @@ class GenerateResponseWidget(Widget):
         selected_comment_rows = st.dataframe(
             combined_df,
             column_config=comment_column_config,
-            use_container_width=True,
+            width='stretch',
             height=400,
             selection_mode="multi-row",
             on_select="rerun",

@@ -454,7 +454,7 @@ class VideoProductMatchWidget(Widget):
                                 "Product URL": st.column_config.LinkColumn("Product URL"),
                                 "Score": st.column_config.NumberColumn(format="%.3f")
                             },
-                            use_container_width=True
+                            width='stretch'
                         )
 
                 if not global_scores_df.empty:

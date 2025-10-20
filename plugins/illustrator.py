@@ -918,7 +918,7 @@ class IllustratorPlugin(Plugin):
                     help="Recherche sur tous les moteurs simultanément"
                 )
             with col2:
-                if st.button("Lancer la recherche globale", use_container_width=True):
+                if st.button("Lancer la recherche globale", width='stretch'):
                     st.session_state.global_search_triggered = True
 
         # Si recherche globale déclenchée

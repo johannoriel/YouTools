@@ -1,3 +1,8 @@
+import os
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 import argparse
 import torch
 import matplotlib.pyplot as plt
@@ -9,11 +14,9 @@ from lib.global_vars import t, translations
 from diffusers import FluxPipeline, AutoPipelineForImage2Image
 from rembg import remove, new_session
 import json
-import os
 import cv2
 import numpy as np
-
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+import traceback
 
 # Mise à jour des traductions pour inclure le nouvel onglet
 translations["en"].update({
@@ -217,7 +220,7 @@ class ImggenPlugin(Plugin):
             "Manual Seeds (comma-separated, e.g., 123, 456, 789)", "", key="imggen_manual_seeds")
 
         st.subheader(t("prompt_history"))
-        selected_history_prompt = st.selectbox("", [""] + self.prompt_history)
+        selected_history_prompt = st.selectbox(t("prompt_history"), [""] + self.prompt_history, label_visibility="collapsed")
         if selected_history_prompt:
             st.session_state.imggen_prompt = selected_history_prompt
         prompt = st.text_area(t("prompt"), key="imggen_prompt", height=150)
@@ -274,7 +277,7 @@ class ImggenPlugin(Plugin):
 
                     # Afficher le résultat
                     st.image(self.result_image, caption="Result",
-                             use_container_width=True)
+                             width='stretch')
                     st.success(t("backremove_success"))
 
                     # Sauvegarde et option de téléchargement
@@ -331,7 +334,7 @@ class ImggenPlugin(Plugin):
                         if current_style:
                             caption += f"\nStyle: {current_style}"
                         st.image(image, caption=caption,
-                                 use_container_width=True)
+                                 width='stretch')
                     self.save_image(image, output_dir, sub_prompt,
                                     current_seed, current_style)
                     image_count += 1
@@ -360,23 +363,100 @@ class ImggenPlugin(Plugin):
             height, width = 1920, 1080
         else:
             raise ValueError("Invalid aspect ratio.")
-        if self.pipe is None:
-            ckpt_id = "black-forest-labs/FLUX.1-schnell"
-            if input_image:
-                self.pipe = AutoPipelineForImage2Image.from_pretrained(
-                    ckpt_id, torch_dtype=torch.bfloat16)
+
+        # Debug: Print CUDA_VISIBLE_DEVICES
+        cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')
+        st.info(f"CUDA_VISIBLE_DEVICES: {cuda_visible}")
+
+        # Check CUDA status with error handling
+        cuda_available = False
+        cuda_device_count = 0
+        try:
+            cuda_available = torch.cuda.is_available()
+            if cuda_available:
+                cuda_device_count = torch.cuda.device_count()
+                # Test CUDA
+                torch.cuda.init()
+                test_tensor = torch.tensor([1.0], device="cuda")
+                del test_tensor
+                torch.cuda.empty_cache()
+                st.success("CUDA test passed.")
+        except Exception as e:
+            st.warning(f"CUDA initialization test failed: {str(e)}. Falling back to CPU.")
+            cuda_available = False
+            cuda_device_count = 0
+
+        st.info(f"CUDA available: {cuda_available}, Device count: {cuda_device_count}")
+        if cuda_available:
+            try:
+                st.info(f"Current CUDA device: {torch.cuda.current_device()}, Name: {torch.cuda.get_device_name(0)}")
+                st.info(f"CUDA version: {torch.version.cuda}")
+                st.info(f"PyTorch built with CUDA: {torch.backends.cudnn.enabled}")
+            except Exception as e:
+                st.warning(f"Error getting CUDA details: {str(e)}")
+
+        device = "cuda" if cuda_available else "cpu"
+        torch_dtype = torch.bfloat16 if device == "cuda" else torch.float32
+
+        try:
+            if self.pipe is None:
+                ckpt_id = "black-forest-labs/FLUX.1-schnell"
+                st.info(f"Loading pipeline for {device} with dtype {torch_dtype}...")
+                if input_image:
+                    self.pipe = AutoPipelineForImage2Image.from_pretrained(
+                        ckpt_id, torch_dtype=torch_dtype, device_map="auto" if device == "cuda" else None)
+                else:
+                    self.pipe = FluxPipeline.from_pretrained(
+                        ckpt_id, torch_dtype=torch_dtype, device_map="auto" if device == "cuda" else None)
+                self.pipe = self.pipe.to(device)
+                if device == "cuda":
+                    self.pipe.vae.enable_tiling()
+                    self.pipe.vae.enable_slicing()
+                    self.pipe.enable_sequential_cpu_offload()
+                st.success("Pipeline loaded successfully.")
+            elif str(self.pipe.device) != device:
+                st.warning("Pipeline device mismatch, reloading...")
+                self.pipe = None
+                # Recurse to reload
+                return self.generate_image(background_prompt, prompt, aspect_ratio, remove_background,
+                                           background_removal_method, seed, face, steps, input_image, face_prompt)
+        except RuntimeError as load_error:
+            if "CUDA" in str(load_error) and device == "cuda":
+                st.warning("CUDA error during pipeline load, falling back to CPU...")
+                device = "cpu"
+                torch_dtype = torch.float32
+                self.pipe = None
+                return self.generate_image(background_prompt, prompt, aspect_ratio, remove_background,
+                                           background_removal_method, seed, face, steps, input_image, face_prompt)
             else:
-                self.pipe = FluxPipeline.from_pretrained(
-                    ckpt_id, torch_dtype=torch.bfloat16)
-            self.pipe.vae.enable_tiling()
-            self.pipe.vae.enable_slicing()
-            self.pipe.enable_sequential_cpu_offload()
-        if input_image:
-            image = self.pipe(prompt, image=input_image, num_inference_steps=steps,
-                              guidance_scale=0.0, generator=generator).images[0]
-        else:
-            image = self.pipe(prompt, num_inference_steps=steps, guidance_scale=0.0,
-                              height=height, width=width, generator=generator).images[0]
+                st.error(f"Failed to load pipeline: {str(load_error)}")
+                st.error("Traceback:")
+                st.code(traceback.format_exc())
+                return None, seed
+
+        try:
+            st.info("Starting inference...")
+            if input_image:
+                image = self.pipe(prompt, image=input_image, num_inference_steps=steps,
+                                  guidance_scale=0.0, generator=generator).images[0]
+            else:
+                image = self.pipe(prompt, num_inference_steps=steps, guidance_scale=0.0,
+                                  height=height, width=width, generator=generator).images[0]
+            st.success("Inference completed.")
+        except RuntimeError as infer_error:
+            if "CUDA" in str(infer_error) and device == "cuda":
+                st.warning("CUDA error during inference, falling back to CPU...")
+                device = "cpu"
+                torch_dtype = torch.float32
+                self.pipe = None
+                return self.generate_image(background_prompt, prompt, aspect_ratio, remove_background,
+                                           background_removal_method, seed, face, steps, input_image, face_prompt)
+            else:
+                st.error(f"Inference failed: {str(infer_error)}")
+                st.error("Traceback:")
+                st.code(traceback.format_exc())
+                return None, seed
+
         if remove_background:
             if background_removal_method == "color":
                 image = self.remove_green_background_improved(image)
@@ -461,7 +541,7 @@ class ImggenPlugin(Plugin):
 
                     # Option pour copier le prompt dans l'onglet de génération d'image
                     if st.button("Use in Image Generation"):
-                        st.session_state.imggen_prompt = st.sesion_state.imggen_generated_prompt
+                        st.session_state.imggen_prompt = st.session_state.imggen_generated_prompt
 
                 except Exception as e:
                     st.error(f"An error occurred: {str(e)}")

@@ -154,6 +154,32 @@ class ArticleEditorWidget(Widget):
             key=f"{self.prefix}_title"
         )
 
+        # Inject Overtype for Markdown text area
+        # TODO : BUGGY
+        overtype_script = """
+        <script src="https://unpkg.com/overtype"></script>
+        <style>
+            .editor {
+                width: 100%;
+                height: 300px;
+                resize: vertical;
+            }
+        </style>
+        <script>
+        """
+        overtype_script += f"""            const textarea = document.querySelector('div[class="st-key-{self.prefix}_content"] textarea');"""
+        overtype_script += """
+            console.log("Markdown editor handling");
+            if (textarea) {
+                textarea.classList.add('editor');
+                new OverType('.editor');
+            } else {
+                console.log("Markdown editor not found");
+            }
+        </script>
+        """
+        st.markdown(overtype_script, unsafe_allow_html=True)
+
         col1, col2 = st.columns(2)
         markdown_content = col1.text_area(
             label="Markdown Content",

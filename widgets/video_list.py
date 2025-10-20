@@ -150,7 +150,7 @@ class VideoListWidget(Widget):
         selected_rows = st.dataframe(
             filtered_df,
             column_config=column_config,
-            use_container_width=True,
+            width='stretch',
             height=400,
             selection_mode="multi-row",
             on_select="rerun",

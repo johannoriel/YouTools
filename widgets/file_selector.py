@@ -178,7 +178,7 @@ class FileSelectorWidget(Widget):
         selected_rows = st.dataframe(
             file_data,
             column_config=column_config,
-            use_container_width=True,
+            width='stretch',
             height=400,
             selection_mode="multi-row",
             on_select="rerun",

@@ -302,7 +302,7 @@ class VideoProductPromotionWidget(Widget):
                     "product_url": st.column_config.LinkColumn("Product URL", display_text="Visit"),
                     "keywords": st.column_config.TextColumn("Keywords", width="large")
                 },
-                use_container_width=True,
+                width='stretch',
                 height=400,
                 selection_mode="multi-row",
                 on_select="rerun",
@@ -374,7 +374,7 @@ class VideoProductPromotionWidget(Widget):
                     "channel_title": st.column_config.TextColumn("Channel", width="medium"),
                     "product_title": st.column_config.TextColumn("Product Title", width="medium")
                 },
-                use_container_width=True,
+                width='stretch',
                 height=400,
                 selection_mode="multi-row",
                 on_select="rerun",

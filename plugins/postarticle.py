@@ -9,7 +9,7 @@ import jwt
 import markdown2
 from lib.social_api import GhostAPI, WordPressAPI
 from lib.api_substack import SubstackAPI
-from lib.api_linedin import LinkedinAPI
+from lib.api_linkedin import LinkedinAPI
 from widgets.random_article import RandomArticleWidget
 from widgets.article_editor import ArticleEditorWidget
 
@@ -161,6 +161,9 @@ class PostarticlePlugin(Plugin):
         text = re.sub(r'\n\s*\n', '\n', text)  # Remove extra newlines
         text = text.strip()  # Remove leading/trailing whitespace
         return text
+
+    def has_tests(self) -> bool:
+        return True
 
     def run(self, config):
         tab1, tab2, tab3, tab4, tab5 = st.tabs([t("randomarticle_tab"), t("ghost_tab"), t("linkedin_tab"), t("wordpress_tab"), t("substack_tab")])

@@ -1,6 +1,8 @@
 from typing import List, Dict, Any, Optional
 import streamlit as st
 import re, os
+import json
+import time
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -307,3 +309,18 @@ class SubstackAPI:
         except Exception as e:
             st.error(f"Substack API Error (publish_draft): {str(e)}")
             return None
+
+    def delete_draft(self, draft_id: str, publication_url: Optional[str] = None) -> bool:
+        """
+        Deletes a draft post by ID for the specified publication.
+        :param draft_id: ID of the draft to delete.
+        :param publication_url: URL of the publication (optional, defaults to first URL).
+        :return: True if the draft was successfully deleted, False otherwise.
+        """
+        try:
+            self._initialize_api(publication_url)
+            self.retry_on_error(lambda: self.api.delete_draft(draft_id))
+            return True
+        except Exception as e:
+            st.error(f"Substack API Error (delete_draft): {str(e)}")
+            return False

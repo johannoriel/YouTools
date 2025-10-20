@@ -161,7 +161,7 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
                 label="Media",
                 images=thumbnails,
                 captions=filtered_media_names,
-                use_container_width=True,
+                width='stretch',
                 key=f"image_select_{suffix}"
             )
             if selected_thumb:
@@ -249,7 +249,7 @@ def remote_media_selector(media_items, suffix, streamlit_component=st, initial_s
                 t("media_selector_remote_choose_label"),
                 images=filtered_media_urls,
                 captions=filtered_media_names,
-                use_container_width=True,
+                width='stretch',
                 return_value="index"
             )
             if selected_idx is not None:

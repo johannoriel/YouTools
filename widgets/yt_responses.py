@@ -50,7 +50,7 @@ class ResponseDBDisplayWidget(Widget):
                     "Réponse": st.column_config.TextColumn(width="large"),
                     "Statut": st.column_config.TextColumn(width="medium")
                 },
-                use_container_width=True,
+                width='stretch',
                 key=f"{self.prefix}_responses_dataframe"
             )
         else:

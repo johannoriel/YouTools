@@ -113,13 +113,13 @@ class RecentVideosWidget(Widget):
         with col1:
             if page_number > 0 and st.button("Page Précédente", key=f"{self.prefix}_prev"):
                 st.session_state[f"{self.prefix}_page_number"] = page_number - 1
-                st.experimental_rerun()
+                st.rerun()
         with col2:
             st.write(f"Page {page_number + 1} / {total_pages}")
         with col3:
             if page_number < total_pages - 1 and st.button("Page Suivante", key=f"{self.prefix}_next"):
                 st.session_state[f"{self.prefix}_page_number"] = page_number + 1
-                st.experimental_rerun()
+                st.rerun()
 
         if st.session_state.get(f"{self.prefix}_show_transcript", False):
             st.header(t("recent_videos_transcript_header"))

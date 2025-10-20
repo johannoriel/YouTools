@@ -688,7 +688,7 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
                 if "title" in item and item["title"]:
                     st.subheader(item["title"])
                 max_height = item.get("size", 800 if is_presentation else 200)
-                st.image(filepath, use_container_width=True)
+                st.image(filepath, width='stretch')
                 st.markdown(f"""
                     <style>
                     img {{
@@ -714,7 +714,7 @@ def display_item(item, directories, is_presentation=False, in_group=False, anima
                     st.subheader(item["title"])
                 image_path = url_to_image(item["url"])
                 if image_path:
-                    st.image(image_path, use_container_width=True)
+                    st.image(image_path, width='stretch')
                     os.remove(image_path)
                 else:
                     st.error("Failed to convert URL to image")

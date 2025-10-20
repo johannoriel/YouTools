@@ -43,7 +43,7 @@ class ImageGeneratorWidget(Widget):
             with st.spinner("Processing..."):
                 image_filename = self.generate_image(pre_prompt_input, dimension_input)
                 if image_filename:
-                    st.image(image_filename, caption="Generated Image", use_container_width=True)
+                    st.image(image_filename, caption="Generated Image", width='stretch')
 
     def generate_image_direct(self, prompt, dimension, output_path, overwrite=True):
         # Initialisation du pipeline si nécessaire

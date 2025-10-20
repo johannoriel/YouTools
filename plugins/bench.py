@@ -923,7 +923,7 @@ class BenchPlugin(Plugin):
                     st.dataframe(
                         df,
                         column_config=column_config,
-                        use_container_width=True,
+                        width='stretch',
                         height=200
                     )
 

@@ -183,7 +183,7 @@ class ProductImporterWidget(Widget):
         selected_rows = st.dataframe(
             filtered_df[["filename", "path"]],  # Ne montrer que le nom et le chemin
             column_config=column_config,
-            use_container_width=True,
+            width='stretch',
             height=400,
             selection_mode="multi-row",
             on_select="rerun",

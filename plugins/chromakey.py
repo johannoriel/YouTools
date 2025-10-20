@@ -114,7 +114,7 @@ class ChromakeyPlugin(Plugin):
             # Convertir l'image de BGR (OpenCV) à RGB pour l'affichage dans Streamlit
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             st.image(frame_rgb, caption="Première image de la vidéo",
-                     use_container_width=True)
+                     width='stretch')
         cap.release()
 
         # Sélecteur de couleur avec la valeur par défaut de la configuration
