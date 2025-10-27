@@ -161,7 +161,7 @@ def media_selector(media_dirs, extensions, suffix, streamlit_component=st, initi
                 label="Media",
                 images=thumbnails,
                 captions=filtered_media_names,
-                width='stretch',
+                #width='stretch',
                 key=f"image_select_{suffix}"
             )
             if selected_thumb:

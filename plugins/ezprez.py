@@ -31,7 +31,7 @@ import re
 import subprocess
 import tempfile
 import os
-from streamlit_shortcuts import button
+from streamlit_shortcuts import shortcut_button as button
 import random
 import time
 

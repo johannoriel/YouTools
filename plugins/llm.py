@@ -896,7 +896,7 @@ class LlmPlugin(Plugin):
         from widgets.prompt_manager import PromptsManagerWidget
         for prompt_info in st.session_state.registered_prompts:
             with st.expander(f"Prompts for {prompt_info['plugin_name']} ({prompt_info['config_field']})"):
-                PromptsManagerWidget(prompt_info['plugin_name'], f"prompt_manager_{prompt_info['plugin_name']}", self.plugin_manager).display_prompts(
+                PromptsManagerWidget(prompt_info['plugin_name'], f"llm_prompt_manager_{prompt_info['plugin_name']}", self.plugin_manager).display_prompts(
                     prompt_info['plugin_name'],
                     prompt_info['config_field'],
                     prompt_info['type']
