@@ -11,6 +11,12 @@ import matplotlib.pyplot as plt
 from scipy.fft import fft, fftfreq
 import subprocess
 import pandas as pd
+import torch
+from demucs import pretrained
+from demucs.apply import apply_model
+from demucs.separate import load_track
+from demucs.audio import save_audio
+from demucs.pretrained import get_model
 
 # Ajout des nouvelles traductions
 translations["en"].update({
@@ -59,6 +65,10 @@ translations["en"].update({
     "batchsilences_reorder_videos": "Reorder Videos",
     "batchsilences_reorder_instructions": "Drag and drop to reorder the videos for merging.",
     "batchsilences_normalize_audio" : "FF normalize",
+    "remove_music_demucs": "Remove Music with Demucs (Isolate Vocals)",
+    "demucs_isolating": "Isolating vocals with Demucs...",
+    "demucs_success": "Vocals isolation completed. Output file: {result}",
+    "demucs_error": "Error during Demucs isolation: {error}",
 })
 
 translations["fr"].update({
@@ -107,6 +117,10 @@ translations["fr"].update({
     "batchsilences_reorder_videos": "Réorganiser les Vidéos",
     "batchsilences_reorder_instructions": "Glissez-déposez pour réorganiser l'ordre des vidéos avant la fusion.",
     "batchsilences_normalize_audio" : "FF normalize",
+    "remove_music_demucs": "Retirer la musique avec Demucs (Isoler les voix)",
+    "demucs_isolating": "Isolation des voix avec Demucs...",
+    "demucs_success": "Isolation des voix terminée. Fichier de sortie : {result}",
+    "demucs_error": "Erreur lors de l'isolation Demucs : {error}",
 })
 
 import os
@@ -228,6 +242,85 @@ def enhance_audio_with_resemble(input_file: str, output_dir: str, resemble_enhan
 
     except Exception as e:
         return f"Erreur lors de l'amélioration audio : {str(e)}", "0%"
+
+def isolate_vocals_demucs(input_file: str, output_dir: str, progress_callback=None) -> tuple[str, str]:
+    """
+    Extrait l'audio d'une vidéo, isole les voix avec Demucs, et recombine avec la vidéo.
+    Crée un fichier de backup avant modification.
+
+    Args:
+        input_file (str): Chemin vers le fichier vidéo d'entrée.
+        output_dir (str): Répertoire où sauvegarder la vidéo isolée.
+        progress_callback (callable, optional): Fonction pour mettre à jour la progression.
+
+    Returns:
+        tuple[str, str]: (Message de résultat, Pourcentage de progression)
+    """
+    try:
+        if progress_callback:
+            progress_callback(0)
+
+        # Créer un fichier de backup
+        backup_file = input_file + ".backup"
+        shutil.copy2(input_file, backup_file)
+
+        # Extraire l'audio en .wav (stéréo pour Demucs)
+        temp_audio = os.path.join(output_dir, "temp_audio.wav")
+        ffmpeg_extract_cmd = [
+            "ffmpeg", "-y", "-i", input_file, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", temp_audio
+        ]
+        process = subprocess.run(ffmpeg_extract_cmd, capture_output=True, text=True, encoding='utf-8')
+        if process.returncode != 0:
+            return f"Erreur lors de l'extraction audio : {process.stderr}", "0%"
+
+        if progress_callback:
+            progress_callback(20)
+
+        # Exécuter Demucs pour isoler les voix
+        base_name = os.path.splitext(os.path.basename(temp_audio))[0]
+        demucs_cmd = [
+            "demucs", "-n", "htdemucs", "--two-stems=vocals", temp_audio, "--out", output_dir
+        ]
+        process = subprocess.run(demucs_cmd, capture_output=True, text=True, encoding='utf-8', cwd=output_dir)
+        if process.returncode != 0:
+            return f"Erreur lors de l'isolation Demucs : {process.stderr}", "0%"
+
+        if progress_callback:
+            progress_callback(60)
+
+        # Chemin vers le fichier vocals.wav
+        vocals_dir = os.path.join(output_dir, "htdemucs", base_name)
+        vocals_path = os.path.join(vocals_dir, "vocals.wav")
+        if not os.path.exists(vocals_path):
+            return "Fichier vocals non trouvé après Demucs", "0%"
+
+        # Recombiner l'audio isolé (vocals) avec la vidéo
+        output_filename = f"vocals_isolated_{os.path.basename(input_file)}"
+        output_file = os.path.join(output_dir, output_filename)
+        ffmpeg_combine_cmd = [
+            "ffmpeg", "-y", "-i", input_file, "-i", vocals_path,
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-map", "0:v:0", "-map", "1:a:0", output_file
+        ]
+        process = subprocess.run(ffmpeg_combine_cmd, capture_output=True, text=True, encoding='utf-8')
+        if process.returncode != 0:
+            return f"Erreur lors de la recombination audio-vidéo : {process.stderr}", "0%"
+
+        # Nettoyer les fichiers temporaires
+        if os.path.exists(temp_audio):
+            os.remove(temp_audio)
+        if os.path.exists(vocals_dir):
+            shutil.rmtree(vocals_dir)
+        htdemucs_dir = os.path.join(output_dir, "htdemucs")
+        if os.path.exists(htdemucs_dir):
+            shutil.rmtree(htdemucs_dir)
+
+        if progress_callback:
+            progress_callback(100)
+
+        return f"Isolation des voix terminée. Fichier de sortie : {output_file}", "100%"
+
+    except Exception as e:
+        return t("demucs_error").format(error=str(e)), "0%"
 
 def get_video_metadata(_file_path: str) -> tuple[str, str]:
     """Calcule la durée et la résolution d'une vidéo avec mise en cache dans st.session_state."""
@@ -657,7 +750,7 @@ class TrimsilencesPlugin(Plugin):
             print("Découpage des segments silencieux")
             clips = []
             for i, (start, end, silence_middle) in enumerate(segments):
-                clip = video.subcliped(start, end)
+                clip = video.subclipped(start, end)
                 clips.append(clip)
                 if progress_callback:
                     progress = 33 + (i / len(segments) * 33)
@@ -1021,7 +1114,7 @@ class TrimsilencesPlugin(Plugin):
         ordered_names = selected_names
 
         # Boutons pour les opérations de masse
-        col_batch1, col_batch2, col_batch3, col_batch4, col_batch5 = st.columns(5)
+        col_batch1, col_batch2, col_batch3, col_batch4, col_batch5, col_batch6 = st.columns(6)
         processed_videos = []
         with col_batch1:
             if st.button(t("trim_silences_button")):
@@ -1132,8 +1225,14 @@ class TrimsilencesPlugin(Plugin):
                         if result.startswith(t("ff_normalize_error").format(error="")):
                             st.error(f"{name}: {result}")
                         else:
-                            st.success(f"{name}: {result}")
-                            processed_videos.append(result)
+                            if "Output file:" in result:
+                                output_file = result.split("Output file: ")[-1].strip()
+                            elif "Fichier de sortie :" in result:
+                                output_file = result.split("Fichier de sortie : ")[-1].strip()
+                            else:
+                                output_file = result.split(": ")[-1].strip()
+                            st.success(f"{name}: {t('ff_normalize_success').format(result=output_file)}")
+                            processed_videos.append(output_file)
 
                     if processed_videos:
                         with st.spinner(t("batchsilences_processing")):
@@ -1144,6 +1243,50 @@ class TrimsilencesPlugin(Plugin):
                                 st.success(result)
 
         with col_batch4:
+            if st.button(t("demucs_button")):
+                if not selected_files:
+                    st.warning(t("no_videos_selected"))
+                else:
+                    processed_videos = []
+                    for file, name in zip(ordered_files, ordered_names):
+                        progress_bar = st.progress(0)
+                        progress_text = st.empty()
+
+                        def update_progress(progress):
+                            progress_bar.progress(progress)
+                            progress_text.text(t("demucs_isolating"))
+
+                        with st.spinner(t("demucs_isolating")):
+                            result, _ = isolate_vocals_demucs(
+                                file,
+                                config['common']['work_directory'],
+                                progress_callback=update_progress
+                            )
+
+                        progress_bar.empty()
+                        progress_text.empty()
+
+                        if result.startswith(t("demucs_error").format(error="")):
+                            st.error(f"{name}: {result}")
+                        else:
+                            if "Output file:" in result:
+                                output_file = result.split("Output file: ")[-1].strip()
+                            elif "Fichier de sortie :" in result:
+                                output_file = result.split("Fichier de sortie : ")[-1].strip()
+                            else:
+                                output_file = result.split(": ")[-1].strip()
+                            st.success(f"{name}: {t('demucs_success').format(result=output_file)}")
+                            processed_videos.append(output_file)
+
+                    if processed_videos:
+                        with st.spinner(t("batchsilences_processing")):
+                            result, _ = self.post_process_videos(processed_videos, config, config['common']['work_directory'])
+                            if result.startswith(t("merge_error").format(error="")) or result.startswith(t("ff_normalize_error").format(error="")):
+                                st.error(result)
+                            else:
+                                st.success(result)
+
+        with col_batch5:
             if st.button(t("enhance_button")):
                 if not selected_files:
                     st.warning(t("no_videos_selected"))
@@ -1183,7 +1326,7 @@ class TrimsilencesPlugin(Plugin):
                             else:
                                 st.success(result)
 
-        with col_batch5:
+        with col_batch6:
             if st.button(t("merge_only_button")):
                 if not selected_files:
                     st.warning(t("no_videos_selected"))
