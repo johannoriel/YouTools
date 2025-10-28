@@ -5,6 +5,7 @@ import os, re
 import subprocess
 from plugins.common import list_video_files
 from plugins.transcript import TranscriptPlugin
+from moviepy import VideoFileClip, TextClip, CompositeVideoClip
 
 
 # Ajout des traductions spécifiques à ce plugin
@@ -31,6 +32,7 @@ translations["en"].update({
     "shortextractor_select_end": "Select end time",
     "shortextractor_suggest_timecode": "Suggest Timecode",
     "shortextractor_suggesting": "Suggesting timecode...",
+    "shortextractor_extract_timecode": "Extract Timecode",
     "shortextractor_llm_response": "LLM Response:",
     "shortextractor_no_timecode": "No valid timecode found in the LLM response.",
     "shortextractor_sugestion" : "Suggest a thematic or a subject",
@@ -42,6 +44,9 @@ translations["en"].update({
     "start_end_set" : "End time set",
     "full_transcript" : "Transcript",
     "shortextractor_format916": "Convert to 9/16 format",
+    "shortextractor_use_old_mode": "Use old zoom mode (instead of 9:16 stack)",
+    "shortextractor_preview_short": "Preview Short",
+    "shortextractor_previewer": "Previewing short...",
     "shortextractor_suggest_timecode_prompt": """Analyze the following video transcript and suggest a short, interesting segment (15-60 seconds) that could be extracted as a standalone short video.
 
 Provide the start and end timecodes in the format HH:MM:SS,mmm.
@@ -80,6 +85,7 @@ translations["fr"].update({
     "shortextractor_select_end": "Sélectionner le temps de fin",
     "shortextractor_suggest_timecode": "Suggérer un timecode",
     "shortextractor_suggesting": "Suggestion de timecode en cours...",
+    "shortextractor_extract_timecode": "Extraire le Timecode",
     "shortextractor_llm_response": "Réponse du LLM :",
     "shortextractor_no_timecode": "Aucun timecode valide trouvé dans la réponse du LLM.",
     "shortextractor_sugestion" : "Suggérer une thématique ou un sujet",
@@ -91,6 +97,9 @@ translations["fr"].update({
     "start_end_set" : "Temps de fin définis",
     "full_transcript" : "Transcription de la vidéo",
     "shortextractor_format916": "Conversion au format 9/16",
+    "shortextractor_use_old_mode": "Utiliser l'ancien mode zoom (au lieu du stack 9:16)",
+    "shortextractor_preview_short": "Prévisualiser le Short",
+    "shortextractor_previewer": "Prévisualisation du short en cours...",
     "shortextractor_suggest_timecode_prompt": """Analyse la transcription vidéo suivante et suggérez un court segment intéressant (15-60 secondes) qui pourrait être extrait comme une courte vidéo autonome.
 
 Fournis les codes temporels de début et de fin au format HH:MM,mmm.
@@ -105,6 +114,7 @@ Réponds avec deux codes temporels : un code temporel de début et un code tempo
     "shortextractor_subtitle_size": "Taille des sous-titres",
     "shortextractor_subtitle_bold": "Sous-titres en gras",
 })
+
 
 class ShortextractorPlugin(Plugin):
     def get_config_fields(self):
@@ -131,154 +141,32 @@ class ShortextractorPlugin(Plugin):
 
     def convert_srt_time_to_seconds(self, time_str):
         """Convert SRT time format to seconds with millisecond precision."""
+        if isinstance(time_str, (int, float)):
+            return time_str
         hours, minutes, seconds = time_str.split(':')
         seconds, milliseconds = seconds.split(',')
         total_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(milliseconds) / 1000
         return total_seconds
 
-    def ffmpeg(self, ffmpeg_command):
-        try:
-            print("Commande ffmpeg:", " ".join(ffmpeg_command))
-            result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
-            print("Sortie STDOUT:", result.stdout)
-            print("Sortie STDERR:", result.stderr)
-        except subprocess.CalledProcessError as e:
-            print("Erreur ffmpeg:", e.stderr)
-            return f"{t('shortextractor_error')}{e.stderr}"
-
-    def extract_timecodes(self, llm_response, options):
-        timecode_pattern = r'(\d{2}:\d{2}:\d{2}(?:,\d{3})?)'
-        timecodes = re.findall(timecode_pattern, llm_response)
-        if len(timecodes) >= 2:
-            start_index = self.find_closest_index(options, timecodes[0])
-            end_index = self.find_closest_index(options, timecodes[1])
-            return start_index, end_index
-        elif len(timecodes) == 1:
-            index = self.find_closest_index(options, timecodes[0])
-            return index, index
-        else:
-            return 0, len(options) - 1
-
-    def find_closest_index(self, options, target):
-        def extract_time(option):
-            return option.split(' - ')[0] if isinstance(option, str) else option
-
-        target_time = extract_time(target)
-
-        closest_index = 0
-        min_diff = float('inf')
-        for i, option in enumerate(options):
-            option_time = extract_time(option)
-
-            # Convert times to seconds for comparison
-            target_seconds = self.convert_srt_time_to_seconds(target_time) if isinstance(target_time, str) else target_time
-            option_seconds = self.convert_srt_time_to_seconds(option_time)
-
-            diff = abs(option_seconds - target_seconds)
-            if diff < min_diff:
-                min_diff = diff
-                closest_index = i
-        return closest_index
-
-    def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y, format_916,
-        add_subtitles=False, subtitle_position="top", subtitle_size=24, subtitle_bold=False):
-        start_seconds = self.convert_srt_time_to_seconds(start_time)
-        end_seconds = self.convert_srt_time_to_seconds(end_time)
-        duration = end_seconds - start_seconds
-
-        videos_dir = os.path.dirname(input_file)
-        input_filename = os.path.basename(input_file)
-        zoom_filename = f"zoom_{input_filename}"
-        zoom_file = os.path.join(videos_dir, zoom_filename)
-
-        def build_ffmpeg_command(input, output, extra_options=None):
-            command = [
-                "ffmpeg", "-y",
-                "-i", input,
-                "-c:a", "aac",
-            ]
-            if extra_options:
-                command.extend(extra_options)
-            command.append(output)
-            return command
-
-        # Créer un fichier SRT temporaire pour le segment
-        if add_subtitles and 'transcript' in st.session_state:
-            temp_srt = os.path.join(videos_dir, "temp_segment.srt")
-            parsed_transcript = self.parse_transcript(st.session_state.transcript)
-
-            # Filtrer et ajuster les sous-titres pour le segment
-            with open(temp_srt, 'w', encoding='utf-8') as f:
-                subtitle_index = 1
-                for entry in parsed_transcript:
-                    entry_start = self.convert_srt_time_to_seconds(entry['start'])
-                    entry_end = self.convert_srt_time_to_seconds(entry['end'])
-
-                    if entry_start >= start_seconds and entry_end <= end_seconds:
-                        # Ajuster les temps relatifs au début du segment
-                        adjusted_start = self.format_srt_time(entry_start - start_seconds)
-                        adjusted_end = self.format_srt_time(entry_end - start_seconds)
-
-                        f.write(f"{subtitle_index}\n")
-                        f.write(f"{adjusted_start} --> {adjusted_end}\n")
-                        f.write(f"{entry['text']}\n\n")
-                        subtitle_index += 1
-
-        # Commande de zoom
-        zoom_options = [
-            "-ss", f"{start_seconds:.3f}",
-            "-t", f"{duration:.3f}",
-            "-vf", f"scale=iw/{zoom_factor}:ih/{zoom_factor}, pad=iw*{zoom_factor}:ih*{zoom_factor}:(ow-iw)/2:(oh-ih)/2",
-        ]
-        ffmpeg_command = build_ffmpeg_command(input_file, zoom_file, zoom_options)
-        self.ffmpeg(ffmpeg_command)
-
-        # Commande finale avec sous-titres si nécessaire
-        if format_916:
-            # Pour la position "top", on utilise Alignment=8 (haut-centre)
-            # Pour la position "bottom", on utilise Alignment=2 (bas-centre)
-            alignment = "6" if subtitle_position == "top" else "2"
-            subtitle_y = str(int(-10*zoom_factor*4)) if subtitle_position == "top" else "(h-th-20)"
-            subtitle_y = "0" if subtitle_position == "top" else "(h-th-20)"
-            bold_style = ",Bold=1" if subtitle_bold else ""
-            subtitle_filter = f"subtitles='{temp_srt}':force_style='FontSize={subtitle_size},Alignment={alignment},MarginV={subtitle_y}{bold_style}'" if add_subtitles else ""
-            crop_filter = f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):(ih/2+ih/(4*{zoom_factor})*{center_y})'"
-            crop_filter = f"crop='min(iw,ih)*9/16:min(iw,ih):((iw-min(iw,ih)*9/16)/2+iw/(4*{zoom_factor})*{center_x}):ih/2'"
-
-            vf_filters = [crop_filter]
-            if add_subtitles:
-                vf_filters.append(subtitle_filter)
-
-            final_options = ["-vf", ",".join(vf_filters)]
-            ffmpeg_command = build_ffmpeg_command(zoom_file, output_file, final_options)
-        else:
-            alignment = "6" if subtitle_position == "top" else "2"
-            subtitle_y = "0" if subtitle_position == "top" else "(h-th-20)"
-            bold_style = ",Bold=1" if subtitle_bold else ""
-            if add_subtitles:
-                final_options = ["-vf", f"subtitles='{temp_srt}':force_style='FontSize={subtitle_size},Alignment={alignment}{bold_style}'"]
-                ffmpeg_command = build_ffmpeg_command(zoom_file, output_file, final_options)
-            else:
-                ffmpeg_command = build_ffmpeg_command(zoom_file, output_file)
-
-        result = self.ffmpeg(ffmpeg_command)
-
-        # Nettoyage
-        os.remove(zoom_file)
-        if add_subtitles:
-            os.remove(temp_srt)
-
-        return output_file
-
-    def format_srt_time(self, seconds):
+    def seconds_to_srt_time(self, seconds):
         """Convert seconds to SRT time format."""
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
-        seconds = seconds % 60
-        milliseconds = int((seconds - int(seconds)) * 1000)
-        seconds = int(seconds)
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+        secs = seconds % 60
+        milliseconds = int((secs - int(secs)) * 1000)
+        secs = int(secs)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
 
+    def extract_timecodes_from_llm(self, llm_response):
+        """Extract two timecodes from LLM response using robust regex."""
+        # Regex for HH:MM:SS,mmm format
+        timecode_pattern = r'(\d{2}:\d{2}:\d{2},\d{3})'
+        timecodes = re.findall(timecode_pattern, llm_response)
+        if len(timecodes) >= 2:
+            return timecodes[0], timecodes[1]
+        elif len(timecodes) == 1:
+            return timecodes[0], timecodes[0]
+        return None, None
 
     def parse_transcript(self, transcript):
         lines = transcript.split('\n')
@@ -323,32 +211,27 @@ class ShortextractorPlugin(Plugin):
 
             if search_term:
                 pattern = re.compile(re.escape(search_term), re.IGNORECASE)
-                matches = list(pattern.finditer(full_transcript))
+                matches = []
+
+                for entry in transcript:
+                    if pattern.search(entry['text']):
+                        matches.append(entry)
 
                 if matches:
-                    pattern = re.compile(re.escape(search_term), re.IGNORECASE)
-                    matches = []
-
-                    for entry in transcript:
-                        if pattern.search(entry['text']):
-                            matches.append(entry)
-
-                    if matches:
-                        st.write(f"{len(matches)} occurrence(s) found:")
-                        for i, match in enumerate(matches, 1):
-                            highlighted_text = pattern.sub(lambda m: f"**{m.group()}**", match['text'])
-                            #st.markdown(f"**Occurrence {i}:**")
-                            st.markdown(f"{match['start']} - {match['end']} {highlighted_text}")
-                            st.markdown("---")
+                    st.write(f"{len(matches)} occurrence(s) found:")
+                    for i, match in enumerate(matches, 1):
+                        highlighted_text = pattern.sub(lambda m: f"**{m.group()}**", match['text'])
+                        st.markdown(f"{match['start']} - {match['end']} {highlighted_text}")
+                        st.markdown("---")
                 else:
-                    st.warning(t("search_term_not_found").format(search_term=search_term))
+                    st.warning("Term not found")
                     st.text_area(t("full_transcript"), full_transcript, height=400)
             else:
                 st.text_area(t("full_transcript"), full_transcript, height=400)
 
     def set_time_from_search(self, search_term, time_type, transcript):
         if not search_term:
-            st.warning(t("enter_search_term"))
+            st.warning("Enter search term")
             return
 
         for i, entry in enumerate(transcript):
@@ -356,25 +239,132 @@ class ShortextractorPlugin(Plugin):
                 if time_type == 'start':
                     st.session_state.start_index = i
                     st.session_state.start_time = entry['start']
-                    st.success(t("start_time_set").format(time=entry['start']))
+                    st.success(f"Start time set: {entry['start']}")
                 else:
                     st.session_state.end_index = i
                     st.session_state.end_time = entry['end']
-                    st.success(t("end_time_set").format(time=entry['end']))
+                    st.success(f"End time set: {entry['end']}")
                 return
 
-        st.warning(t("search_term_not_found").format(search_term=search_term))
+        st.warning("Search term not found")
+
+    def build_short_clip(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip):
+        w, h = subclip.size
+        duration = subclip.duration
+
+        if use_old_mode:
+            clip = subclip
+            if zoom_factor != 1:
+                zoom_w = int(w / zoom_factor)
+                zoom_h = int(h / zoom_factor)
+                cx_offset = int(center_x * (w - zoom_w) / 2)
+                cy_offset = int(center_y * (h - zoom_h) / 2)
+                clip = clip.cropped(x1=cx_offset, y1=cy_offset, x2=cx_offset + zoom_w, y2=cy_offset + zoom_h)
+                clip = clip.resized(width=w, height=h)
+            if format_916:
+                target_w = int(h * 9 / 16)
+                crop_x = int((w - target_w) / 2)
+                clip = clip.cropped(x1=crop_x, y1=0, x2=crop_x + target_w, y2=h)
+        else:
+            # New 9:16 stack mode
+            crop_w = int(h * 9 / 8)
+            left = subclip.cropped(x1=0, y1=0, x2=min(crop_w, w), y2=h)
+            right = subclip.cropped(x1=max(0, w - crop_w), y1=0, x2=w, y2=h)
+            target_w = h  # portrait width = original height
+            left = left.resized(width=target_w).without_audio()
+            right = right.resized(width=target_w).without_audio()
+            block_h = left.h
+            total_h = 2 * block_h
+            stacked = CompositeVideoClip([
+                left.with_position((0, 0)),
+                right.with_position((0, block_h))
+            ], size=(target_w, total_h)).with_audio(subclip.audio)
+            clip = stacked
+
+        # Add subtitles
+        if add_subtitles and 'transcript' in st.session_state:
+            parsed_transcript = self.parse_transcript(st.session_state.transcript)
+            subtitle_clips = []
+            for entry in parsed_transcript:
+                entry_start_abs = self.convert_srt_time_to_seconds(entry['start'])
+                entry_end_abs = self.convert_srt_time_to_seconds(entry['end'])
+                if entry_start_abs >= self.convert_srt_time_to_seconds(start_time) and entry_end_abs <= self.convert_srt_time_to_seconds(end_time):
+                    adjusted_start = entry_start_abs - self.convert_srt_time_to_seconds(start_time)
+                    adjusted_dur = entry_end_abs - entry_start_abs
+                    txt = entry['text']
+                    font_name = 'Arial-Bold' if subtitle_bold else 'Arial'
+                    txt_clip = TextClip(
+                        text=txt,
+                        font=font_name,
+                        font_size=subtitle_size,
+                        color='white',
+                        stroke_color='black',
+                        stroke_width=4,
+                        method='caption',
+                        size=clip.size,
+                        #align='center',
+                        transparent=True
+                    ).with_start(adjusted_start).with_duration(adjusted_dur)
+                    if subtitle_position == "top":
+                        txt_clip = txt_clip.with_position(('center', 'top'))
+                    else:
+                        txt_clip = txt_clip.with_position(('center', 'bottom'))
+                    subtitle_clips.append(txt_clip)
+            if subtitle_clips:
+                clip = CompositeVideoClip([clip] + subtitle_clips)
+
+        return clip
+
+    def preview_short(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold):
+        start_seconds = self.convert_srt_time_to_seconds(start_time)
+        end_seconds = self.convert_srt_time_to_seconds(end_time)
+        subclip = VideoFileClip(input_file).subclipped(start_seconds, end_seconds)
+        clip = self.build_short_clip(input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip)
+        # Use preview as in movied
+        st.write("Preview start: 0")
+        st.write("Preview end: " + str(clip.duration))
+        preview_clip = clip.subclipped(0, clip.duration)
+        preview_clip.preview()
+        preview_clip.close()
+        clip.close()
+        subclip.close()
+
+    def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y, use_old_mode, format_916,
+                      add_subtitles=False, subtitle_position="top", subtitle_size=24, subtitle_bold=False):
+        start_seconds = self.convert_srt_time_to_seconds(start_time)
+        end_seconds = self.convert_srt_time_to_seconds(end_time)
+        subclip = VideoFileClip(input_file).subclipped(start_seconds, end_seconds)
+        clip = self.build_short_clip(input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip)
+        clip.write_videofile(output_file, codec="libx264", audio_codec="aac", temp_audiofile="temp-audio.m4a",
+                             remove_temp=True, logger=None)
+        clip.close()
+        subclip.close()
+        return output_file
 
     def run(self, config):
         st.header(t("shortextractor_header"))
 
-        # Sélection de la vidéo
+        # Initialize session state if needed
+        if 'transcript' not in st.session_state:
+            st.session_state.transcript = None
+        if 'start_time' not in st.session_state:
+            st.session_state.start_time = "00:00:00,000"
+        if 'end_time' not in st.session_state:
+            st.session_state.end_time = "00:01:00,000"
+        if 'start_index' not in st.session_state:
+            st.session_state.start_index = 0
+        if 'end_index' not in st.session_state:
+            st.session_state.end_index = 0
+        if 'llm_response' not in st.session_state:
+            st.session_state.llm_response = ""
+
+        # Video selection
         work_directory = os.path.expanduser(config['common']['work_directory'])
         l1, l2, l3, _ = list_video_files(work_directory)
-        videos = l1+l2+l3
+        videos = l1 + l2 + l3
 
         if not videos:
-            st.info(f"{t('transcript_no_videos')} {work_directory}")
+            st.info(f"No videos in {work_directory}")
             return
 
         selected_video = st.selectbox(t("shortextractor_select_video"), options=[v[0] for v in videos])
@@ -383,33 +373,18 @@ class ShortextractorPlugin(Plugin):
         if st.button(t("shortextractor_transcribe")):
             with st.spinner(t("shortextractor_transcribing")):
                 transcript_plugin = TranscriptPlugin("transcript", self.plugin_manager)
-                transcript = transcript_plugin.transcribe_video(selected_video_path, "srt")
-                st.session_state.transcript = transcript
+                st.session_state.transcript = transcript_plugin.transcribe_video(selected_video_path, "srt")
 
-        if 'transcript' in st.session_state:
+        if st.session_state.transcript:
             parsed_transcript = self.parse_transcript(st.session_state.transcript)
-            if not isinstance(parsed_transcript, list):
+            if not isinstance(parsed_transcript, list) or not parsed_transcript:
                 return
-            if not parsed_transcript:
-                return
-            if not "start" in parsed_transcript[0]:
+            if "start" not in parsed_transcript[0]:
                 return
 
             self.display_searchable_transcript(parsed_transcript)
 
-            # Création des options pour les select boxes
-            options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
-
-            # Initialisation des valeurs de session si elles n'existent pas
-            if 'start_index' not in st.session_state:
-                st.session_state.start_index = 0
-            if 'end_index' not in st.session_state:
-                st.session_state.end_index = len(options) - 1
-            if 'start_time' not in st.session_state:
-                st.session_state.start_time = parsed_transcript[st.session_state.start_index]['start']
-            if 'end_time' not in st.session_state:
-                st.session_state.end_time = parsed_transcript[st.session_state.end_index]['end']
-
+            options = [f"{entry['start']} - {entry['text'][:50]}..." for entry in parsed_transcript]
 
             col1, col2 = st.columns(2)
             with col1:
@@ -417,63 +392,52 @@ class ShortextractorPlugin(Plugin):
                                            options=options,
                                            index=st.session_state.start_index,
                                            key='start_select')
-
             with col2:
                 end_index = st.selectbox(t("shortextractor_select_end"),
                                          options=options,
                                          index=st.session_state.end_index,
                                          key='end_select')
 
-            # Mise à jour des indices et des temps dans st.session_state
+            # Update session state
             st.session_state.start_index = options.index(start_index)
             st.session_state.end_index = options.index(end_index)
             st.session_state.start_time = parsed_transcript[st.session_state.start_index]['start']
             st.session_state.end_time = parsed_transcript[st.session_state.end_index]['end']
 
-            # Assurer que l'index de fin n'est pas avant l'index de début
+            # Ensure end >= start
             if st.session_state.end_index < st.session_state.start_index:
                 st.session_state.end_index = st.session_state.start_index
                 st.session_state.end_time = parsed_transcript[st.session_state.end_index]['end']
 
-
-            # Mise à jour des valeurs de timecode
-            start_time = parsed_transcript[st.session_state.start_index]['start']
-            end_time = parsed_transcript[st.session_state.end_index]['end']
-
             suggestion = st.text_input(t("shortextractor_sugestion"))
 
-            if st.button(t("shortextractor_suggest_timecode")):
-                with st.spinner(t("shortextractor_suggesting")):
+            col_suggest, col_extract = st.columns(2)
+            with col_suggest:
+                if st.button(t("shortextractor_suggest_timecode")):
+                    with st.spinner(t("shortextractor_suggesting")):
+                        suggest_theme = t("shortextractor_searchfor").format(suggestion=suggestion) if suggestion else ""
+                        prompt = t("shortextractor_suggest_timecode_prompt") + suggest_theme
+                        st.session_state.llm_response = self.process_with_llm(prompt, config['llm']['llm_sys_prompt'], st.session_state.transcript)
 
-                    suggest_theme = ""
-                    if suggestion != "":
-                        suggest_theme = t("shortextractor_searchfor").format(suggestion=suggestion)
+            st.text(t("shortextractor_llm_response"))
+            st.text(st.session_state.llm_response)
 
+            with col_extract:
+                if st.button(t("shortextractor_extract_timecode")):
+                    start_tc, end_tc = self.extract_timecodes_from_llm(st.session_state.llm_response)
+                    if start_tc and end_tc:
+                        st.session_state.start_time = start_tc
+                        st.session_state.end_time = end_tc
+                        st.success(f"Timecodes extracted: {start_tc} -> {end_tc}")
+                        st.rerun()
+                    else:
+                        st.warning(t("shortextractor_no_timecode"))
 
-                    prompt = t("shortextractor_suggest_timecode_prompt") + suggest_theme
-                    print(prompt)
-                    llm_response = self.process_with_llm(prompt, config['llm']['llm_sys_prompt'], st.session_state.transcript)
-
-                    st.text(t("shortextractor_llm_response"))
-                    st.text(llm_response)
-
-                    options = [f"{entry['start']} - {entry['text']}" for entry in parsed_transcript]
-
-                    suggested_start_index, suggested_end_index = self.extract_timecodes(llm_response, options)
-                    st.session_state.start_index = suggested_start_index
-                    st.session_state.end_index = suggested_end_index
-                    st.session_state.start_time = parsed_transcript[suggested_start_index]['start']
-                    st.session_state.end_time = parsed_transcript[suggested_end_index]['end']
-                    st.write(f"{st.session_state.start_time} -> {st.session_state.end_time}")
-
-            col3,col4 = st.columns(2)
-            # Affichage des timecodes sélectionnés
+            col3, col4 = st.columns(2)
             st.session_state.start_time = col3.text_input(t("shortextractor_start_time"), value=st.session_state.start_time, key='display_start_time')
             st.session_state.end_time = col4.text_input(t("shortextractor_end_time"), value=st.session_state.end_time, key='display_end_time')
 
-
-
-            # Assurez-vous que les valeurs sont des floats
+            # Controls
             default_zoom = float(config['shortextractor'].get('zoom_factor', 1.5))
             default_center_x = float(config['shortextractor'].get('center_x', 0))
             default_center_y = float(config['shortextractor'].get('center_y', 0))
@@ -482,6 +446,8 @@ class ShortextractorPlugin(Plugin):
             zoom_factor = col1.slider(t("shortextractor_zoom"), min_value=1.0, max_value=3.0, value=default_zoom, step=0.1)
             center_x = col2.slider(t("shortextractor_center_x"), min_value=-1.0, max_value=1.0, value=default_center_x, step=0.1)
             center_y = col3.slider(t("shortextractor_center_y"), min_value=-1.0, max_value=1.0, value=default_center_y, step=0.1)
+
+            use_old_mode = st.checkbox(t("shortextractor_use_old_mode"), value=False)
 
             add_subtitles = col1.checkbox(t("shortextractor_add_subtitles"), value=True)
             subtitle_position = col2.selectbox(
@@ -492,28 +458,36 @@ class ShortextractorPlugin(Plugin):
             )
             format_916 = col3.checkbox(t("shortextractor_format916"), value=True)
             if add_subtitles:
-
                 subtitle_size = col2.slider(
                     t("shortextractor_subtitle_size"),
                     min_value=12,
-                    max_value=36,
-                    value=18,
+                    max_value=192,
+                    value=96,
                     step=2
                 )
                 subtitle_bold = col3.checkbox(t("shortextractor_subtitle_bold"), value=False)
             else:
                 subtitle_size = 18
-                subtitle_bold = True
+                subtitle_bold = False
 
-            if st.button(t("shortextractor_extract")):
-                with st.spinner(t("shortextractor_extracting")):
-                    output_file = os.path.join(work_directory, f"short_{os.path.splitext(selected_video)[0]}.mp4")
-                    st.write(f"Extracting {st.session_state.start_time} -> {st.session_state.end_time}")
-                    result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time,
-                        output_file, zoom_factor, center_x, center_y, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
-                    _, center, _ = st.columns([1, 1, 1])
-                    if result == output_file:
-                        st.success("Short extracted successfully!")
-                        center.video(output_file, muted=False)
-                    else:
-                        st.error(result)
+            col_preview, col_extract = st.columns(2)
+            with col_preview:
+                if st.button(t("shortextractor_preview_short")):
+                    with st.spinner(t("shortextractor_previewer")):
+                        self.preview_short(selected_video_path, st.session_state.start_time, st.session_state.end_time,
+                                           zoom_factor, center_x, center_y, use_old_mode, format_916,
+                                           add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
+
+            with col_extract:
+                if st.button(t("shortextractor_extract")):
+                    with st.spinner(t("shortextractor_extracting")):
+                        output_file = os.path.join(work_directory, f"short_{os.path.splitext(selected_video)[0]}.mp4")
+                        result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time,
+                                                    output_file, zoom_factor, center_x, center_y, use_old_mode, format_916,
+                                                    add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
+                        if result == output_file:
+                            st.success("Short extracted successfully!")
+                            _, center, _ = st.columns([1, 1, 1])
+                            center.video(output_file)
+                        else:
+                            st.error(result)
