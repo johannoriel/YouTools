@@ -529,6 +529,8 @@ def main():
             # Load and run only the selected plugin
             plugin_manager.run_plugin(st.session_state.selected_tab_id, config)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         st.error(f"Application error: {str(e)}")
 
 
