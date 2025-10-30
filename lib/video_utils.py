@@ -1142,25 +1142,22 @@ def insert_audio(main_clip, start_sec, audio_path, target_size):
     return new_clip, audio_duration
 
 
-def transcribe_video_whisper_cli(video_path, output_format, whisper_path, whisper_model, ffmpeg_path, lang):
+def transcribe_video_whisper_cli(video_path, output_format, word_level, whisper_path, whisper_model, ffmpeg_path, lang):
     """Transcrit une vidéo en utilisant whisper.cpp en ligne de commande.
-
     Args:
         video_path (str): Chemin vers le fichier vidéo à transcrire
         output_format (str): Format de sortie ('txt' ou 'srt')
+        word_level (bool): Active les timestamps au niveau mot (force txt + -ml 1)
         whisper_path (str): Chemin vers l'exécutable whisper.cpp
         whisper_model (str): Modèle whisper à utiliser (tiny, base, small, medium, large)
         ffmpeg_path (str): Chemin vers l'exécutable ffmpeg
         lang (str): Langue de la vidéo (code à 2 lettres)
-
     Returns:
         str: Le contenu de la transcription ou None en cas d'erreur
     """
     print("Executed by user :", getpass.getuser())
-
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
         temp_audio_path = temp_audio.name
-
     try:
         # Conversion de la vidéo en audio WAV 16kHz
         print(f"Conversion to {temp_audio_path} 16bits...")
@@ -1173,9 +1170,9 @@ def transcribe_video_whisper_cli(video_path, output_format, whisper_path, whispe
         ]
         print("Commande ffmpeg:", " ".join(ffmpeg_command))
         try:
-            result = subprocess.run(
+            result_ffmpeg = subprocess.run(
                 ffmpeg_command, check=True, capture_output=True, text=True)
-            print("Output STDOUT:", result.stdout)
+            print("Output STDOUT:", result_ffmpeg.stdout)
         except subprocess.CalledProcessError as e:
             print("Error while executing ffmpeg:")
             print(e.stderr)
@@ -1192,8 +1189,15 @@ def transcribe_video_whisper_cli(video_path, output_format, whisper_path, whispe
             "-f", temp_audio_path,
             "-l", lang,
             "-of", file_without_extension,
-            "-otxt" if output_format == "txt" else "-osrt"
         ]
+        original_output_format = output_format  # Sauvegarde pour cleanup
+        if word_level:
+            output_format = "txt"  # Force txt pour word-level
+            whisper_command.extend(["-ml", "1"])  # Active word-level timestamps
+            whisper_command.append("-otxt")
+            print(f"Word-level mode: Will capture from STDOUT (common behavior with -ml 1 -otxt)")
+        else:
+            whisper_command.append("-otxt" if output_format == "txt" else "-osrt")
         print("Command whisper:", " ".join(whisper_command))
         try:
             result = subprocess.run(
@@ -1204,19 +1208,26 @@ def transcribe_video_whisper_cli(video_path, output_format, whisper_path, whispe
             print(e.stderr)
         print('Transcription done')
 
-        with open(output_file, 'r') as f:
-            transcript = f.read()
+        # Lecture du transcript : fichier pour SRT/normal, STDOUT pour word-level
+        if word_level:
+            transcript = result.stdout  # Capture depuis STDOUT pour word-level
+            print(f"Word-level transcript captured from STDOUT (length: {len(transcript)} chars)")
+        else:
+            with open(output_file, 'r') as f:
+                transcript = f.read()
+            print(f"Transcript read from file {output_file} (length: {len(transcript)} chars)")
 
-        os.remove(output_file)
+        # Cleanup du fichier de sortie seulement si on l'a utilisé
+        if not word_level and os.path.exists(output_file):
+            os.remove(output_file)
         return transcript
 
     except subprocess.CalledProcessError as e:
         st.error(f"{t('transcript_error_transcribing')}{e.stderr}")
         return None
-
     finally:
         # Nettoyage des fichiers temporaires
         if os.path.exists(temp_audio_path):
             os.remove(temp_audio_path)
-        if os.path.exists(f"transcript.{output_format}"):
-            os.remove(f"transcript.{output_format}")
+        # Ne supprime pas "transcript.{output_format}" car ce n'est plus un fallback global
+        # (et pour word_level, le fichier n'est pas toujours créé/utilisé)

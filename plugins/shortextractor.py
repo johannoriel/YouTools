@@ -5,7 +5,7 @@ import os, re
 import subprocess
 from plugins.common import list_video_files
 from plugins.transcript import TranscriptPlugin
-from moviepy import VideoFileClip, TextClip, CompositeVideoClip
+from moviepy import VideoFileClip, TextClip, CompositeVideoClip  # Ajout .editor si pas déjà
 
 
 # Ajout des traductions spécifiques à ce plugin
@@ -60,6 +60,7 @@ Please respond with two timecodes: a start time and an end time, along with a br
     "shortextractor_subtitle_bottom": "Bottom",
     "shortextractor_subtitle_size": "Subtitles size",
     "shortextractor_subtitle_bold": "Bold subtitles",
+    "shortextractor_word_level": "Use word-level animated subtitles (modern style)",
 })
 
 translations["fr"].update({
@@ -113,6 +114,7 @@ Réponds avec deux codes temporels : un code temporel de début et un code tempo
     "shortextractor_subtitle_bottom": "Bas",
     "shortextractor_subtitle_size": "Taille des sous-titres",
     "shortextractor_subtitle_bold": "Sous-titres en gras",
+    "shortextractor_word_level": "Utiliser sous-titres animés mot par mot (style moderne)",
 })
 
 
@@ -189,6 +191,34 @@ class ShortextractorPlugin(Plugin):
             parsed.append(current_entry)
         return parsed
 
+    def parse_word_transcript(self, transcript_str):
+        """Parse word-level transcript from whisper.cpp txt output (handles concatenated format without newlines)."""
+        words = []
+        # Pattern for concatenated [HH:MM:SS.mmm --> HH:MM:SS.mmm] text
+        # Captures start, end, and text (which may include spaces or be empty)
+        pattern = r'\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\]([ \w\'’.,!?;:-]+?)(?=\[|\Z)'
+        matches = 0
+        for match in re.finditer(pattern, transcript_str):
+            start, end, text = match.groups()
+            text = text.strip()  # Clean spaces
+            if text:  # Ignore silence lines (empty text after strip)
+                try:
+                    start_sec = self.convert_srt_time_to_seconds(start)
+                    end_sec = self.convert_srt_time_to_seconds(end)
+                    words.append({
+                        "text": text,
+                        "start": start_sec,
+                        "end": end_sec
+                    })
+                    matches += 1
+                except ValueError as ve:
+                    print(f"WARNING: Skipping invalid timestamp {start} --> {end}: {ve}")
+                    continue
+        print(f"Parsed {matches} words from word transcript.")  # Debug log
+        if matches == 0:
+            print(f"WARNING: No word matches found. Raw sample: {transcript_str[:300]}...")  # Truncated debug
+        return words
+
     def display_searchable_transcript(self, transcript):
         st.subheader(t("searchable_transcript"))
         if not isinstance(transcript, list):
@@ -248,9 +278,85 @@ class ShortextractorPlugin(Plugin):
 
         st.warning("Search term not found")
 
-    def build_short_clip(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip):
+    def build_word_subtitles(self, words, start_sec, end_sec, clip_size, subtitle_position, subtitle_size, subtitle_bold):
+        """Build animated word-level subtitles."""
+        if not words:
+            return []
+
+        full_duration = end_sec - start_sec
+        relevant_words = [w for w in words if start_sec <= w["start"] < end_sec]
+        if not relevant_words:
+            return []
+
+        font_name = 'Arial-Bold' if subtitle_bold else 'Arial'
+        y_pos = 'top' if subtitle_position == "top" else 'bottom'
+        padding = 5  # Espace entre mots
+
+        # Styles
+        normal_style = {
+            'font': font_name,
+            'fontsize': subtitle_size,
+            'color': 'white',
+            'stroke_color': 'black',
+            'stroke_width': 2,
+            'method': 'caption',
+            'size': clip_size,
+            'align': 'west'  # Left align pour accumulation
+        }
+        highlight_style = {
+            **normal_style,
+            'fontsize': subtitle_size * 1.2,
+            'color': 'limegreen',  # Vert comme CapCut
+            'stroke_color': 'black',
+            'stroke_width': 3
+        }
+
+        subtitle_clips = []
+        current_x = 0  # Position X cumulative
+
+        for word in relevant_words:
+            adjusted_start = word["start"] - start_sec
+            duration = word["end"] - word["start"]
+            word_duration = full_duration - adjusted_start  # Reste jusqu'à la fin
+
+            # Clip normal (apparaît et reste)
+            temp_normal = TextClip(word["text"], transparent=True, **normal_style)
+            w_normal = temp_normal.w
+            temp_normal.close()
+
+            normal_clip = (TextClip(word["text"], transparent=True, **normal_style)
+                           .with_position((current_x, y_pos))
+                           .with_start(adjusted_start)
+                           .with_duration(word_duration))
+            subtitle_clips.append(normal_clip)
+
+            # Clip highlight (couvre pendant la prononciation)
+            temp_highlight = TextClip(word["text"], transparent=True, **highlight_style)
+            w_highlight = temp_highlight.w  # Plus large, ajuster position si besoin
+            offwith_x = (w_normal - w_highlight) / 2  # Centre le highlight
+            temp_highlight.close()
+
+            highlight_clip = (TextClip(word["text"], transparent=True, **highlight_style)
+                              .with_position((current_x + offwith_x, y_pos))
+                              .with_start(adjusted_start)
+                              .with_duration(duration))
+            subtitle_clips.append(highlight_clip)
+
+            current_x += w_normal + padding
+
+        # Centrer la ligne entière (approx)
+        total_width = current_x
+        center_offset = (clip_size[0] - total_width) / 2
+        for clip in subtitle_clips:
+            clip = clip.with_position(lambda t: (clip.pos[0] + center_offset, clip.pos[1]))
+            # Note: with_position avec lambda pour dynamique, mais ici statique
+
+        return subtitle_clips
+
+    def build_short_clip(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip, use_word_level=False):
         w, h = subclip.size
         duration = subclip.duration
+        clip_w, clip_h = w, h  # Sera ajusté si 9:16
 
         if use_old_mode:
             clip = subclip
@@ -265,6 +371,7 @@ class ShortextractorPlugin(Plugin):
                 target_w = int(h * 9 / 16)
                 crop_x = int((w - target_w) / 2)
                 clip = clip.cropped(x1=crop_x, y1=0, x2=crop_x + target_w, y2=h)
+                clip_w, clip_h = target_w, h
         else:
             # New 9:16 stack mode
             crop_w = int(h * 9 / 8)
@@ -280,47 +387,59 @@ class ShortextractorPlugin(Plugin):
                 right.with_position((0, block_h))
             ], size=(target_w, total_h)).with_audio(subclip.audio)
             clip = stacked
+            clip_w, clip_h = target_w, total_h
 
         # Add subtitles
-        if add_subtitles and 'transcript' in st.session_state:
-            parsed_transcript = self.parse_transcript(st.session_state.transcript)
-            subtitle_clips = []
-            for entry in parsed_transcript:
-                entry_start_abs = self.convert_srt_time_to_seconds(entry['start'])
-                entry_end_abs = self.convert_srt_time_to_seconds(entry['end'])
-                if entry_start_abs >= self.convert_srt_time_to_seconds(start_time) and entry_end_abs <= self.convert_srt_time_to_seconds(end_time):
-                    adjusted_start = entry_start_abs - self.convert_srt_time_to_seconds(start_time)
-                    adjusted_dur = entry_end_abs - entry_start_abs
-                    txt = entry['text']
-                    font_name = 'Arial-Bold' if subtitle_bold else 'Arial'
-                    txt_clip = TextClip(
-                        text=txt,
-                        font=font_name,
-                        font_size=subtitle_size,
-                        color='white',
-                        stroke_color='black',
-                        stroke_width=4,
-                        method='caption',
-                        size=clip.size,
-                        #align='center',
-                        transparent=True
-                    ).with_start(adjusted_start).with_duration(adjusted_dur)
-                    if subtitle_position == "top":
-                        txt_clip = txt_clip.with_position(('center', 'top'))
-                    else:
-                        txt_clip = txt_clip.with_position(('center', 'bottom'))
-                    subtitle_clips.append(txt_clip)
+        subtitle_clips = []
+        start_sec = self.convert_srt_time_to_seconds(start_time)
+        end_sec = self.convert_srt_time_to_seconds(end_time)
+
+        if add_subtitles:
+            if use_word_level and 'word_transcript' in st.session_state and st.session_state.word_transcript:
+                # Mode word-level animé
+                st.info("Building word-level subtitles...")
+                subtitle_clips = self.build_word_subtitles(
+                    st.session_state.word_transcript, start_sec, end_sec,
+                    (clip_w, clip_h), subtitle_position, subtitle_size, subtitle_bold
+                )
+            elif 'transcript' in st.session_state:
+                # Fallback phrase-level (ancien mode)
+                parsed_transcript = self.parse_transcript(st.session_state.transcript)
+                for entry in parsed_transcript:
+                    entry_start_abs = self.convert_srt_time_to_seconds(entry['start'])
+                    entry_end_abs = self.convert_srt_time_to_seconds(entry['end'])
+                    if entry_start_abs >= start_sec and entry_end_abs <= end_sec:
+                        adjusted_start = entry_start_abs - start_sec
+                        adjusted_dur = entry_end_abs - entry_start_abs
+                        txt = entry['text']
+                        font_name = 'Arial-Bold' if subtitle_bold else 'Arial'
+                        txt_clip = TextClip(
+                            text=txt,
+                            font=font_name,
+                            font_size=subtitle_size,
+                            color='white',
+                            stroke_color='black',
+                            stroke_width=4,
+                            method='caption',
+                            size=(clip_w, clip_h),
+                            transparent=True
+                        ).with_start(adjusted_start).with_duration(adjusted_dur)
+                        if subtitle_position == "top":
+                            txt_clip = txt_clip.with_position(('center', 'top'))
+                        else:
+                            txt_clip = txt_clip.with_position(('center', 'bottom'))
+                        subtitle_clips.append(txt_clip)
+
             if subtitle_clips:
-                clip = CompositeVideoClip([clip] + subtitle_clips)
+                clip = CompositeVideoClip([clip] + subtitle_clips, size=(clip_w, clip_h))
 
         return clip
 
-    def preview_short(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold):
+    def preview_short(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, use_word_level):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
         end_seconds = self.convert_srt_time_to_seconds(end_time)
         subclip = VideoFileClip(input_file).subclipped(start_seconds, end_seconds)
-        clip = self.build_short_clip(input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip)
-        # Use preview as in movied
+        clip = self.build_short_clip(input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip, use_word_level)
         st.write("Preview start: 0")
         st.write("Preview end: " + str(clip.duration))
         preview_clip = clip.subclipped(0, clip.duration)
@@ -330,11 +449,11 @@ class ShortextractorPlugin(Plugin):
         subclip.close()
 
     def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y, use_old_mode, format_916,
-                      add_subtitles=False, subtitle_position="top", subtitle_size=24, subtitle_bold=False):
+                      add_subtitles=False, subtitle_position="top", subtitle_size=24, subtitle_bold=False, use_word_level=False):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
         end_seconds = self.convert_srt_time_to_seconds(end_time)
         subclip = VideoFileClip(input_file).subclipped(start_seconds, end_seconds)
-        clip = self.build_short_clip(input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip)
+        clip = self.build_short_clip(input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip, use_word_level)
         clip.write_videofile(output_file, codec="libx264", audio_codec="aac", temp_audiofile="temp-audio.m4a",
                              remove_temp=True, logger=None)
         clip.close()
@@ -347,6 +466,8 @@ class ShortextractorPlugin(Plugin):
         # Initialize session state if needed
         if 'transcript' not in st.session_state:
             st.session_state.transcript = None
+        if 'word_transcript' not in st.session_state:
+            st.session_state.word_transcript = None
         if 'start_time' not in st.session_state:
             st.session_state.start_time = "00:00:00,000"
         if 'end_time' not in st.session_state:
@@ -370,10 +491,21 @@ class ShortextractorPlugin(Plugin):
         selected_video = st.selectbox(t("shortextractor_select_video"), options=[v[0] for v in videos])
         selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
 
+        use_word_level = st.checkbox(t("shortextractor_word_level"), value=True, help="Active les sous-titres animés mot par mot pour un style moderne.")
+
         if st.button(t("shortextractor_transcribe")):
             with st.spinner(t("shortextractor_transcribing")):
                 transcript_plugin = TranscriptPlugin("transcript", self.plugin_manager)
+                # SRT pour l'UI/search
                 st.session_state.transcript = transcript_plugin.transcribe_video(selected_video_path, "srt")
+                # Word-level pour subtitles (seulement si activé)
+                if use_word_level:
+                    word_str = transcript_plugin.transcribe_video(selected_video_path, "txt", word_level=True)
+                    #st.debug(word_str)
+                    st.session_state.word_transcript = self.parse_word_transcript(word_str)
+
+        if st.session_state.word_transcript:
+            st.info('Word-level transcription completed.')
 
         if st.session_state.transcript:
             parsed_transcript = self.parse_transcript(st.session_state.transcript)
@@ -462,10 +594,10 @@ class ShortextractorPlugin(Plugin):
                     t("shortextractor_subtitle_size"),
                     min_value=12,
                     max_value=192,
-                    value=96,
+                    value=96 if use_word_level else 24,  # Plus grand par défaut pour words
                     step=2
                 )
-                subtitle_bold = col3.checkbox(t("shortextractor_subtitle_bold"), value=False)
+                subtitle_bold = col3.checkbox(t("shortextractor_subtitle_bold"), value=use_word_level)  # Bold par défaut pour modern
             else:
                 subtitle_size = 18
                 subtitle_bold = False
@@ -476,7 +608,7 @@ class ShortextractorPlugin(Plugin):
                     with st.spinner(t("shortextractor_previewer")):
                         self.preview_short(selected_video_path, st.session_state.start_time, st.session_state.end_time,
                                            zoom_factor, center_x, center_y, use_old_mode, format_916,
-                                           add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
+                                           add_subtitles, subtitle_position, subtitle_size, subtitle_bold, use_word_level)
 
             with col_extract:
                 if st.button(t("shortextractor_extract")):
@@ -484,7 +616,7 @@ class ShortextractorPlugin(Plugin):
                         output_file = os.path.join(work_directory, f"short_{os.path.splitext(selected_video)[0]}.mp4")
                         result = self.extract_short(selected_video_path, st.session_state.start_time, st.session_state.end_time,
                                                     output_file, zoom_factor, center_x, center_y, use_old_mode, format_916,
-                                                    add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
+                                                    add_subtitles, subtitle_position, subtitle_size, subtitle_bold, use_word_level)
                         if result == output_file:
                             st.success("Short extracted successfully!")
                             _, center, _ = st.columns([1, 1, 1])

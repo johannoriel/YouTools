@@ -174,7 +174,7 @@ class TranscriptPlugin(Plugin):
             {"name": t("prompt_transcript_tab"), "plugin": "transcript"},
         ]
 
-    def transcribe_video(self, video_path, output_format, whisper_path=None, whisper_model=None, ffmpeg_path=None, lang=None):
+    def transcribe_video(self, video_path, output_format, word_level=False, whisper_path=None, whisper_model=None, ffmpeg_path=None, lang=None):
         if whisper_path is None:
             whisper_path = os.path.expanduser(self.get_config("whisper_path"))
         if ffmpeg_path is None:
@@ -183,10 +183,10 @@ class TranscriptPlugin(Plugin):
             whisper_model = self.get_config("whisper_model")
         if lang is None:
             lang = self.plugin_manager.config["common"]["language"]
-
         return transcribe_video_whisper_cli(
             video_path=video_path,
             output_format=output_format,
+            word_level=word_level,
             whisper_path=whisper_path,
             whisper_model=whisper_model,
             ffmpeg_path=ffmpeg_path,
