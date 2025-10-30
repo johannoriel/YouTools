@@ -351,9 +351,9 @@ class ShortextractorPlugin(Plugin):
         # Step 2: Handle subtitles
         if add_subtitles and not use_old_subtitle:
             ass_file = "temp_subs.ass"
-            generate_karaoke_ass(temp_short, ass_file, subtitle_size, subtitle_bold, subtitle_position, lang, max_line_chars=35)
+            generate_karaoke_ass(temp_short, ass_file, subtitle_size, subtitle_bold, "middle", lang, max_line_chars=35)
             try:
-                burn_ass_subtitles(temp_short, ass_file, output_file, subtitle_size, subtitle_position)
+                burn_ass_subtitles(temp_short, ass_file, output_file, subtitle_size, "middle")
             except Exception as e:
                 st.error(str(e))
                 # Fallback: rename temp to output
@@ -505,7 +505,7 @@ class ShortextractorPlugin(Plugin):
                     t("shortextractor_subtitle_size"),
                     min_value=12,
                     max_value=192,
-                    value=24,
+                    value=96,
                     step=2
                 )
                 subtitle_bold = col_bold.checkbox(t("shortextractor_subtitle_bold"), value=False)

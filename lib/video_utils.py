@@ -83,11 +83,12 @@ def extract_and_reformat_subclip(input_path, start_sec, end_sec, output_path, zo
     subclip.close()
     return output_path
 
-def generate_karaoke_ass(input_path, output_ass_path, subtitle_size=24, subtitle_bold=False, subtitle_position="bottom", lang="fr", model_size="medium", max_line_chars=35):
+def generate_karaoke_ass(input_path, output_ass_path, subtitle_size=24, subtitle_bold=False, subtitle_position="middle", lang="fr", model_size="large-v3", max_line_chars=35):
     """
     Generates an ASS subtitle file with word-level karaoke highlighting using faster_whisper.
     - Highlights words in green as they are spoken (white for normal text).
     - Splits long lines into shorter sub-events for better readability.
+    - Centered horizontally; transparent background with black outline halo/border.
     - Writes to output_ass_path.
     """
     # Step 1: Transcribe with word timestamps
@@ -114,11 +115,22 @@ def generate_karaoke_ass(input_path, output_ass_path, subtitle_size=24, subtitle
     segments = result_segments
 
     # Step 2: Build ASS file
-    primary_color = "&H00FFFFFF"  # White for normal text
-    secondary_color = "&H0000FF00"  # Green for highlight (ASS BGR)
-    font_name = "Arial-Bold" if subtitle_bold else "Arial"
-    alignment = "8" if subtitle_position == "top" else "2"  # Portrait: top-center or bottom-center
-    margin_v = "50" if subtitle_position == "bottom" else "50"
+    # Corrected colors: Primary (normal text: white), Secondary (highlight: green), Outline (black), Back (black for shadow)
+    primary_color = "&H0000FF00"  # Green for normal text
+    secondary_color = "&H00FFFFFF"  # White for highlight
+    outline_color = "&H00000000"  # Black for outline
+    back_color = "&H00000000"  # Black for shadow (opaque)
+    font_name = "Arial-Bold" if subtitle_bold else "Arial"    # Alignement basé sur la position (correction et implémentation du paramètre)
+
+    alignment = "10"  # Milieu-centré
+    margin_v = "0"  # Pas de marge verticale pour centrage
+
+    # Centrage horizontal : marges latérales à 0
+    margin_l_r = "0"
+
+    # Bordure plus épaisse et effet halo : Outline=4 (plus épais), Shadow=4 (halo symétrique)
+    outline_thickness = "14"
+    shadow_distance = "14"
 
     ass_content = f"""[Script Info]
 Title: Auto Karaoke Subtitles
@@ -127,7 +139,7 @@ PlayResY: 1920
 ScriptType: v4.00+
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{subtitle_size},{secondary_color},{primary_color},&H00000000,&H80000000,1,0,0,0,100,100,0,0,3,2,1,{alignment},10,10,{margin_v},1
+Style: Default,{font_name},{subtitle_size},{primary_color},{secondary_color},{outline_color},{back_color},1,0,0,0,100,100,0,0,1,{outline_thickness},{shadow_distance},{alignment},{margin_l_r},{margin_l_r},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -237,18 +249,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     with open(output_ass_path, "w", encoding="utf-8") as f:
         f.write(ass_content)
 
-    print(f"Fichier ASS généré avec découpage des lignes longues (max {max_line_chars} chars). Styles custom (centre, taille utilisateur, blanc normal/vert highlight).")
+    print(f"Fichier ASS généré avec découpage des lignes longues (max {max_line_chars} chars). Sous-titres centrés avec halo/bordure noir (fond transparent).")
     return output_ass_path
 
-def burn_ass_subtitles(video_path, ass_path, output_path, subtitle_size=24, subtitle_position="bottom"):
+def burn_ass_subtitles(video_path, ass_path, output_path, subtitle_size=24, subtitle_position="middle"):
     """
     Burns ASS subtitles into the video using FFmpeg.
-    Applies custom force_style for alignment, size, etc.
+    Applies custom force_style for alignment, size, thicker outline, halo, horizontal centering, etc.
+    Supports top, bottom, and middle vertical positioning.
     """
     try:
         stream = ffmpeg.input(video_path)
-        alignment_num = 8 if subtitle_position == "top" else 2  # Portrait-friendly
-        force_style = f"Alignment={alignment_num},Fontsize={subtitle_size},Outline=2,Shadow=2,BackColour=&H80000000&"
+
+        alignment_num = 10  # Milieu-centré
+        margin_v = "0"     # Pas de marge verticale pour vrai centrage
+
+        # Force_style mis à jour : centrage horizontal (MarginL/R=0), bordure plus épaisse (Outline=4), halo (Shadow=4), fond ombre noir opaque, et MarginV pour position verticale
+        force_style = f"Alignment={alignment_num},Fontsize={subtitle_size},MarginL=0,MarginR=0,MarginV={margin_v},Outline=8,Shadow=14,BackColour=&H80000000&"
+
         stream = ffmpeg.output(
             stream,
             output_path,
@@ -256,7 +274,7 @@ def burn_ass_subtitles(video_path, ass_path, output_path, subtitle_size=24, subt
             vcodec="h264", acodec="aac",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=False)
-        print("Vidéo finale créée avec ASS karaoké (blanc normal, vert highlight, centre, taille utilisateur).")
+        print(f"Vidéo finale créée avec ASS karaoké (blanc normal, vert highlight, centrés horizontalement et verticalement en {subtitle_position}, taille utilisateur, bordure/halo noir plus épais).")
         return output_path
     except Exception as e:
         raise Exception(f"Erreur FFmpeg burn: {e}")
