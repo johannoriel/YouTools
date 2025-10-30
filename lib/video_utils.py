@@ -17,7 +17,249 @@ import yt_dlp
 import getpass
 import tempfile
 import subprocess
+import re
 
+# Try faster-whisper first, fallback to openai-whisper
+try:
+    from faster_whisper import WhisperModel
+    USE_FASTER = True
+    print("Utilisation de faster-whisper (rapide !)")
+except ImportError:
+    import whisper as openai_whisper  # Fallback
+    USE_FASTER = False
+    print("Fallback sur openai-whisper (plus lent). Installe faster-whisper pour booster.")
+
+def ms_to_ass_time(ms):
+    """Convertit les ms en format ASS HH:MM:SS:cc"""
+    hours = ms // 3600000
+    ms %= 3600000
+    minutes = ms // 60000
+    ms %= 60000
+    seconds = ms // 1000
+    cs = (ms % 1000) // 10  # Centi-secondes (2 digits)
+    return f"{hours}:{minutes:02d}:{seconds:02d}:{cs:02d}"
+
+def extract_and_reformat_subclip(input_path, start_sec, end_sec, output_path, zoom_factor=1.0, center_x=0.0, center_y=0.0, use_old_mode=False, format_916=True):
+    """
+    Extracts a subclip and reformats it to 9:16 (portrait) mode.
+    - Old mode: Applies zoom/crop, then optional center-crop to 9:16 width.
+    - New mode: Vertical stack of left/right crops for 9:16.
+    Writes the result to output_path.
+    """
+    subclip = VideoFileClip(input_path).subclipped(start_sec, end_sec)
+    w, h = subclip.size
+
+    if use_old_mode:
+        clip_temp = subclip
+        if zoom_factor != 1:
+            zoom_w = int(w / zoom_factor)
+            zoom_h = int(h / zoom_factor)
+            cx_offset = int(center_x * (w - zoom_w) / 2)
+            cy_offset = int(center_y * (h - zoom_h) / 2)
+            clip_temp = clip_temp.cropped(x1=cx_offset, y1=cy_offset, x2=cx_offset + zoom_w, y2=cy_offset + zoom_h)
+            clip_temp = clip_temp.resized(width=w, height=h)
+        if format_916:
+            target_w = int(h * 9 / 16)
+            crop_x = int((w - target_w) / 2)
+            clip_temp = clip_temp.cropped(x1=crop_x, y1=0, x2=crop_x + target_w, y2=h)
+    else:
+        # New 9:16 stack mode
+        crop_w = int(h * 9 / 8)
+        left = subclip.cropped(x1=0, y1=0, x2=min(crop_w, w), y2=h)
+        right = subclip.cropped(x1=max(0, w - crop_w), y1=0, x2=w, y2=h)
+        target_w = h  # Portrait width = original height
+        left = left.resized(width=target_w).without_audio()
+        right = right.resized(width=target_w).without_audio()
+        block_h = left.h
+        total_h = 2 * block_h
+        clip_temp = CompositeVideoClip([
+            left.with_position((0, 0)),
+            right.with_position((0, block_h))
+        ], size=(target_w, total_h)).with_audio(subclip.audio)
+
+    # Write to output
+    clip_temp.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
+    clip_temp.close()
+    subclip.close()
+    return output_path
+
+def generate_karaoke_ass(input_path, output_ass_path, subtitle_size=24, subtitle_bold=False, subtitle_position="bottom", lang="fr", model_size="medium", max_line_chars=35):
+    """
+    Generates an ASS subtitle file with word-level karaoke highlighting using faster_whisper.
+    - Highlights words in green as they are spoken (white for normal text).
+    - Splits long lines into shorter sub-events for better readability.
+    - Writes to output_ass_path.
+    """
+    # Step 1: Transcribe with word timestamps
+    if USE_FASTER:
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        segments, info = model.transcribe(input_path, word_timestamps=True, language=lang)
+        # Convert to Whisper-like format
+        result_segments = []
+        for segment in segments:
+            word_list = []
+            for word in segment.words:
+                word_list.append({"word": word.word.strip(), "start": word.start, "end": word.end})
+            result_segments.append({
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text.strip(),
+                "words": word_list
+            })
+    else:
+        model = openai_whisper.load_model(model_size)
+        result = model.transcribe(input_path, word_timestamps=True, language=lang)
+        result_segments = result["segments"]
+
+    segments = result_segments
+
+    # Step 2: Build ASS file
+    primary_color = "&H00FFFFFF"  # White for normal text
+    secondary_color = "&H0000FF00"  # Green for highlight (ASS BGR)
+    font_name = "Arial-Bold" if subtitle_bold else "Arial"
+    alignment = "8" if subtitle_position == "top" else "2"  # Portrait: top-center or bottom-center
+    margin_v = "50" if subtitle_position == "bottom" else "50"
+
+    ass_content = f"""[Script Info]
+Title: Auto Karaoke Subtitles
+PlayResX: 1080
+PlayResY: 1920
+ScriptType: v4.00+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{font_name},{subtitle_size},{secondary_color},{primary_color},&H00000000,&H80000000,1,0,0,0,100,100,0,0,3,2,1,{alignment},10,10,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    def split_long_line(words, segment_start, segment_end, max_chars):
+        """Split words into sub-groups if total clean text > max_chars."""
+        if not words:
+            return [{"words": [], "start": segment_start, "end": segment_end}]
+
+        sub_groups = []
+        current_group = []
+        current_length = 0
+        current_start = segment_start
+        last_end = segment_start
+
+        for word_info in words:
+            word = word_info["word"].strip()
+            word_length = len(word) + 1  # +1 for space
+            if current_length + word_length > max_chars and current_group:
+                # End current group
+                group_end = word_info["start"]  # Start of next word as end
+                sub_groups.append({
+                    "words": current_group[:],
+                    "start": current_start,
+                    "end": group_end
+                })
+                # Start new group
+                current_group = [word_info]
+                current_length = word_length
+                current_start = word_info["start"]
+            else:
+                current_group.append(word_info)
+                current_length += word_length
+                last_end = word_info["end"]
+
+        # Add last group
+        if current_group:
+            sub_groups.append({
+                "words": current_group,
+                "start": current_start,
+                "end": segment_end if last_end == segment_end else last_end  # Use segment_end if no words
+            })
+
+        return sub_groups
+
+    for i, segment in enumerate(segments):
+        start_ms = int(segment["start"] * 1000)
+        end_ms = int(segment["end"] * 1000)
+        segment_start = segment["start"]
+        segment_end = segment["end"]
+
+        words = segment.get("words", [])
+        if not words or len(words) < 1:
+            # Fallback: simple text as one event
+            full_text = segment["text"].strip()
+            start_time = ms_to_ass_time(start_ms)
+            end_time = ms_to_ass_time(end_ms)
+            event = f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{full_text}"
+            ass_content += event + "\n"
+            continue
+
+        # Build tagged text parts for the whole segment first (for length check)
+        text_parts = []
+        for word_info in words:
+            dur_cs = int((word_info["end"] - word_info["start"]) * 100)
+            word = word_info["word"].strip()
+            if word and dur_cs > 0:
+                tag = '{\\k' + str(dur_cs) + '}'
+                text_parts.append(tag + word)
+        full_tagged_text = ' '.join(text_parts)
+
+        # Estimate clean length (remove tags roughly)
+        clean_text = re.sub(r'\\k\d+', '', full_tagged_text).strip()
+        if len(clean_text) <= max_line_chars:
+            # No split needed
+            start_time = ms_to_ass_time(start_ms)
+            end_time = ms_to_ass_time(end_ms)
+            event = f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{full_tagged_text}"
+            ass_content += event + "\n"
+        else:
+            # Split into sub-groups
+            sub_groups = split_long_line(words, segment_start, segment_end, max_line_chars)
+            for j, group in enumerate(sub_groups):
+                if not group["words"]:
+                    continue
+                group_start = group["start"]
+                group_end = group["end"]
+                group_start_ms = int(group_start * 1000)
+                group_end_ms = int(group_end * 1000)
+                group_start_time = ms_to_ass_time(group_start_ms)
+                group_end_time = ms_to_ass_time(group_end_ms)
+
+                # Build tagged text for this sub-group
+                group_parts = []
+                for word_info in group["words"]:
+                    dur_cs = int((word_info["end"] - word_info["start"]) * 100)
+                    word = word_info["word"].strip()
+                    if word and dur_cs > 0:
+                        tag = '{\\k' + str(dur_cs) + '}'
+                        group_parts.append(tag + word)
+                group_tagged_text = ' '.join(group_parts)
+
+                event = f"Dialogue: 0,{group_start_time},{group_end_time},Default,,0,0,0,,{group_tagged_text}"
+                ass_content += event + "\n"
+
+    with open(output_ass_path, "w", encoding="utf-8") as f:
+        f.write(ass_content)
+
+    print(f"Fichier ASS généré avec découpage des lignes longues (max {max_line_chars} chars). Styles custom (centre, taille utilisateur, blanc normal/vert highlight).")
+    return output_ass_path
+
+def burn_ass_subtitles(video_path, ass_path, output_path, subtitle_size=24, subtitle_position="bottom"):
+    """
+    Burns ASS subtitles into the video using FFmpeg.
+    Applies custom force_style for alignment, size, etc.
+    """
+    try:
+        stream = ffmpeg.input(video_path)
+        alignment_num = 8 if subtitle_position == "top" else 2  # Portrait-friendly
+        force_style = f"Alignment={alignment_num},Fontsize={subtitle_size},Outline=2,Shadow=2,BackColour=&H80000000&"
+        stream = ffmpeg.output(
+            stream,
+            output_path,
+            vf=f"subtitles={ass_path}:force_style='{force_style}'",
+            vcodec="h264", acodec="aac",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=False)
+        print("Vidéo finale créée avec ASS karaoké (blanc normal, vert highlight, centre, taille utilisateur).")
+        return output_path
+    except Exception as e:
+        raise Exception(f"Erreur FFmpeg burn: {e}")
 
 def convert_time_to_seconds(time_str):
     # Convert a time string "mm:ss" to seconds

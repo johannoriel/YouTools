@@ -2,32 +2,10 @@ from lib.global_vars import translations, t
 from app import Plugin
 import streamlit as st
 import os, re
-import subprocess
 from plugins.common import list_video_files
 from plugins.transcript import TranscriptPlugin
-from moviepy import VideoFileClip, TextClip, CompositeVideoClip  # Ajout .editor si pas déjà
-import ffmpeg  # Pour le burn final ASS
-
-# Try faster-whisper first, fallback to openai-whisper
-try:
-    from faster_whisper import WhisperModel
-    USE_FASTER = True
-    print("Utilisation de faster-whisper (rapide !)")
-except ImportError:
-    import whisper as openai_whisper  # Fallback
-    USE_FASTER = False
-    print("Fallback sur openai-whisper (plus lent). Installe faster-whisper pour booster.")
-
-def ms_to_ass_time(ms):
-    """Convertit les ms en format ASS HH:MM:SS:cc"""
-    hours = ms // 3600000
-    ms %= 3600000
-    minutes = ms // 60000
-    ms %= 60000
-    seconds = ms // 1000
-    cs = (ms % 1000) // 10  # Centi-secondes (2 digits)
-    return f"{hours}:{minutes:02d}:{seconds:02d}:{cs:02d}"
-
+from moviepy import VideoFileClip, TextClip, CompositeVideoClip
+from lib.video_utils import extract_and_reformat_subclip, generate_karaoke_ass, burn_ass_subtitles  # New imports
 
 # Ajout des traductions spécifiques à ce plugin (inchangé)
 translations["en"].update({
@@ -309,7 +287,7 @@ class ShortextractorPlugin(Plugin):
             clip = stacked
             clip_w, clip_h = target_w, total_h
 
-        # Add subtitles
+        # Add subtitles (MoviePy fallback for preview/old mode)
         subtitle_clips = []
         start_sec = self.convert_srt_time_to_seconds(start_time)
         end_sec = self.convert_srt_time_to_seconds(end_time)
@@ -348,89 +326,6 @@ class ShortextractorPlugin(Plugin):
 
         return clip
 
-    def generate_ass_karaoke(self, temp_video_path, subtitle_size, subtitle_bold, subtitle_position, lang="fr", model_size="medium"):
-        """Génère un fichier ASS avec karaoké mot par mot pour la vidéo temp (subclip)."""
-        # Étape 1: Transcription avec timestamps par mot
-        if USE_FASTER:
-            model = WhisperModel(model_size, device="cpu", compute_type="int8")  # Ajuste pour perf
-            segments, info = model.transcribe(temp_video_path, word_timestamps=True, language=lang)
-            # Convert to Whisper-like format
-            result_segments = []
-            for segment in segments:
-                word_list = []
-                for word in segment.words:
-                    word_list.append({"word": word.word.strip(), "start": word.start, "end": word.end})
-                result_segments.append({
-                    "start": segment.start,
-                    "end": segment.end,
-                    "text": segment.text.strip(),
-                    "words": word_list
-                })
-        else:
-            model = openai_whisper.load_model(model_size)
-            result = model.transcribe(temp_video_path, word_timestamps=True, language=lang)
-            result_segments = result["segments"]
-
-        segments = result_segments
-
-        # Étape 2: Construire un fichier ASS avec highlighting karaoké mot par mot
-        # Inversé : Primaire=blanc (normal), Secondaire=vert (highlight)
-        primary_color = "&H00FFFFFF"  # Blanc pour texte normal
-        secondary_color = "&H00FF00&"  # Vert pour highlight
-        font_name = "Arial-Bold" if subtitle_bold else "Arial"
-        alignment = "8" if subtitle_position == "top" else "5"  # 8=top-center, 5=bottom-center
-        margin_v = "50" if subtitle_position == "bottom" else "50"  # Ajuste vertical
-
-        ass_content = f"""[Script Info]
-Title: Auto Karaoke Subtitles
-PlayResX: 1080
-PlayResY: 1920
-ScriptType: v4.00+
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{subtitle_size},{secondary_color},{primary_color},&H00000000,&H80000000,1,0,0,0,100,100,0,0,3,2,1,{alignment},10,10,{margin_v},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-
-        # Pour chaque segment (phrase), créer un événement ASS avec \k par mot
-        for i, segment in enumerate(segments):
-            start_ms = int(segment["start"] * 1000)  # ASS en ms
-            end_ms = int(segment["end"] * 1000)
-            start_time = ms_to_ass_time(start_ms)
-            end_time = ms_to_ass_time(end_ms)
-
-            # Récupère les mots avec leurs timings
-            words = segment.get("words", [])
-
-            if not words or len(words) < 1:
-                # Fallback si pas de words : texte simple statique
-                full_text = segment["text"].strip()
-            else:
-                # Construit les parties avec {\k<dur_cs>} avant chaque mot (karaoké : highlight secondaire)
-                text_parts = []
-                for word_info in words:
-                    dur_cs = int((word_info["end"] - word_info["start"]) * 100)  # Centi-secondes pour \k
-                    word = word_info["word"].strip()
-                    if word and dur_cs > 0:  # Skip mots vides ou durée nulle
-                        tag = '{\\k' + str(dur_cs) + '}'
-                        text_parts.append(tag + word)
-                full_text = ' '.join(text_parts)
-                if not full_text:  # Si tous skippés, fallback
-                    full_text = segment["text"].strip()
-
-            # Ajoute l'événement ASS (highlight avance mot par mot)
-            event = f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{full_text}"
-            ass_content += event + "\n"
-
-        ass_file = "temp_subs.ass"
-        with open(ass_file, "w", encoding="utf-8") as f:
-            f.write(ass_content)
-
-        print("Fichier ASS généré avec styles custom (centre, taille utilisateur, blanc normal/vert highlight).")
-        return ass_file
-
     def preview_short(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
         end_seconds = self.convert_srt_time_to_seconds(end_time)
@@ -445,67 +340,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         subclip.close()
 
     def extract_short(self, input_file, start_time, end_time, output_file, zoom_factor, center_x, center_y, use_old_mode, format_916,
-                      add_subtitles=False, subtitle_position="top", subtitle_size=24, subtitle_bold=False, use_old_subtitle=False, lang="fr"):
+                      add_subtitles=False, subtitle_position="bottom", subtitle_size=24, subtitle_bold=False, use_old_subtitle=False, lang="fr"):
         start_seconds = self.convert_srt_time_to_seconds(start_time)
         end_seconds = self.convert_srt_time_to_seconds(end_time)
 
-        # Étape 1: Créer une subclip temporaire pour traitement
+        # Step 1: Extract and reformat subclip using utils
         temp_short = "temp_short.mp4"
-        subclip = VideoFileClip(input_file).subclipped(start_seconds, end_seconds)
+        extract_and_reformat_subclip(input_file, start_seconds, end_seconds, temp_short, zoom_factor, center_x, center_y, use_old_mode, format_916)
 
-        # Applique zoom/format 9:16 si needed (comme dans build_short_clip)
-        w, h = subclip.size
-        if use_old_mode:
-            clip_temp = subclip
-            if zoom_factor != 1:
-                zoom_w = int(w / zoom_factor)
-                zoom_h = int(h / zoom_factor)
-                cx_offset = int(center_x * (w - zoom_w) / 2)
-                cy_offset = int(center_y * (h - zoom_h) / 2)
-                clip_temp = clip_temp.crop(x1=cx_offset, y1=cy_offset, x2=cx_offset + zoom_w, y2=cy_offset + zoom_h)
-                clip_temp = clip_temp.resize(width=w, height=h)
-            if format_916:
-                target_w = int(h * 9 / 16)
-                crop_x = int((w - target_w) / 2)
-                clip_temp = clip_temp.crop(x1=crop_x, y1=0, x2=crop_x + target_w, y2=h)
-        else:
-            # Stack mode 9:16
-            crop_w = int(h * 9 / 8)
-            left = subclip.cropped(x1=0, y1=0, x2=min(crop_w, w), y2=h)
-            right = subclip.cropped(x1=max(0, w - crop_w), y1=0, x2=w, y2=h)
-            target_w = h
-            left = left.resized(width=target_w).without_audio()
-            right = right.resized(width=target_w).without_audio()
-            block_h = left.h
-            total_h = 2 * block_h
-            clip_temp = CompositeVideoClip([
-                left.with_position((0, 0)),
-                right.with_position((0, block_h))
-            ], size=(target_w, total_h)).with_audio(subclip.audio)
-
-        # Écrit la subclip formatée en temp file
-        clip_temp.write_videofile(temp_short, codec="libx264", audio_codec="aac", logger=None)
-        clip_temp.close()
-        subclip.close()
-
-        # Étape 2: Si subtitles et nouveau mode (pas old_subtitle), génère ASS et burn avec FFmpeg
+        # Step 2: Handle subtitles
         if add_subtitles and not use_old_subtitle:
-            ass_file = self.generate_ass_karaoke(temp_short, subtitle_size, subtitle_bold, subtitle_position, lang)
+            ass_file = "temp_subs.ass"
+            generate_karaoke_ass(temp_short, ass_file, subtitle_size, subtitle_bold, subtitle_position, lang, max_line_chars=35)
             try:
-                # Burn ASS dans la vidéo avec FFmpeg
-                stream = ffmpeg.input(temp_short)
-                force_style = f"Alignment={8 if subtitle_position == 'top' else 5},Fontsize={subtitle_size},Outline=2,Shadow=2,BackColour=&H80000000&"
-                stream = ffmpeg.output(
-                    stream,
-                    output_file,
-                    vf=f"subtitles={ass_file}:force_style='{force_style}'",
-                    vcodec="h264", acodec="aac",
-                )
-                ffmpeg.run(stream, overwrite_output=True, quiet=False)
-                print("Vidéo finale créée avec ASS karaoké (blanc normal, vert highlight, centre, taille utilisateur).")
+                burn_ass_subtitles(temp_short, ass_file, output_file, subtitle_size, subtitle_position)
             except Exception as e:
-                st.error(f"Erreur FFmpeg burn: {e}")
-                # Fallback à MoviePy
+                st.error(str(e))
+                # Fallback: rename temp to output
                 os.rename(temp_short, output_file)
             finally:
                 if os.path.exists(ass_file):
@@ -513,13 +364,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if os.path.exists(temp_short):
                     os.remove(temp_short)
         else:
-            # Fallback MoviePy pour ancien mode ou preview
+            # Fallback: Load temp and add MoviePy subtitles
             clip_temp = VideoFileClip(temp_short)
-            clip = self.build_short_clip(input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, clip_temp)
+            # Recreate subclip for build (since we have temp, but build expects original subclip; approximate)
+            # Note: For old mode, we re-apply subtitles here
+            original_subclip = VideoFileClip(input_file).subclipped(start_seconds, end_seconds)
+            clip = self.build_short_clip(input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, original_subclip)
             clip.write_videofile(output_file, codec="libx264", audio_codec="aac", temp_audiofile="temp-audio.m4a",
                                  remove_temp=True, logger=None)
             clip.close()
             clip_temp.close()
+            original_subclip.close()
             os.remove(temp_short)
 
         return output_file
@@ -635,6 +490,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             use_old_mode = col_old_zoom.checkbox(t("shortextractor_use_old_mode"), value=False)
             use_old_subtitle = col_old_sub.checkbox(t("shortextractor_use_old_subtitle"), value=False)
 
+            col1, col2, col3 = st.columns(3)
             add_subtitles = col1.checkbox(t("shortextractor_add_subtitles"), value=True)
             subtitle_position = col2.selectbox(
                 t("shortextractor_subtitle_position"),
@@ -644,14 +500,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
             format_916 = col3.checkbox(t("shortextractor_format916"), value=True)
             if add_subtitles:
-                subtitle_size = col2.slider(
+                col_size, col_bold = st.columns(2)
+                subtitle_size = col_size.slider(
                     t("shortextractor_subtitle_size"),
                     min_value=12,
                     max_value=192,
                     value=24,
                     step=2
                 )
-                subtitle_bold = col3.checkbox(t("shortextractor_subtitle_bold"), value=False)
+                subtitle_bold = col_bold.checkbox(t("shortextractor_subtitle_bold"), value=False)
             else:
                 subtitle_size = 18
                 subtitle_bold = False
