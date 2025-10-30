@@ -7,6 +7,13 @@ from plugins.transcript import TranscriptPlugin
 from moviepy import VideoFileClip, TextClip, CompositeVideoClip
 from lib.video_utils import extract_and_reformat_subclip, generate_karaoke_ass, burn_ass_subtitles  # New imports
 
+# Import du composant
+try:
+    from code_editor import code_editor
+except ImportError:
+    st.error("Installez streamlit-code-editor : pip install streamlit-code-editor")
+    st.stop()
+
 # Ajout des traductions spécifiques à ce plugin (inchangé)
 translations["en"].update({
     "shortextractor_tab": "Short Extractor",
@@ -103,7 +110,7 @@ translations["fr"].update({
     "shortextractor_previewer": "Prévisualisation du short en cours...",
     "shortextractor_suggest_timecode_prompt": """Analyse la transcription vidéo suivante et suggérez un court segment intéressant (15-60 secondes) qui pourrait être extrait comme une courte vidéo autonome.
 
-Fournis les codes temporels de début et de fin au format HH:MM,mmm.
+Fournis les codes temporels de début et de fin au format HH:MM:SS,mmm.
 
 Réponds avec deux codes temporels : un code temporel de début et un code temporel de fin, accompagnés d'une brève explication de pourquoi ce segment ferait une bonne courte vidéo.
 """,
@@ -192,64 +199,32 @@ class ShortextractorPlugin(Plugin):
             parsed.append(current_entry)
         return parsed
 
-    def display_searchable_transcript(self, transcript):
-        st.subheader(t("searchable_transcript"))
-        if not isinstance(transcript, list):
-            return
-        if not "start" in transcript[0]:
-            return
-        col1, col2 = st.columns([1, 3])
+    def format_compact_transcript(self, transcript):
+        """Format the transcript compactly: timecodes and text on same line, no empty lines or numbers."""
+        parsed = self.parse_transcript(transcript)
+        compact_lines = []
+        for entry in parsed:
+            text = entry['text'].strip()
+            if text:  # Skip empty text
+                line = f"{entry['start']} - {entry['end']}: {text}"
+                compact_lines.append(line)
+        return '\n'.join(compact_lines)
 
-        with col1:
-            search_term = st.text_input(t("search_in_transcript"), "")
-
-            if st.button(t("set_as_start_time")):
-                self.set_time_from_search(search_term, 'start', transcript)
-
-            if st.button(t("set_as_end_time")):
-                self.set_time_from_search(search_term, 'end', transcript)
-
-        with col2:
-            full_transcript = "\n\n".join([f"{entry['start']} - {entry['end']}\n{entry['text']}" for entry in transcript])
-
-            if search_term:
-                pattern = re.compile(re.escape(search_term), re.IGNORECASE)
-                matches = []
-
-                for entry in transcript:
-                    if pattern.search(entry['text']):
-                        matches.append(entry)
-
-                if matches:
-                    st.write(f"{len(matches)} occurrence(s) found:")
-                    for i, match in enumerate(matches, 1):
-                        highlighted_text = pattern.sub(lambda m: f"**{m.group()}**", match['text'])
-                        st.markdown(f"{match['start']} - {match['end']} {highlighted_text}")
-                        st.markdown("---")
-                else:
-                    st.warning("Term not found")
-                    st.text_area(t("full_transcript"), full_transcript, height=400)
-            else:
-                st.text_area(t("full_transcript"), full_transcript, height=400)
-
-    def set_time_from_search(self, search_term, time_type, transcript):
-        if not search_term:
-            st.warning("Enter search term")
-            return
-
-        for i, entry in enumerate(transcript):
-            if search_term.lower() in entry['text'].lower():
-                if time_type == 'start':
-                    st.session_state.start_index = i
-                    st.session_state.start_time = entry['start']
-                    st.success(f"Start time set: {entry['start']}")
-                else:
-                    st.session_state.end_index = i
-                    st.session_state.end_time = entry['end']
-                    st.success(f"End time set: {entry['end']}")
-                return
-
-        st.warning("Search term not found")
+    def parse_compact_selection(self, selected_text):
+        """Parse the compact selected text to extract entries."""
+        lines = selected_text.strip().split('\n')
+        parsed = []
+        for line in lines:
+            line = line.strip()
+            if line:
+                # Match "HH:MM:SS,mmm - HH:MM:SS,mmm: text"
+                match = re.match(r'^(\d{2}:\d{2}:\d{2},\d{3}) - (\d{2}:\d{2}:\d{2},\d{3}): (.*)$', line)
+                if match:
+                    start, end, text = match.groups()
+                    text = text.strip()
+                    if text:  # Skip empty
+                        parsed.append({'start': start, 'end': end, 'text': text})
+        return parsed
 
     def build_short_clip(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip):
         w, h = subclip.size
@@ -389,12 +364,12 @@ class ShortextractorPlugin(Plugin):
             st.session_state.start_time = "00:00:00,000"
         if 'end_time' not in st.session_state:
             st.session_state.end_time = "00:01:00,000"
-        if 'start_index' not in st.session_state:
-            st.session_state.start_index = 0
-        if 'end_index' not in st.session_state:
-            st.session_state.end_index = 0
         if 'llm_response' not in st.session_state:
             st.session_state.llm_response = ""
+        if 'texte_actuel' not in st.session_state:
+            st.session_state.texte_actuel = ""
+        if 'texte_selectionne' not in st.session_state:
+            st.session_state.texte_selectionne = ""
 
         # Video selection
         work_directory = os.path.expanduser(config['common']['work_directory'])
@@ -415,38 +390,37 @@ class ShortextractorPlugin(Plugin):
                 st.session_state.transcript = transcript_plugin.transcribe_video(selected_video_path, "srt")
 
         if st.session_state.transcript:
-            parsed_transcript = self.parse_transcript(st.session_state.transcript)
-            if not isinstance(parsed_transcript, list) or not parsed_transcript:
-                return
-            if "start" not in parsed_transcript[0]:
-                return
+            compact_transcript = self.format_compact_transcript(st.session_state.transcript)
+            if st.session_state.texte_actuel != compact_transcript:
+                st.session_state.texte_actuel = compact_transcript
 
-            self.display_searchable_transcript(parsed_transcript)
+            st.subheader("Transcript Editor")
+            # Configuration de l'éditeur
+            response_dict = code_editor(
+                st.session_state.texte_actuel,
+                lang="text",
+                theme="default",
+                height=30,
+                response_mode=["select", "blur"],  # Met à jour sur sélection ET perte de focus
+                allow_reset=True,
+                key="transcript_editor"
+            )
 
-            options = [f"{entry['start']} - {entry['text'][:50]}..." for entry in parsed_transcript]
+            # Mise à jour du texte actuel si changé (via submit ou blur)
+            if response_dict.get('type') in ['submit', 'blur'] and response_dict.get('text'):
+                st.session_state.texte_actuel = response_dict['text']
 
-            col1, col2 = st.columns(2)
-            with col1:
-                start_index = st.selectbox(t("shortextractor_select_start"),
-                                           options=options,
-                                           index=st.session_state.start_index,
-                                           key='start_select')
-            with col2:
-                end_index = st.selectbox(t("shortextractor_select_end"),
-                                         options=options,
-                                         index=st.session_state.end_index,
-                                         key='end_select')
-
-            # Update session state
-            st.session_state.start_index = options.index(start_index)
-            st.session_state.end_index = options.index(end_index)
-            st.session_state.start_time = parsed_transcript[st.session_state.start_index]['start']
-            st.session_state.end_time = parsed_transcript[st.session_state.end_index]['end']
-
-            # Ensure end >= start
-            if st.session_state.end_index < st.session_state.start_index:
-                st.session_state.end_index = st.session_state.start_index
-                st.session_state.end_time = parsed_transcript[st.session_state.end_index]['end']
+            # Mise à jour de la sélection si changée et extraction des timecodes
+            if response_dict.get('type') == 'selection' and response_dict.get('selected'):
+                st.session_state.texte_selectionne = response_dict['selected']
+                # Parse the selected text to extract first start and last end
+                selected_parsed = self.parse_compact_selection(st.session_state.texte_selectionne)
+                if selected_parsed:
+                    first_start = selected_parsed[0]['start']
+                    last_end = selected_parsed[-1]['end']
+                    st.session_state.start_time = first_start
+                    st.session_state.end_time = last_end
+                    st.success(f"Selected range: {first_start} to {last_end}")
 
             suggestion = st.text_input(t("shortextractor_sugestion"))
 
@@ -473,8 +447,8 @@ class ShortextractorPlugin(Plugin):
                         st.warning(t("shortextractor_no_timecode"))
 
             col3, col4 = st.columns(2)
-            st.session_state.start_time = col3.text_input(t("shortextractor_start_time"), value=st.session_state.start_time, key='display_start_time')
-            st.session_state.end_time = col4.text_input(t("shortextractor_end_time"), value=st.session_state.end_time, key='display_end_time')
+            col3.text_input(t("shortextractor_start_time"), key="start_time")
+            col4.text_input(t("shortextractor_end_time"), key="end_time")
 
             # Controls
             default_zoom = float(config['shortextractor'].get('zoom_factor', 1.5))
