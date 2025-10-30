@@ -52,3 +52,4 @@ pytest
 pytest-bdd
 spacy
 markdown2
+faster-whisper
