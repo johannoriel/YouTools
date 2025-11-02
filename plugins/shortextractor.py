@@ -67,6 +67,16 @@ Please respond with two timecodes: a start time and an end time, along with a br
     "shortextractor_subtitle_bottom": "Bottom",
     "shortextractor_subtitle_size": "Subtitles size",
     "shortextractor_subtitle_bold": "Bold subtitles",
+    "shortextractor_suggest_filename": "Suggest filename",
+    "shortextractor_generating_title": "Generating title...",
+    "shortextractor_edit_filename": "Edit filename:",
+    "shortextractor_apply": "Apply",
+    "shortextractor_regenerate": "Regenerate suggestion",
+    "shortextractor_suggest_title_prompt": """Suggest a catchy, engaging title for a YouTube Short based on the following transcript segment:
+
+{segment_text}
+
+The title should be concise, optimized for clicks, and formatted with words separated by underscores (e.g., amazing_ai_trick_you_need_to_try). Respond only with the title, no extra text.""",
 })
 
 translations["fr"].update({
@@ -121,6 +131,16 @@ Réponds avec deux codes temporels : un code temporel de début et un code tempo
     "shortextractor_subtitle_bottom": "Bas",
     "shortextractor_subtitle_size": "Taille des sous-titres",
     "shortextractor_subtitle_bold": "Sous-titres en gras",
+    "shortextractor_suggest_filename": "Suggérer un nom de fichier",
+    "shortextractor_generating_title": "Génération du titre...",
+    "shortextractor_edit_filename": "Modifier le nom de fichier:",
+    "shortextractor_apply": "Appliquer",
+    "shortextractor_regenerate": "Régénérer la suggestion",
+    "shortextractor_suggest_title_prompt": """Suggérez un titre accrocheur et engageant pour un YouTube Short basé sur le segment de transcription suivant :
+
+{segment_text}
+
+Le titre doit être concis, optimisé pour les clics, et formaté avec des mots séparés par des underscores (ex. : astuce_ia_incroyable_a_essayer). Répondez uniquement avec le titre, sans texte supplémentaire.""",
 })
 
 
@@ -370,6 +390,12 @@ class ShortextractorPlugin(Plugin):
             st.session_state.texte_actuel = ""
         if 'texte_selectionne' not in st.session_state:
             st.session_state.texte_selectionne = ""
+        if 'short_generated' not in st.session_state:
+            st.session_state.short_generated = False
+        if 'output_file' not in st.session_state:
+            st.session_state.output_file = ""
+        if 'suggested_filename' not in st.session_state:
+            st.session_state.suggested_filename = ""
 
         # Video selection
         work_directory = os.path.expanduser(config['common']['work_directory'])
@@ -380,7 +406,7 @@ class ShortextractorPlugin(Plugin):
             st.info(f"No videos in {work_directory}")
             return
 
-        selected_video = st.selectbox(t("shortextractor_select_video"), options=[v[0] for v in videos])
+        selected_video = st.selectbox(t("shortextractor_select_video"), options=[v[0] for v in videos], key="video_selector")
         selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
 
         if st.button(t("shortextractor_transcribe")):
@@ -503,8 +529,57 @@ class ShortextractorPlugin(Plugin):
                                                     output_file, zoom_factor, center_x, center_y, use_old_mode, format_916,
                                                     add_subtitles, subtitle_position, subtitle_size, subtitle_bold, use_old_subtitle, config['common'].get('language', 'fr'))
                         if result == output_file:
+                            st.session_state.short_generated = True
+                            st.session_state.output_file = output_file
+                            st.session_state.suggested_filename = ""
                             st.success("Short extracted successfully!")
-                            _, center, _ = st.columns([1, 1, 1])
-                            center.video(output_file)
                         else:
                             st.error(result)
+
+            # Display generated short and filename suggestion
+            if st.session_state.short_generated:
+                st.subheader("Generated Short")
+                _, center, _ = st.columns([1, 1, 1])
+                center.video(st.session_state.output_file)
+
+                if not st.session_state.suggested_filename:
+                    if st.button(t("shortextractor_suggest_filename")):
+                        with st.spinner(t("shortextractor_generating_title")):
+                            parsed = self.parse_transcript(st.session_state.transcript)
+                            start_sec = self.convert_srt_time_to_seconds(st.session_state.start_time)
+                            end_sec = self.convert_srt_time_to_seconds(st.session_state.end_time)
+                            segment_text = " ".join([
+                                entry['text']
+                                for entry in parsed
+                                if self.convert_srt_time_to_seconds(entry['start']) >= start_sec
+                                and self.convert_srt_time_to_seconds(entry['end']) <= end_sec
+                            ])
+                            prompt = t("shortextractor_suggest_title_prompt").format(segment_text=segment_text[:1000])
+                            system_prompt = config['llm']['llm_sys_prompt']
+                            suggested_title = self.process_with_llm(prompt, system_prompt, segment_text)
+                            filename = suggested_title.strip() + ".mp4"
+                            st.session_state.suggested_filename = filename
+                        st.rerun()
+                else:
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        edited_filename = st.text_input(
+                            t("shortextractor_edit_filename"),
+                            value=st.session_state.suggested_filename,
+                            key="edit_filename"
+                        )
+                    with col2:
+                        if st.button(t("shortextractor_apply")):
+                            new_path = os.path.join(
+                                os.path.dirname(st.session_state.output_file),
+                                edited_filename
+                            )
+                            os.rename(st.session_state.output_file, new_path)
+                            st.session_state.output_file = new_path
+                            st.session_state.suggested_filename = ""
+                            st.success("Filename applied!")
+                            st.rerun()
+
+                    if st.button(t("shortextractor_regenerate")):
+                        st.session_state.suggested_filename = ""
+                        st.rerun()
