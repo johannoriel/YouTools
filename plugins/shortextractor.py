@@ -54,11 +54,11 @@ translations["en"].update({
     "shortextractor_use_old_subtitle": "Use old subtitle mode (MoviePy instead of ASS)",
     "shortextractor_preview_short": "Preview Short",
     "shortextractor_previewer": "Previewing short...",
-    "shortextractor_suggest_timecode_prompt": """Analyze the following video transcript and suggest a short, interesting segment (15-60 seconds) that could be extracted as a standalone short video.
+    "shortextractor_suggest_timecode_prompt": """Analyze the following video transcript and suggest {num} short, interesting segments (15-60 seconds each) that could be extracted as standalone short videos.
 
-Provide the start and end timecodes in the format HH:MM:SS,mmm.
+For each segment, provide the start and end timecodes in the format HH:MM:SS,mmm.
 
-Please respond with two timecodes: a start time and an end time, along with a brief explanation of why this segment would make a good short video.
+Please respond with {num} pairs of timecodes: a start time and an end time for each, along with a brief explanation of why this segment would make a good short video.
 """,
     "shortextractor_searchfor" : "Search speifically around the thematic or following subject : '{suggestion}'",
     "shortextractor_add_subtitles": "Add subtitles",
@@ -77,6 +77,16 @@ Please respond with two timecodes: a start time and an end time, along with a br
 {segment_text}
 
 The title should be concise, optimized for clicks, and formatted with words separated by underscores (e.g., amazing_ai_trick_you_need_to_try). Respond only with the title, no extra text.""",
+    "shortextractor_number_suggestions": "Number of suggestions",
+    "shortextractor_current_suggestion": "Current suggestion",
+    "shortextractor_of": "of",
+    "preview_full": "Preview Full",
+    "preview_start": "Preview Start",
+    "preview_end": "Preview End",
+    "preview_duration": "Preview duration (seconds)",
+    "shortextractor_extract_all": "Extract All",
+    "shortextractor_extracting_full": "Extracting full video...",
+    "shortextractor_full_extracted": "Full video extracted successfully!",
 })
 
 translations["fr"].update({
@@ -118,11 +128,11 @@ translations["fr"].update({
     "shortextractor_use_old_subtitle": "Utiliser l'ancien mode sous-titres (MoviePy au lieu d'ASS)",
     "shortextractor_preview_short": "Prévisualiser le Short",
     "shortextractor_previewer": "Prévisualisation du short en cours...",
-    "shortextractor_suggest_timecode_prompt": """Analyse la transcription vidéo suivante et suggérez un court segment intéressant (15-60 secondes) qui pourrait être extrait comme une courte vidéo autonome.
+    "shortextractor_suggest_timecode_prompt": """Analyse la transcription vidéo suivante et suggérez {num} courts segments intéressants (15-60 secondes chacun) qui pourraient être extraits comme des courtes vidéos autonomes.
 
-Fournis les codes temporels de début et de fin au format HH:MM:SS,mmm.
+Pour chaque segment, fournis les codes temporels de début et de fin au format HH:MM:SS,mmm.
 
-Réponds avec deux codes temporels : un code temporel de début et un code temporel de fin, accompagnés d'une brève explication de pourquoi ce segment ferait une bonne courte vidéo.
+Réponds avec {num} paires de codes temporels : un code temporel de début et un code temporel de fin pour chacun, accompagnés d'une brève explication de pourquoi ce segment ferait une bonne courte vidéo.
 """,
     "shortextractor_searchfor" : "Recherche spécifiquement autour des thématiques suivantes : '{suggestion}'",
     "shortextractor_add_subtitles": "Ajouter les sous-titres",
@@ -141,6 +151,16 @@ Réponds avec deux codes temporels : un code temporel de début et un code tempo
 {segment_text}
 
 Le titre doit être concis, optimisé pour les clics, et formaté avec des mots séparés par des underscores (ex. : astuce_ia_incroyable_a_essayer). Répondez uniquement avec le titre, sans texte supplémentaire.""",
+    "shortextractor_number_suggestions": "Nombre de suggestions",
+    "shortextractor_current_suggestion": "Suggestion actuelle",
+    "shortextractor_of": "sur",
+    "preview_full": "Prévisualiser Complet",
+    "preview_start": "Prévisualiser Début",
+    "preview_end": "Prévisualiser Fin",
+    "preview_duration": "Durée de prévisualisation (secondes)",
+    "shortextractor_extract_all": "Extraire tout",
+    "shortextractor_extracting_full": "Extraction de la vidéo complète...",
+    "shortextractor_full_extracted": "Vidéo complète extraite avec succès!",
 })
 
 
@@ -187,16 +207,20 @@ class ShortextractorPlugin(Plugin):
         secs = int(secs)
         return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
 
-    def extract_timecodes_from_llm(self, llm_response):
-        """Extract two timecodes from LLM response using robust regex."""
+    def extract_timecodes_from_llm(self, llm_response, num_suggestions):
+        """Extract multiple pairs of timecodes from LLM response using robust regex."""
         # Regex for HH:MM:SS,mmm format
         timecode_pattern = r'(\d{2}:\d{2}:\d{2},\d{3})'
         timecodes = re.findall(timecode_pattern, llm_response)
-        if len(timecodes) >= 2:
-            return timecodes[0], timecodes[1]
-        elif len(timecodes) == 1:
-            return timecodes[0], timecodes[0]
-        return None, None
+        # Group them into pairs: assume even number, start-end pairs
+        pairs = []
+        for i in range(0, len(timecodes), 2):
+            if i + 1 < len(timecodes):
+                pairs.append((timecodes[i], timecodes[i+1]))
+            else:
+                pairs.append((timecodes[i], timecodes[i]))  # If odd, duplicate last
+        # Take up to num_suggestions
+        return pairs[:num_suggestions]
 
     def parse_transcript(self, transcript):
         lines = transcript.split('\n')
@@ -230,21 +254,88 @@ class ShortextractorPlugin(Plugin):
                 compact_lines.append(line)
         return '\n'.join(compact_lines)
 
-    def parse_compact_selection(self, selected_text):
-        """Parse the compact selected text to extract entries."""
-        lines = selected_text.strip().split('\n')
-        parsed = []
-        for line in lines:
-            line = line.strip()
-            if line:
-                # Match "HH:MM:SS,mmm - HH:MM:SS,mmm: text"
-                match = re.match(r'^(\d{2}:\d{2}:\d{2},\d{3}) - (\d{2}:\d{2}:\d{2},\d{3}): (.*)$', line)
-                if match:
-                    start, end, text = match.groups()
-                    text = text.strip()
-                    if text:  # Skip empty
-                        parsed.append({'start': start, 'end': end, 'text': text})
-        return parsed
+    def compute_adjusted_times_from_selection(self, selected_text, full_compact):
+        """Compute adjusted start and end times from potentially partial selection."""
+        if not selected_text or not selected_text.strip():
+            return None, None
+
+        full_text = full_compact  # the whole string with \n
+        index = full_text.find(selected_text)
+        if index == -1:
+            st.warning("Selection not found in transcript.")
+            return None, None
+
+        sel_end = index + len(selected_text)
+
+        # For start
+        # Find start of the line: last \n before index, or 0
+        line_start = full_text.rfind('\n', 0, index) + 1 if full_text.rfind('\n', 0, index) != -1 else 0
+        next_nl = full_text.find('\n', line_start)
+        if next_nl == -1:
+            next_nl = len(full_text)
+        full_line = full_text[line_start:next_nl].rstrip('\n').strip()
+
+        # Parse full_line
+        match = re.match(r'^(\d{2}:\d{2}:\d{2},\d{3}) - (\d{2}:\d{2}:\d{2},\d{3}): (.*)$', full_line)
+        if not match:
+            st.warning("Could not parse start line.")
+            return None, None
+
+        start_srt, end_srt, text = match.groups()
+        # text_start pos in full_line: len(start_srt + " - " + end_srt + ": ")
+        prefix_len = len(start_srt) + len(" - ") + len(end_srt) + len(": ")
+        text_start_in_line = line_start + prefix_len
+        # selection start pos in text
+        sel_pos_in_text = index - text_start_in_line
+        text_len = len(text)
+        if sel_pos_in_text < 0:
+            prop = 0.0
+        else:
+            prop = sel_pos_in_text / text_len if text_len > 0 else 0.0
+
+        start_sec = self.convert_srt_time_to_seconds(start_srt)
+        end_sec = self.convert_srt_time_to_seconds(end_srt)
+        dur = end_sec - start_sec
+        adj_start_sec = start_sec + prop * dur
+        adjusted_start_srt = self.seconds_to_srt_time(adj_start_sec)
+
+        chars_before = full_text[text_start_in_line : index]
+
+        # For end
+        # Find start of the end line: last \n before sel_end, or 0
+        last_line_start = full_text.rfind('\n', 0, sel_end) + 1 if full_text.rfind('\n', 0, sel_end) != -1 else 0
+        line_end = full_text.find('\n', sel_end)
+        if line_end == -1:
+            line_end = len(full_text)
+        full_last_line = full_text[last_line_start:line_end].rstrip('\n').strip()
+
+        # Parse full_last_line
+        match_end = re.match(r'^(\d{2}:\d{2}:\d{2},\d{3}) - (\d{2}:\d{2}:\d{2},\d{3}): (.*)$', full_last_line)
+        if not match_end:
+            st.warning("Could not parse end line.")
+            return adjusted_start_srt, None
+
+        start_srt_e, end_srt_e, text_e = match_end.groups()
+        prefix_len_e = len(start_srt_e) + len(" - ") + len(end_srt_e) + len(": ")
+        text_start_in_line_e = last_line_start + prefix_len_e
+        sel_end_pos_in_text = sel_end - text_start_in_line_e
+        text_len_e = len(text_e)
+        if sel_end_pos_in_text < 0:
+            prop_e = 0.0
+        elif sel_end_pos_in_text > text_len_e:
+            prop_e = 1.0
+        else:
+            prop_e = sel_end_pos_in_text / text_len_e if text_len_e > 0 else 0.0
+
+        start_sec_e = self.convert_srt_time_to_seconds(start_srt_e)
+        end_sec_e = self.convert_srt_time_to_seconds(end_srt_e)
+        dur_e = end_sec_e - start_sec_e
+        adj_end_sec = start_sec_e + prop_e * dur_e
+        adjusted_end_srt = self.seconds_to_srt_time(adj_end_sec)
+
+        chars_up_to_sel = full_text[text_start_in_line_e : sel_end]
+
+        return adjusted_start_srt, adjusted_end_srt
 
     def build_short_clip(self, input_file, start_time, end_time, zoom_factor, center_x, center_y, use_old_mode, format_916, add_subtitles, subtitle_position, subtitle_size, subtitle_bold, subclip):
         w, h = subclip.size
@@ -396,6 +487,14 @@ class ShortextractorPlugin(Plugin):
             st.session_state.output_file = ""
         if 'suggested_filename' not in st.session_state:
             st.session_state.suggested_filename = ""
+        if 'suggested_timecodes' not in st.session_state:
+            st.session_state.suggested_timecodes = []
+        if 'current_timecode_index' not in st.session_state:
+            st.session_state.current_timecode_index = 0
+        if 'num_suggestions' not in st.session_state:
+            st.session_state.num_suggestions = 3
+        if 'preview_duration' not in st.session_state:
+            st.session_state.preview_duration = 5.0
 
         # Video selection
         work_directory = os.path.expanduser(config['common']['work_directory'])
@@ -439,38 +538,60 @@ class ShortextractorPlugin(Plugin):
             # Mise à jour de la sélection si changée et extraction des timecodes
             if response_dict.get('type') == 'selection' and response_dict.get('selected'):
                 st.session_state.texte_selectionne = response_dict['selected']
-                # Parse the selected text to extract first start and last end
-                selected_parsed = self.parse_compact_selection(st.session_state.texte_selectionne)
-                if selected_parsed:
-                    first_start = selected_parsed[0]['start']
-                    last_end = selected_parsed[-1]['end']
-                    st.session_state.start_time = first_start
-                    st.session_state.end_time = last_end
-                    st.success(f"Selected range: {first_start} to {last_end}")
+                adjusted_start, adjusted_end = self.compute_adjusted_times_from_selection(
+                    st.session_state.texte_selectionne, st.session_state.texte_actuel
+                )
+                if adjusted_start and adjusted_end:
+                    st.session_state.start_time = adjusted_start
+                    st.session_state.end_time = adjusted_end
+                    st.success(f"Selected range: {adjusted_start} to {adjusted_end}")
+                else:
+                    st.warning("Could not parse selection times.")
 
             suggestion = st.text_input(t("shortextractor_sugestion"))
+
+            # Slider pour le nombre de suggestions
+            num_suggestions = st.slider(t("shortextractor_number_suggestions"), min_value=1, max_value=5, value=st.session_state.num_suggestions, key="num_suggestions_slider")
+            st.session_state.num_suggestions = num_suggestions
 
             col_suggest, col_extract = st.columns(2)
             with col_suggest:
                 if st.button(t("shortextractor_suggest_timecode")):
                     with st.spinner(t("shortextractor_suggesting")):
                         suggest_theme = t("shortextractor_searchfor").format(suggestion=suggestion) if suggestion else ""
-                        prompt = t("shortextractor_suggest_timecode_prompt") + suggest_theme
+                        prompt = t("shortextractor_suggest_timecode_prompt").format(num=num_suggestions) + suggest_theme
                         st.session_state.llm_response = self.process_with_llm(prompt, config['llm']['llm_sys_prompt'], st.session_state.transcript)
+                        # Extract timecodes after suggestion
+                        st.session_state.suggested_timecodes = self.extract_timecodes_from_llm(st.session_state.llm_response, num_suggestions)
+                        st.session_state.current_timecode_index = 0
+                        if st.session_state.suggested_timecodes:
+                            start_tc, end_tc = st.session_state.suggested_timecodes[0]
+                            st.session_state.start_time = start_tc
+                            st.session_state.end_time = end_tc
+                            st.success(f"First suggestion applied: {start_tc} -> {end_tc}")
 
             st.text(t("shortextractor_llm_response"))
             st.text(st.session_state.llm_response)
 
             with col_extract:
                 if st.button(t("shortextractor_extract_timecode")):
-                    start_tc, end_tc = self.extract_timecodes_from_llm(st.session_state.llm_response)
-                    if start_tc and end_tc:
+                    if not st.session_state.suggested_timecodes:
+                        st.warning(t("shortextractor_no_timecode"))
+                    else:
+                        # Cycle to next
+                        current_index = st.session_state.current_timecode_index
+                        next_index = (current_index + 1) % len(st.session_state.suggested_timecodes)
+                        st.session_state.current_timecode_index = next_index
+                        start_tc, end_tc = st.session_state.suggested_timecodes[next_index]
                         st.session_state.start_time = start_tc
                         st.session_state.end_time = end_tc
-                        st.success(f"Timecodes extracted: {start_tc} -> {end_tc}")
+                        st.success(f"Suggestion {next_index + 1} {t('shortextractor_of')} {len(st.session_state.suggested_timecodes)} applied: {start_tc} -> {end_tc}")
                         st.rerun()
-                    else:
-                        st.warning(t("shortextractor_no_timecode"))
+
+            # Display current suggestion info
+            if st.session_state.suggested_timecodes:
+                current_index = st.session_state.current_timecode_index
+                st.info(f"{t('shortextractor_current_suggestion')} {current_index + 1} {t('shortextractor_of')} {len(st.session_state.suggested_timecodes)}")
 
             col3, col4 = st.columns(2)
             col3.text_input(t("shortextractor_start_time"), key="start_time")
@@ -513,14 +634,36 @@ class ShortextractorPlugin(Plugin):
                 subtitle_size = 18
                 subtitle_bold = False
 
-            col_preview, col_extract = st.columns(2)
-            with col_preview:
-                if st.button(t("shortextractor_preview_short")):
+            # Preview duration slider
+            preview_duration = st.slider(t("preview_duration"), min_value=1.0, max_value=30.0, value=st.session_state.preview_duration, key="preview_dur_slider")
+            st.session_state.preview_duration = preview_duration
+
+            # Preview and extract buttons
+            col_full, col_start, col_end, col_extract, col_extract_all = st.columns(5)  # Changé à 5 colonnes
+            with col_full:
+                if st.button(t("preview_full")):
                     with st.spinner(t("shortextractor_previewer")):
                         self.preview_short(selected_video_path, st.session_state.start_time, st.session_state.end_time,
                                            zoom_factor, center_x, center_y, use_old_mode, format_916,
                                            add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
-
+            with col_start:
+                if st.button(t("preview_start")):
+                    with st.spinner(t("shortextractor_previewer")):
+                        start_sec = self.convert_srt_time_to_seconds(st.session_state.start_time)
+                        end_sec = start_sec + preview_duration
+                        temp_end = self.seconds_to_srt_time(end_sec)
+                        self.preview_short(selected_video_path, st.session_state.start_time, temp_end,
+                                           zoom_factor, center_x, center_y, use_old_mode, format_916,
+                                           add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
+            with col_end:
+                if st.button(t("preview_end")):
+                    with st.spinner(t("shortextractor_previewer")):
+                        end_sec = self.convert_srt_time_to_seconds(st.session_state.end_time)
+                        start_sec = end_sec - preview_duration
+                        temp_start = self.seconds_to_srt_time(max(0, start_sec))
+                        self.preview_short(selected_video_path, temp_start, st.session_state.end_time,
+                                           zoom_factor, center_x, center_y, use_old_mode, format_916,
+                                           add_subtitles, subtitle_position, subtitle_size, subtitle_bold)
             with col_extract:
                 if st.button(t("shortextractor_extract")):
                     with st.spinner(t("shortextractor_extracting")):
@@ -533,6 +676,31 @@ class ShortextractorPlugin(Plugin):
                             st.session_state.output_file = output_file
                             st.session_state.suggested_filename = ""
                             st.success("Short extracted successfully!")
+                        else:
+                            st.error(result)
+
+            # Ajout du bouton "Extraire tout"
+            with col_extract_all:
+                if st.button(t("shortextractor_extract_all")):
+                    with st.spinner(t("shortextractor_extracting_full")):
+                        # Récupérer la durée totale de la vidéo
+                        video_clip = VideoFileClip(selected_video_path)
+                        total_duration = video_clip.duration
+                        video_clip.close()
+
+                        # Définir le début à 0 et la fin à la durée totale
+                        full_start_time = "00:00:00,000"
+                        full_end_time = self.seconds_to_srt_time(total_duration)
+
+                        output_file = os.path.join(work_directory, f"full_{os.path.splitext(selected_video)[0]}.mp4")
+                        result = self.extract_short(selected_video_path, full_start_time, full_end_time,
+                                                    output_file, zoom_factor, center_x, center_y, use_old_mode, format_916,
+                                                    add_subtitles, subtitle_position, subtitle_size, subtitle_bold, use_old_subtitle, config['common'].get('language', 'fr'))
+                        if result == output_file:
+                            st.session_state.short_generated = True
+                            st.session_state.output_file = output_file
+                            st.session_state.suggested_filename = ""
+                            st.success(t("shortextractor_full_extracted"))
                         else:
                             st.error(result)
 
