@@ -6,6 +6,8 @@ from plugins.common import list_video_files
 from plugins.transcript import TranscriptPlugin
 from moviepy import VideoFileClip, TextClip, CompositeVideoClip
 from lib.video_utils import extract_and_reformat_subclip, generate_karaoke_ass, burn_ass_subtitles  # New imports
+import requests
+from plugins.common import upload_video
 
 # Import du composant
 try:
@@ -87,6 +89,15 @@ The title should be concise, optimized for clicks, and formatted with words sepa
     "shortextractor_extract_all": "Extract All",
     "shortextractor_extracting_full": "Extracting full video...",
     "shortextractor_full_extracted": "Full video extracted successfully!",
+    "directpublish_processing" : "Automatic publishing processing...",
+    "publish_without_subtitles": "Publish without subtitles",
+    "publish_with_subtitles": "Publish with subtitles",
+    "auto_transcribing": "Automatic transcription in progress...",
+    "removing_silences": "Removing silences...",
+    "formatting_short": "Formatting to Short (9:16)...",
+    "generating_content": "Generating title, description and tags...",
+    "uploading_youtube": "Uploading to YouTube...",
+    "directpublish_sucess": "Publication success",
 })
 
 translations["fr"].update({
@@ -161,6 +172,15 @@ Le titre doit être concis, optimisé pour les clics, et formaté avec des mots 
     "shortextractor_extract_all": "Extraire tout",
     "shortextractor_extracting_full": "Extraction de la vidéo complète...",
     "shortextractor_full_extracted": "Vidéo complète extraite avec succès!",
+    "publish_without_subtitles": "Publier sans sous-titres",
+    "directpublish_processing" : "Publication automatique en cours...",
+    "publish_with_subtitles": "Publier avec sous-titres",
+    "auto_transcribing": "Transcription automatique en cours...",
+    "removing_silences": "Suppression des silences...",
+    "formatting_short": "Formatage en Short (9:16)...",
+    "generating_content": "Génération du titre, description et tags...",
+    "uploading_youtube": "Téléversement sur YouTube...",
+    "directpublish_sucess": "Succès de la publication",
 })
 
 
@@ -465,6 +485,136 @@ class ShortextractorPlugin(Plugin):
 
         return output_file
 
+    def process_and_publish(self, video_path: str, work_directory: str, config: dict, with_subtitles: bool):
+        """Fonction commune pour les deux types de publication (Short complet)."""
+        with st.spinner(t("directpublish_processing")):
+
+            video_to_process = video_path
+
+            # 1. Suppression des silences (toujours activée pour la publication)
+            trimsilences_plugin = self.plugin_manager.get_plugin('trimsilences')
+            if trimsilences_plugin:
+                st.info(t("removing_silences"))
+                result, reduction, orig_dur, final_dur = trimsilences_plugin.remove_silence(
+                    video_to_process, work_directory)
+                if isinstance(result, str) and ("erreur" in result.lower() or "error" in result.lower()):
+                    st.error(result)
+                    return
+                video_to_process = result
+
+            # 2. Transcription automatique du vidéo après suppression des silences
+            st.info(t("auto_transcribing"))
+            transcript_plugin = self.plugin_manager.get_plugin('transcript')
+            st.session_state.transcript = transcript_plugin.transcribe_video(video_to_process, "srt")
+
+            # 3. Durée totale du vidéo traité
+            clip = VideoFileClip(video_to_process)
+            total_duration = clip.duration
+            clip.close()
+            start_time = "00:00:00,000"
+            end_time = self.seconds_to_srt_time(total_duration)
+
+            # 4. Paramètres optimisés pour un Short complet (indépendants des sliders manuels)
+            zoom_factor = 1.2
+            center_x = 0.5
+            center_y = 0.4  # Légèrement plus haut pour centrer sur le visage
+            use_old_mode = False
+            format_916 = True
+            subtitle_position = "bottom"
+            subtitle_size = 80
+            subtitle_bold = True
+            use_old_subtitle = False  # Préférence ASS pour de meilleurs sous-titres
+            lang = config['common'].get('language', 'fr')
+
+            # Fichier temporaire
+            base_name = os.path.splitext(os.path.basename(video_path))[0]
+            temp_output = os.path.join(work_directory, f"temp_short_full_{base_name}.mp4")
+
+            st.info(t("formatting_short"))
+            self.extract_short(
+                video_to_process, start_time, end_time, temp_output,
+                zoom_factor, center_x, center_y, use_old_mode, format_916,
+                add_subtitles=with_subtitles,
+                subtitle_position=subtitle_position,
+                subtitle_size=subtitle_size,
+                subtitle_bold=subtitle_bold,
+                use_old_subtitle=use_old_subtitle,
+                lang=lang
+            )
+
+            # 5. Génération titre / description / tags avec LLM
+            st.info(t("generating_content"))
+            parsed = self.parse_transcript(st.session_state.transcript)
+            plain_transcript = " ".join([e['text'].strip() for e in parsed if e['text'].strip()])
+
+            title_prompt = t("shortextractor_suggest_title_prompt").format(segment_text=plain_transcript[:1500])
+            title = self.process_with_llm(title_prompt, config['llm']['llm_sys_prompt'], plain_transcript).strip()
+
+            desc_prompt = ("Génère une description engageante et optimisée pour un YouTube Short basée sur cette transcription. "
+                            "Ajoute des hashtags pertinents à la fin.\n\n" + plain_transcript[:2000])
+            description = self.process_with_llm(desc_prompt, config['llm']['llm_sys_prompt'], plain_transcript)
+
+            tag_prompt = t("directpublish_tag_generator")
+            tags = self.process_with_llm(tag_prompt, config['llm']['llm_sys_prompt'], plain_transcript)
+            extra_keywords = config.get('directpublish', {}).get('keywords', '').strip()
+            if extra_keywords:
+                tags = extra_keywords + ", " + tags
+
+            introduction = config.get('directpublish', {}).get('introduction', '')
+            signature = config.get('directpublish', {}).get('signature', '')
+            full_description = f"{introduction}\n\n{description}\n\n{signature}".strip()
+
+            # 6. Renommage final
+            final_video = temp_output
+            if with_subtitles:
+                # Titre LLM déjà formaté avec underscores → on remplace par des tirets pour le nom de fichier
+                safe_title = title.replace('_', '-').strip()
+                new_name = f"{safe_title}.mp4"
+                new_path = os.path.join(work_directory, new_name)
+                i = 1
+                while os.path.exists(new_path):
+                    new_path = os.path.join(work_directory, f"{safe_title}_{i}.mp4")
+                    i += 1
+                os.rename(temp_output, new_path)
+                final_video = new_path
+            else:
+                generic_path = os.path.join(work_directory, f"short_full_{base_name}.mp4")
+                os.rename(temp_output, generic_path)
+                final_video = generic_path
+
+            # 7. Upload YouTube
+            st.info(t("uploading_youtube"))
+            category_id = "24"  # Entertainment – parfait pour les Shorts
+            tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+
+            try:
+                video_id = upload_video(
+                    final_video, title, full_description, category_id, tags_list, "unlisted")
+                st.success(t("directpublish_success").format(video_id=video_id))
+            except Exception as e:
+                st.warning(t("directpublish_notags"))
+                try:
+                    video_id = upload_video(
+                        final_video, title, full_description, category_id, [], "unlisted")
+                    st.success(t("directpublish_success").format(video_id=video_id))
+                except Exception as e2:
+                    st.error(f"Erreur lors de la publication : {e2}")
+
+            # 8. Webhooks
+            webhook_urls = config.get('directpublish', {}).get('webhook_urls', '').strip().split('\n')
+            webhook_urls = [u.strip() for u in webhook_urls if u.strip()]
+            if webhook_urls:
+                for webhook in webhook_urls:
+                    try:
+                        response = requests.post(webhook, json={"video_id": video_id})
+                        if response.status_code == 200:
+                            st.success(t("directpublish_webhook_triggered").format(webhook=webhook))
+                        else:
+                            st.warning(t("directpublish_webhook_not_triggered").format(
+                                webhook=webhook, status_code=response.status_code))
+                    except Exception as e:
+                        st.error(t("directpublish_webhook_error").format(webhook=webhook, error=str(e)))
+
     def run(self, config):
         st.header(t("shortextractor_header"))
 
@@ -508,11 +658,21 @@ class ShortextractorPlugin(Plugin):
         selected_video = st.selectbox(t("shortextractor_select_video"), options=[v[0] for v in videos], key="video_selector")
         selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
 
-        if st.button(t("shortextractor_transcribe")):
-            with st.spinner(t("shortextractor_transcribing")):
-                transcript_plugin = TranscriptPlugin("transcript", self.plugin_manager)
-                # SRT pour l'UI/search
-                st.session_state.transcript = transcript_plugin.transcribe_video(selected_video_path, "srt")
+        col_transcribe, col_pub_no_sub, col_pub_sub = st.columns(3)
+
+        with col_transcribe:
+            if st.button(t("shortextractor_transcribe")):
+                with st.spinner(t("shortextractor_transcribing")):
+                    transcript_plugin = TranscriptPlugin("transcript", self.plugin_manager)
+                    st.session_state.transcript = transcript_plugin.transcribe_video(selected_video_path, "srt")
+
+        with col_pub_no_sub:
+            if st.button(t("publish_without_subtitles")):
+                self.process_and_publish(selected_video_path, work_directory, config, with_subtitles=False)
+
+        with col_pub_sub:
+            if st.button(t("publish_with_subtitles")):
+                self.process_and_publish(selected_video_path, work_directory, config, with_subtitles=True)
 
         if st.session_state.transcript:
             compact_transcript = self.format_compact_transcript(st.session_state.transcript)
