@@ -98,6 +98,7 @@ The title should be concise, click-optimized, with Title Case and spaces (exampl
     "uploading_youtube": "Uploading to YouTube...",
     "directpublish_success": "Upload successful!",
     "directpublish_desc_prompt": "Generate an engaging and optimized description for a YouTube Short based on the following transcript. Add relevant hashtags at the end.",
+    "shortextractor_custom_desc": "Custom description to insert:",
 })
 
 translations["fr"].update({
@@ -182,6 +183,7 @@ Le titre doit être concis, optimisé pour les clics, en français, avec des maj
     "uploading_youtube": "Téléversement sur YouTube...",
     "directpublish_success": "Publication réussie !",
     "directpublish_desc_prompt": "Génère une description engageante et optimisée pour un YouTube Short basée sur cette transcription. Ajoute des hashtags pertinents à la fin.",
+    "shortextractor_custom_desc": "Description personnalisée à insérer :",
 })
 
 
@@ -486,7 +488,7 @@ class ShortextractorPlugin(Plugin):
 
         return output_file
 
-    def process_and_publish(self, video_path: str, work_directory: str, config: dict, with_subtitles: bool):
+    def process_and_publish(self, video_path: str, work_directory: str, config: dict, with_subtitles: bool, custom_desc: str = ""):
         """Fonction commune pour les deux types de publication (Short complet)."""
         with st.spinner(t("directpublish_processing")):
 
@@ -561,7 +563,8 @@ class ShortextractorPlugin(Plugin):
 
             introduction = config.get('directpublish', {}).get('introduction', '')
             signature = config.get('directpublish', {}).get('signature', '')
-            full_description = f"{introduction}\n\n{description}\n\n{signature}".strip()
+            parts = [introduction, description, custom_desc, signature]
+            full_description = "\n\n".join([p for p in parts if p]).strip()
 
             # 6. Renommage final
             final_video = temp_output
@@ -655,6 +658,8 @@ class ShortextractorPlugin(Plugin):
         selected_video = st.selectbox(t("shortextractor_select_video"), options=[v[0] for v in videos], key="video_selector")
         selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
 
+        custom_desc = st.text_area(t("shortextractor_custom_desc"), "")
+
         col_transcribe, col_pub_no_sub, col_pub_sub = st.columns(3)
 
         with col_transcribe:
@@ -665,11 +670,11 @@ class ShortextractorPlugin(Plugin):
 
         with col_pub_no_sub:
             if st.button(t("publish_without_subtitles")):
-                self.process_and_publish(selected_video_path, work_directory, config, with_subtitles=False)
+                self.process_and_publish(selected_video_path, work_directory, config, with_subtitles=False, custom_desc=custom_desc)
 
         with col_pub_sub:
             if st.button(t("publish_with_subtitles")):
-                self.process_and_publish(selected_video_path, work_directory, config, with_subtitles=True)
+                self.process_and_publish(selected_video_path, work_directory, config, with_subtitles=True, custom_desc=custom_desc)
 
         if st.session_state.transcript:
             compact_transcript = self.format_compact_transcript(st.session_state.transcript)
