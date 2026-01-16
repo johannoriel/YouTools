@@ -16,7 +16,6 @@ except ImportError:
     st.error("Installez streamlit-code-editor : pip install streamlit-code-editor")
     st.stop()
 
-# Ajout des traductions spécifiques à ce plugin (inchangé)
 translations["en"].update({
     "shortextractor_tab": "Short Extractor",
     "shortextractor_header": "Extract Shorts from Videos",
@@ -78,7 +77,7 @@ Please respond with {num} pairs of timecodes: a start time and an end time for e
 
 {segment_text}
 
-The title should be concise, optimized for clicks, and formatted with words separated by underscores (e.g., amazing_ai_trick_you_need_to_try). Respond only with the title, no extra text.""",
+The title should be concise, click-optimized, with Title Case and spaces (example: Amazing AI Trick You Need To Try!). Respond only with the title, no extra text.""",
     "shortextractor_number_suggestions": "Number of suggestions",
     "shortextractor_current_suggestion": "Current suggestion",
     "shortextractor_of": "of",
@@ -97,7 +96,8 @@ The title should be concise, optimized for clicks, and formatted with words sepa
     "formatting_short": "Formatting to Short (9:16)...",
     "generating_content": "Generating title, description and tags...",
     "uploading_youtube": "Uploading to YouTube...",
-    "directpublish_sucess": "Publication success",
+    "directpublish_success": "Upload successful!",
+    "directpublish_desc_prompt": "Generate an engaging and optimized description for a YouTube Short based on the following transcript. Add relevant hashtags at the end.",
 })
 
 translations["fr"].update({
@@ -161,7 +161,7 @@ Réponds avec {num} paires de codes temporels : un code temporel de début et un
 
 {segment_text}
 
-Le titre doit être concis, optimisé pour les clics, et formaté avec des mots séparés par des underscores (ex. : astuce_ia_incroyable_a_essayer). Répondez uniquement avec le titre, sans texte supplémentaire.""",
+Le titre doit être concis, optimisé pour les clics, en français, avec des majuscules et des espaces (exemple : Astuce IA Incroyable à Essayer !). Répondez uniquement avec le titre, sans texte supplémentaire.""",
     "shortextractor_number_suggestions": "Nombre de suggestions",
     "shortextractor_current_suggestion": "Suggestion actuelle",
     "shortextractor_of": "sur",
@@ -180,7 +180,8 @@ Le titre doit être concis, optimisé pour les clics, et formaté avec des mots 
     "formatting_short": "Formatage en Short (9:16)...",
     "generating_content": "Génération du titre, description et tags...",
     "uploading_youtube": "Téléversement sur YouTube...",
-    "directpublish_sucess": "Succès de la publication",
+    "directpublish_success": "Publication réussie !",
+    "directpublish_desc_prompt": "Génère une description engageante et optimisée pour un YouTube Short basée sur cette transcription. Ajoute des hashtags pertinents à la fin.",
 })
 
 
@@ -491,7 +492,7 @@ class ShortextractorPlugin(Plugin):
 
             video_to_process = video_path
 
-            # 1. Suppression des silences (toujours activée pour la publication)
+            # 1. Suppression des silences
             trimsilences_plugin = self.plugin_manager.get_plugin('trimsilences')
             if trimsilences_plugin:
                 st.info(t("removing_silences"))
@@ -502,31 +503,30 @@ class ShortextractorPlugin(Plugin):
                     return
                 video_to_process = result
 
-            # 2. Transcription automatique du vidéo après suppression des silences
+            # 2. Transcription automatique
             st.info(t("auto_transcribing"))
             transcript_plugin = self.plugin_manager.get_plugin('transcript')
             st.session_state.transcript = transcript_plugin.transcribe_video(video_to_process, "srt")
 
-            # 3. Durée totale du vidéo traité
+            # 3. Durée totale
             clip = VideoFileClip(video_to_process)
             total_duration = clip.duration
             clip.close()
             start_time = "00:00:00,000"
             end_time = self.seconds_to_srt_time(total_duration)
 
-            # 4. Paramètres optimisés pour un Short complet (indépendants des sliders manuels)
+            # 4. Paramètres optimisés pour Short complet
             zoom_factor = 1.2
             center_x = 0.5
-            center_y = 0.4  # Légèrement plus haut pour centrer sur le visage
+            center_y = 0.4
             use_old_mode = False
             format_916 = True
             subtitle_position = "bottom"
             subtitle_size = 80
             subtitle_bold = True
-            use_old_subtitle = False  # Préférence ASS pour de meilleurs sous-titres
+            use_old_subtitle = False
             lang = config['common'].get('language', 'fr')
 
-            # Fichier temporaire
             base_name = os.path.splitext(os.path.basename(video_path))[0]
             temp_output = os.path.join(work_directory, f"temp_short_full_{base_name}.mp4")
 
@@ -542,7 +542,7 @@ class ShortextractorPlugin(Plugin):
                 lang=lang
             )
 
-            # 5. Génération titre / description / tags avec LLM
+            # 5. Génération titre / description / tags
             st.info(t("generating_content"))
             parsed = self.parse_transcript(st.session_state.transcript)
             plain_transcript = " ".join([e['text'].strip() for e in parsed if e['text'].strip()])
@@ -550,8 +550,7 @@ class ShortextractorPlugin(Plugin):
             title_prompt = t("shortextractor_suggest_title_prompt").format(segment_text=plain_transcript[:1500])
             title = self.process_with_llm(title_prompt, config['llm']['llm_sys_prompt'], plain_transcript).strip()
 
-            desc_prompt = ("Génère une description engageante et optimisée pour un YouTube Short basée sur cette transcription. "
-                            "Ajoute des hashtags pertinents à la fin.\n\n" + plain_transcript[:2000])
+            desc_prompt = t("directpublish_desc_prompt") + "\n\n" + plain_transcript[:2000]
             description = self.process_with_llm(desc_prompt, config['llm']['llm_sys_prompt'], plain_transcript)
 
             tag_prompt = t("directpublish_tag_generator")
@@ -567,13 +566,13 @@ class ShortextractorPlugin(Plugin):
             # 6. Renommage final
             final_video = temp_output
             if with_subtitles:
-                # Titre LLM déjà formaté avec underscores → on remplace par des tirets pour le nom de fichier
-                safe_title = title.replace('_', '-').strip()
+                # Sanitization minimale des caractères interdits, conservation des espaces et de la casse
+                safe_title = re.sub(r'[\\/:*?"<>|]', '-', title.strip())
                 new_name = f"{safe_title}.mp4"
                 new_path = os.path.join(work_directory, new_name)
                 i = 1
                 while os.path.exists(new_path):
-                    new_path = os.path.join(work_directory, f"{safe_title}_{i}.mp4")
+                    new_path = os.path.join(work_directory, f"{safe_title} ({i}).mp4")
                     i += 1
                 os.rename(temp_output, new_path)
                 final_video = new_path
@@ -584,21 +583,19 @@ class ShortextractorPlugin(Plugin):
 
             # 7. Upload YouTube
             st.info(t("uploading_youtube"))
-            category_id = "24"  # Entertainment – parfait pour les Shorts
+            category_id = "24"
             tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
 
             try:
                 video_id = upload_video(
                     final_video, title, full_description, category_id, tags_list, "unlisted")
-                st.success(t("directpublish_success").format(video_id=video_id))
-            except Exception as e:
+            except Exception:
                 st.warning(t("directpublish_notags"))
-                try:
-                    video_id = upload_video(
-                        final_video, title, full_description, category_id, [], "unlisted")
-                    st.success(t("directpublish_success").format(video_id=video_id))
-                except Exception as e2:
-                    st.error(f"Erreur lors de la publication : {e2}")
+                video_id = upload_video(
+                    final_video, title, full_description, category_id, [], "unlisted")
+
+            st.success(t("directpublish_success"))
+            st.markdown(f"**Publication :** https://www.youtube.com/shorts/{video_id}")
 
             # 8. Webhooks
             webhook_urls = config.get('directpublish', {}).get('webhook_urls', '').strip().split('\n')
