@@ -4,12 +4,12 @@ import streamlit as st
 import torch
 import random
 from io import BytesIO
-from PIL import Image  # Ajout pour gérer les images uploadées
+from PIL import Image
 
 # Ajout des traductions spécifiques à ce plugin
 translations["en"].update({
     "flux_tab": "Flux Plugin",
-    "flux_header": "FLUX.2 Image Generator",
+    "flux_header": "FLUX.2 & GLM-Image Generator",
     "flux_input_label": "Enter the prompt for the image you want to generate or edit",
     "flux_init_image_label": "Upload an initial image to edit (optional)",
     "flux_strength_label": "Strength (how much to change the initial image)",
@@ -24,11 +24,15 @@ translations["en"].update({
     "flux_size_wide": "Wide (1024x576)",
     "flux_size_tall": "Tall (576x1024)",
     "flux_size_custom": "Custom",
+    # Nouvelles traductions pour le sélecteur de modèle
+    "model_choice": "Select Model",
+    "model_flux": "FLUX.2 Klein (fast, low VRAM)",
+    "model_glm": "GLM-Image (high quality, slower, high VRAM)",
 })
 
 translations["fr"].update({
     "flux_tab": "Plugin Flux",
-    "flux_header": "Générateur d'images FLUX.2",
+    "flux_header": "Générateur d'images FLUX.2 & GLM-Image",
     "flux_input_label": "Entrez le prompt pour l'image que vous souhaitez générer ou modifier",
     "flux_init_image_label": "Téléchargez une image initiale à modifier (optionnel)",
     "flux_strength_label": "Force de modification (combien changer l'image initiale)",
@@ -43,13 +47,16 @@ translations["fr"].update({
     "flux_size_wide": "Large (1024x576)",
     "flux_size_tall": "Haut (576x1024)",
     "flux_size_custom": "Personnalisée",
+    # Nouvelles traductions pour le sélecteur de modèle
+    "model_choice": "Choisir le modèle",
+    "model_flux": "FLUX.2 Klein (rapide, faible VRAM)",
+    "model_glm": "GLM-Image (haute qualité, plus lent, forte VRAM)",
 })
 
 class FluxPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
 
-        # Définition des tailles standard
         self.standard_sizes = {
             "square": (1024, 1024),
             "portrait": (768, 1024),
@@ -59,162 +66,184 @@ class FluxPlugin(Plugin):
         }
 
     def get_config_fields(self):
-        """Aucun champ de configuration pour l'instant."""
         return {}
 
     def get_tabs(self):
-        """Définit les onglets du plugin dans l'interface."""
         return [{"name": t("flux_tab"), "plugin": "flux"}]
 
     def run(self, config):
-        """Logique principale du plugin."""
         st.header(t("flux_header"))
 
-        # Prompt texte (obligatoire)
+        # Sélecteur de modèle
+        selected_model = st.selectbox(
+            t("model_choice"),
+            [t("model_flux"), t("model_glm")]
+        )
+        is_flux = selected_model == t("model_flux")
+
+        # Prompt texte
         user_prompt = st.text_area(
             t("flux_input_label"),
             height=120,
             value="A cat holding a sign that says hello world"
         )
 
-        # Upload d'image initiale (optionnel pour img2img)
+        # Upload image initiale (optionnel)
         init_image_file = st.file_uploader(
             t("flux_init_image_label"),
             type=["png", "jpg", "jpeg", "webp"]
         )
 
-        init_image = None
-        target_width = None
-        target_height = None
-
+        uploaded_image = None
         if init_image_file:
-            init_image = Image.open(init_image_file).convert("RGB")
-            st.image(init_image, caption="Image initiale", width='stretch')
+            uploaded_image = Image.open(init_image_file).convert("RGB")
+            st.image(uploaded_image, caption="Image initiale uploadée", use_column_width=True)
 
-            # Garder la taille originale pour img2img
-            target_width, target_height = init_image.size
+        # Sélection de la taille (toujours visible)
+        st.subheader(t("flux_size_label"))
 
-        else:
-            # Sélection de la taille pour T2I (pas d'image initiale)
-            st.subheader(t("flux_size_label"))
+        size_options = [
+            t("flux_size_square"),
+            t("flux_size_portrait"),
+            t("flux_size_landscape"),
+            t("flux_size_wide"),
+            t("flux_size_tall"),
+            t("flux_size_custom")
+        ]
 
-            # Options de taille
-            size_options = [
-                t("flux_size_square"),
-                t("flux_size_portrait"),
-                t("flux_size_landscape"),
-                t("flux_size_wide"),
-                t("flux_size_tall"),
-                t("flux_size_custom")
-            ]
+        selected_size_option = st.selectbox(
+            "Choisissez une taille d'image",
+            size_options,
+            index=0
+        )
 
-            selected_size_option = st.selectbox(
-                "Choisissez une taille d'image",
-                size_options,
-                index=0
-            )
+        if selected_size_option == t("flux_size_square"):
+            target_width, target_height = self.standard_sizes["square"]
+        elif selected_size_option == t("flux_size_portrait"):
+            target_width, target_height = self.standard_sizes["portrait"]
+        elif selected_size_option == t("flux_size_landscape"):
+            target_width, target_height = self.standard_sizes["landscape"]
+        elif selected_size_option == t("flux_size_wide"):
+            target_width, target_height = self.standard_sizes["wide"]
+        elif selected_size_option == t("flux_size_tall"):
+            target_width, target_height = self.standard_sizes["tall"]
+        elif selected_size_option == t("flux_size_custom"):
+            col1, col2 = st.columns(2)
+            with col1:
+                target_width = st.number_input("Largeur", min_value=256, max_value=2048, value=1024, step=64)
+            with col2:
+                target_height = st.number_input("Hauteur", min_value=256, max_value=2048, value=1024, step=64)
 
-            # Déterminer la taille en fonction de la sélection
-            if selected_size_option == t("flux_size_square"):
-                target_width, target_height = self.standard_sizes["square"]
-            elif selected_size_option == t("flux_size_portrait"):
-                target_width, target_height = self.standard_sizes["portrait"]
-            elif selected_size_option == t("flux_size_landscape"):
-                target_width, target_height = self.standard_sizes["landscape"]
-            elif selected_size_option == t("flux_size_wide"):
-                target_width, target_height = self.standard_sizes["wide"]
-            elif selected_size_option == t("flux_size_tall"):
-                target_width, target_height = self.standard_sizes["tall"]
-            elif selected_size_option == t("flux_size_custom"):
-                # Options personnalisées
-                col1, col2 = st.columns(2)
-                with col1:
-                    target_width = st.number_input(
-                        "Largeur",
-                        min_value=256,
-                        max_value=2048,
-                        value=1024,
-                        step=64
-                    )
-                with col2:
-                    target_height = st.number_input(
-                        "Hauteur",
-                        min_value=256,
-                        max_value=2048,
-                        value=1024,
-                        step=64
-                    )
+        # Ajustement automatique des dimensions pour GLM-Image (doivent être divisibles par 32)
+        if not is_flux:
+            original_w, original_h = target_width, target_height
+            target_width = max(32, (target_width // 32) * 32)
+            target_height = max(32, (target_height // 32) * 32)
+            if (target_width, target_height) != (original_w, original_h):
+                st.info(f"Dimensions ajustées à {target_width}x{target_height} pour compatibilité GLM-Image (divisible par 32).")
 
-            # Afficher la taille sélectionnée
-            st.info(f"Taille d'image : {target_width} x {target_height} pixels")
+        st.info(f"Taille cible : {target_width} x {target_height} pixels")
 
-        # Bouton pour lancer la génération
+        # Préparation de l'image initiale (redimensionnée à la taille cible si présente)
+        init_image = None
+        strength = None
+        if uploaded_image:
+            init_image = uploaded_image.resize((target_width, target_height))
+            st.image(init_image, caption=f"Image initiale redimensionnée à {target_width}x{target_height}", use_column_width=True)
+
+            # Strength uniquement pour FLUX (GLM-Image n'a pas ce paramètre)
+            if is_flux:
+                strength = st.slider(
+                    t("flux_strength_label"),
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.8,
+                    step=0.05,
+                    help=t("flux_strength_help")
+                )
+
+        # Bouton génération
         if st.button(t("flux_process_button")):
             if not user_prompt.strip():
                 st.warning("Veuillez saisir un prompt.")
                 return
 
-            if not target_width or not target_height:
-                st.warning("Veuillez spécifier une taille d'image.")
-                return
-
             with st.spinner(t("flux_processing")):
                 try:
-                    # Chargement du pipeline mis en cache
+                    # Chargement des pipelines (cachés séparément)
                     @st.cache_resource
                     def load_flux_pipeline():
                         from diffusers import Flux2KleinPipeline
-
                         pipe = Flux2KleinPipeline.from_pretrained(
-                            "./flux2-klein-4b",  # Ton dossier local
+                            "./flux2-klein-4b",  # Dossier local pour FLUX.2 Klein
                             torch_dtype=torch.bfloat16,
                             local_files_only=True
                         )
-                        device = "cuda" if torch.cuda.is_available() else "cpu"
-                        if device == "cuda":
-                            pipe.enable_sequential_cpu_offload()  # Garde l'offload agressif pour 8GB VRAM
-                            torch.cuda.empty_cache()
+                        return pipe
+
+                    @st.cache_resource
+                    def load_glm_pipeline():
+                        from diffusers.pipelines.glm_image import GlmImagePipeline
+                        # Pour GLM-Image : téléchargez le modèle dans ./glm-image avec :
+                        # export HF_HUB_ENABLE_HF_TRANSFER=0
+                        # huggingface-cli download zai-org/GLM-Image --local-dir ./glm-image --resume-download
+                        pipe = GlmImagePipeline.from_pretrained(
+                            "./glm-image",  # Dossier local pour GLM-Image
+                            torch_dtype=torch.bfloat16
+                        )
+                        return pipe
+
+                    if is_flux:
+                        pipe = load_flux_pipeline()
+                    else:
+                        pipe = load_glm_pipeline()
+
+                    device = "cuda" if torch.cuda.is_available() else "cpu"
+                    if device == "cuda":
+                        if is_flux:
+                            pipe.enable_sequential_cpu_offload()
                         else:
-                            st.warning("CUDA non détecté : exécution sur CPU (beaucoup plus lent).")
-                            pipe.to("cpu")
-                        return pipe, device
+                            pipe.enable_model_cpu_offload()  # Recommandé pour GLM-Image (~23GB VRAM nécessaire sinon)
+                        torch.cuda.empty_cache()
+                    else:
+                        st.warning("CUDA non détecté : exécution sur CPU (beaucoup plus lent).")
+                        pipe.to("cpu")
 
-                    pipe, device = load_flux_pipeline()
+                    # Paramètres adaptés au modèle
+                    guidance_scale = 1.0 if is_flux else 1.5
+                    num_steps = 4 if is_flux else 50
 
-                    # Seed aléatoire
                     seed = random.randint(0, 999999999)
                     generator = torch.Generator(device=device).manual_seed(seed)
 
-                    # Préparation des paramètres
                     pipe_params = {
                         "prompt": user_prompt,
                         "height": target_height,
                         "width": target_width,
-                        "guidance_scale": 1.0,
-                        "num_inference_steps": 4,
+                        "guidance_scale": guidance_scale,
+                        "num_inference_steps": num_steps,
                         "generator": generator
                     }
 
-                    # Si image initiale → mode img2img
                     if init_image:
-                        # Redimensionner l'image initiale à la taille cible (garder les proportions si besoin)
-                        # FLUX.2 peut gérer différentes tailles, donc on utilise la taille originale
-                        pipe_params["image"] = init_image
+                        if is_flux:
+                            pipe_params["image"] = init_image
+                            if strength is not None:
+                                pipe_params["strength"] = strength
+                        else:
+                            pipe_params["image"] = [init_image]  # GLM-Image attend une liste
 
-                    # Génération
                     image = pipe(**pipe_params).images[0]
 
-                    # Affichage
-                    st.image(image, caption=user_prompt, width='stretch')
+                    st.image(image, caption=user_prompt, use_column_width=True)
 
-                    # Téléchargement
                     buf = BytesIO()
                     image.save(buf, format="PNG")
                     buf.seek(0)
                     st.download_button(
                         label="Télécharger l'image",
                         data=buf,
-                        file_name=f"flux_{seed}.png",
+                        file_name=f"{'flux' if is_flux else 'glm'}_{seed}.png",
                         mime="image/png"
                     )
 
@@ -222,8 +251,7 @@ class FluxPlugin(Plugin):
 
                 except Exception as e:
                     st.error(f"Une erreur s'est produite : {str(e)}")
-                    st.exception(e)  # Affiche plus de détails pour le débogage
-
+                    st.exception(e)
 
 if __name__ == "__main__":
     st.write("Flux Plugin standalone test")
