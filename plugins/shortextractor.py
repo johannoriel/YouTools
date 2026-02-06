@@ -96,7 +96,6 @@ The title should be concise, click-optimized, with Title Case and spaces (exampl
     "formatting_short": "Formatting to Short (9:16)...",
     "generating_content": "Generating title, description and tags...",
     "uploading_youtube": "Uploading to YouTube...",
-    "directpublish_success": "Upload successful!",
     "directpublish_desc_prompt": "Generate an engaging and optimized description for a YouTube Short based on the following transcript. Add relevant hashtags at the end.",
     "shortextractor_custom_desc": "Custom description to insert:",
 })
@@ -181,7 +180,6 @@ Le titre doit être concis, optimisé pour les clics, en français, avec des maj
     "formatting_short": "Formatage en Short (9:16)...",
     "generating_content": "Génération du titre, description et tags...",
     "uploading_youtube": "Téléversement sur YouTube...",
-    "directpublish_success": "Publication réussie !",
     "directpublish_desc_prompt": "Génère une description engageante et optimisée pour un YouTube Short basée sur cette transcription. Ajoute des hashtags pertinents à la fin.",
     "shortextractor_custom_desc": "Description personnalisée à insérer :",
 })
@@ -492,6 +490,14 @@ class ShortextractorPlugin(Plugin):
         """Fonction commune pour les deux types de publication (Short complet)."""
         with st.spinner(t("directpublish_processing")):
 
+            # Récupérer les répertoires depuis la configuration
+            temp_directory = os.path.expanduser(config['common'].get('temp_directory', work_directory))
+            archive_directory = os.path.expanduser(config['common'].get('archive_directory', work_directory))
+
+            # Créer les répertoires s'ils n'existent pas
+            os.makedirs(temp_directory, exist_ok=True)
+            os.makedirs(archive_directory, exist_ok=True)
+
             video_to_process = video_path
 
             # 1. Suppression des silences
@@ -597,10 +603,48 @@ class ShortextractorPlugin(Plugin):
                 video_id = upload_video(
                     final_video, title, full_description, category_id, [], "unlisted")
 
-            st.success(t("directpublish_success"))
+            st.success(t("directpublish_success").format(
+                video_id=video_id))
             st.markdown(f"**Publication :** https://www.youtube.com/shorts/{video_id}")
 
-            # 8. Webhooks
+            # 8. GESTION DES FICHIERS - Déplacer les fichiers dans les répertoires appropriés
+            st.info("Nettoyage et organisation des fichiers...")
+
+            # Déplacer la vidéo finale uploadée vers archive_directory
+            try:
+                archive_path = os.path.join(archive_directory, os.path.basename(final_video))
+                os.rename(final_video, archive_path)
+                st.success(f"Vidéo finale déplacée vers l'archive : {archive_path}")
+            except Exception as e:
+                st.warning(f"Impossible de déplacer la vidéo finale : {e}")
+
+            # Déplacer toutes les vidéos intermédiaires et la vidéo originale vers temp_directory
+            videos_to_move = []
+
+            # Vérifier et ajouter la vidéo originale si elle existe encore
+            if os.path.exists(video_path):
+                videos_to_move.append(video_path)
+
+            # Vérifier et ajouter la vidéo après suppression des silences si différente
+            if video_to_process != video_path and os.path.exists(video_to_process):
+                videos_to_move.append(video_to_process)
+
+            # Déplacer toutes les vidéos du répertoire de travail qui commencent par "temp_"
+            for file in os.listdir(work_directory):
+                if file.lower().endswith(('.mp4', '.mkv', '.mov', '.ogg')) and file.startswith('temp_'):
+                    file_path = os.path.join(work_directory, file)
+                    videos_to_move.append(file_path)
+
+            # Déplacer les fichiers vers temp_directory
+            for video_file in videos_to_move:
+                try:
+                    temp_path = os.path.join(temp_directory, os.path.basename(video_file))
+                    os.rename(video_file, temp_path)
+                    st.info(f"Déplacé vers temp : {os.path.basename(video_file)}")
+                except Exception as e:
+                    st.warning(f"Impossible de déplacer {video_file} : {e}")
+
+            # 9. Webhooks
             webhook_urls = config.get('directpublish', {}).get('webhook_urls', '').strip().split('\n')
             webhook_urls = [u.strip() for u in webhook_urls if u.strip()]
             if webhook_urls:
