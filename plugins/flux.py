@@ -21,6 +21,7 @@ translations["en"].update({
     "flux_size_square": "Square (1024x1024)",
     "flux_size_portrait": "Portrait (768x1024)",
     "flux_size_landscape": "Landscape (1024x768)",
+    "flux_size_youtube": "Youtube (1280x720)",
     "flux_size_wide": "Wide (1024x576)",
     "flux_size_tall": "Tall (576x1024)",
     "flux_size_custom": "Custom",
@@ -44,6 +45,7 @@ translations["fr"].update({
     "flux_size_square": "Carré (1024x1024)",
     "flux_size_portrait": "Portrait (768x1024)",
     "flux_size_landscape": "Paysage (1024x768)",
+    "flux_size_youtube": "Youtube (1280x720)",
     "flux_size_wide": "Large (1024x576)",
     "flux_size_tall": "Haut (576x1024)",
     "flux_size_custom": "Personnalisée",
@@ -61,6 +63,7 @@ class FluxPlugin(Plugin):
             "square": (1024, 1024),
             "portrait": (768, 1024),
             "landscape": (1024, 768),
+            "youtube": (1280, 720),
             "wide": (1024, 576),
             "tall": (576, 1024),
         }
@@ -97,7 +100,7 @@ class FluxPlugin(Plugin):
         uploaded_image = None
         if init_image_file:
             uploaded_image = Image.open(init_image_file).convert("RGB")
-            st.image(uploaded_image, caption="Image initiale uploadée", use_column_width=True)
+            st.image(uploaded_image, caption="Image initiale uploadée", use_container_width=True)
 
         # Sélection de la taille (toujours visible)
         st.subheader(t("flux_size_label"))
@@ -106,6 +109,7 @@ class FluxPlugin(Plugin):
             t("flux_size_square"),
             t("flux_size_portrait"),
             t("flux_size_landscape"),
+            t("flux_size_youtube"),
             t("flux_size_wide"),
             t("flux_size_tall"),
             t("flux_size_custom")
@@ -123,6 +127,8 @@ class FluxPlugin(Plugin):
             target_width, target_height = self.standard_sizes["portrait"]
         elif selected_size_option == t("flux_size_landscape"):
             target_width, target_height = self.standard_sizes["landscape"]
+        elif selected_size_option == t("flux_size_youtube"):
+            target_width, target_height = self.standard_sizes["youtube"]
         elif selected_size_option == t("flux_size_wide"):
             target_width, target_height = self.standard_sizes["wide"]
         elif selected_size_option == t("flux_size_tall"):
@@ -149,7 +155,7 @@ class FluxPlugin(Plugin):
         strength = None
         if uploaded_image:
             init_image = uploaded_image.resize((target_width, target_height))
-            st.image(init_image, caption=f"Image initiale redimensionnée à {target_width}x{target_height}", use_column_width=True)
+            st.image(init_image, caption=f"Image initiale redimensionnée à {target_width}x{target_height}", use_container_width=True)
 
             # Strength uniquement pour FLUX (GLM-Image n'a pas ce paramètre)
             if is_flux:
@@ -228,14 +234,12 @@ class FluxPlugin(Plugin):
                     if init_image:
                         if is_flux:
                             pipe_params["image"] = init_image
-                            if strength is not None:
-                                pipe_params["strength"] = strength
                         else:
                             pipe_params["image"] = [init_image]  # GLM-Image attend une liste
 
                     image = pipe(**pipe_params).images[0]
 
-                    st.image(image, caption=user_prompt, use_column_width=True)
+                    st.image(image, caption=user_prompt, use_container_width=True)
 
                     buf = BytesIO()
                     image.save(buf, format="PNG")
