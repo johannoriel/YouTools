@@ -511,10 +511,65 @@ class ShortextractorPlugin(Plugin):
                     return
                 video_to_process = result
 
+                # VÉRIFICATION DE LA DURÉE APRÈS SUPPRESSION DES SILENCES
+                try:
+                    clip = VideoFileClip(video_to_process)
+                    duration_after_silence_removal = clip.duration
+                    clip.close()
+
+                    MAX_DURATION = 180  # 3 minutes en secondes
+
+                    if duration_after_silence_removal > MAX_DURATION:
+                        st.warning(f"⚠️ **Attention : La durée de la vidéo après suppression des silences ({duration_after_silence_removal:.1f}s) dépasse la limite de 3 minutes ({MAX_DURATION}s).**")
+                        st.info("Pour publier un Short YouTube, la vidéo doit faire moins de 60 secondes. Pour une vidéo longue, utilisez plutôt le mode 'Extraire tout' avec un segment spécifique.")
+
+                        # Afficher la vidéo pour édition
+                        st.video(video_to_process)
+
+                        # Boutons pour continuer ou abandonner
+                        col_continue, col_cancel = st.columns(2)
+                        with col_continue:
+                            if st.button("⚠️ Publier quand même (risque de rejet YouTube)", type="secondary"):
+                                st.warning("Vous allez publier une vidéo trop longue pour un Short YouTube.")
+                                # Continuer le processus
+                                pass
+                            else:
+                                # Arrêter le processus ici
+                                st.stop()
+
+                        with col_cancel:
+                            if st.button("✋ Arrêter et éditer la vidéo", type="primary"):
+                                st.info("Le processus est arrêté. Vous pouvez:")
+                                st.info("1. Utiliser l'extracteur de shorts pour sélectionner un segment < 60s")
+                                st.info("2. Réduire manuellement la vidéo")
+                                st.info("3. Revenir ensuite pour publier")
+                                st.stop()
+
+                        # Si l'utilisateur clique sur "Publier quand même", on continue
+                        # Sinon, le processus s'arrête via st.stop()
+
+                except Exception as e:
+                    st.warning(f"Impossible de vérifier la durée de la vidéo: {e}")
+
             # 2. Transcription automatique
             st.info(t("auto_transcribing"))
             transcript_plugin = self.plugin_manager.get_plugin('transcript')
             st.session_state.transcript = transcript_plugin.transcribe_video(video_to_process, "srt")
+
+            # 3. Durée totale
+            clip = VideoFileClip(video_to_process)
+            total_duration = clip.duration
+            clip.close()
+
+            # Vérification finale de la durée (au cas où l'utilisateur a choisi de continuer malgré l'avertissement)
+            MAX_DURATION = 180  # 3 minutes en secondes
+            if total_duration > MAX_DURATION:
+                st.error(f"❌ **La vidéo est trop longue ({total_duration:.1f}s > {MAX_DURATION}s). Impossible de publier un Short YouTube.**")
+                st.info("Utilisez l'extracteur de shorts pour sélectionner un segment de moins de 60 secondes.")
+                return
+
+            start_time = "00:00:00,000"
+            end_time = self.seconds_to_srt_time(total_duration)
 
             # 3. Durée totale
             clip = VideoFileClip(video_to_process)
@@ -699,8 +754,16 @@ class ShortextractorPlugin(Plugin):
             st.info(f"No videos in {work_directory}")
             return
 
-        selected_video = st.selectbox(t("shortextractor_select_video"), options=[v[0] for v in videos], key="video_selector")
-        selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
+        col_select, col_preview = st.columns([1, 1])
+
+        with col_select:
+            selected_video = st.selectbox(t("shortextractor_select_video"), options=[v[0] for v in videos], key="video_selector")
+            selected_video_path = next(v[1] for v in videos if v[0] == selected_video)
+
+        with col_preview:
+            if selected_video_path:
+                st.video(selected_video_path)
+
 
         custom_desc = st.text_area(t("shortextractor_custom_desc"), "")
 
