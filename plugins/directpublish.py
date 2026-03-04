@@ -62,6 +62,9 @@ translations["en"].update({
     "directpublish_performing_editing": "Performing editing operations...",
     "directpublish_normalize_audio": "Normalize audio before publishing",
     "directpublish_normalizing_audio": "Normalizing audio...",
+    # Nouveaux ajouts
+    "directpublish_suggest_title": "Suggest title",
+    "directpublish_suggest_title_prompt": """Suggest a catchy, engaging title for a YouTube video based on the following transcript. The title should be concise, click-optimized, with Title Case (example: Amazing AI Trick You Need To Try!). Respond only with the title, no extra text.""",
 })
 
 translations["fr"].update({
@@ -76,7 +79,7 @@ translations["fr"].update({
     "directpublish_error": "Une erreur s'est produite lors de la publication : {error}",
     "directpublish_generating_title": "Génération du titre de la vidéo...",
     "directpublish_generating_description": "Génération de la description de la vidéo...",
-    "directpublish_generating_transcription": "Génération de la transcription transcription...",
+    "directpublish_generating_transcription": "Génération de la transcription...",
     "directpublish_silence_trim": "Suppression des silences...",
     "directpublish_upload": "Téléversement...",
     "publish_signature": "Signature à ajouter à la description de la vidéo",
@@ -111,6 +114,9 @@ translations["fr"].update({
     "directpublish_performing_editing": "Exécution des opérations d'édition...",
     "directpublish_normalize_audio": "Normaliser le son avant publication",
     "directpublish_normalizing_audio": "Normalisation du son en cours...",
+    # Nouveaux ajouts
+    "directpublish_suggest_title": "Suggérer un titre",
+    "directpublish_suggest_title_prompt": """Suggérez un titre accrocheur et engageant pour une vidéo YouTube basée sur la transcription suivante. Le titre doit être concis, optimisé pour les clics, en français, avec des majuscules (exemple : Astuce IA Incroyable à Essayer !). Répondez uniquement avec le titre, sans texte supplémentaire.""",
 })
 
 
@@ -162,6 +168,18 @@ class DirectpublishPlugin(Plugin):
 
     def get_tabs(self):
         return [{"name": t("directpublish_tab"), "plugin": "directpublish"}]
+
+    def parse_transcript(self, transcript):
+        """Parse SRT transcript to extract plain text."""
+        if not transcript:
+            return ""
+        lines = transcript.split('\n')
+        text_parts = []
+        for line in lines:
+            # Skip lines with timecodes and numbers
+            if ' --> ' not in line and not line.strip().isdigit() and line.strip():
+                text_parts.append(line.strip())
+        return " ".join(text_parts)
 
     def run(self, config):
         st.header(t("directpublish_header"))
@@ -226,7 +244,11 @@ class DirectpublishPlugin(Plugin):
             )
 
         do_llm = st.checkbox(t("directpublish_do_llm"), value=False)
+
+        # Nouvelle checkbox pour suggérer le titre (visible seulement si do_llm est coché)
+        suggest_title = False
         if do_llm:
+            suggest_title = st.checkbox(t("directpublish_suggest_title"), value=True)
             user_prompt = st.text_area(
                 t("directpublish_preprompt"), value=st.session_state.rag_question, key="rag_prompt_key")
             st.session_state.rag_question = user_prompt
@@ -364,13 +386,29 @@ class DirectpublishPlugin(Plugin):
 
                     # 5. Générer un titre pour la vidéo
                     st.text(t("directpublish_generating_title"))
-                    title_prompt = t("directpublish_title_generator")
-                    if not title:
-                        title = remove_quotes(self.process_with_llm(
-                            title_prompt,
-                            config['llm']['llm_sys_prompt'],
-                            transcript
-                        )).split('\n')[0].strip()
+
+                    # Utiliser le prompt de suggestion de titre si la case est cochée
+                    if suggest_title:
+                        # Extraire le texte brut de la transcription
+                        plain_transcript = self.parse_transcript(transcript)
+                        # Utiliser le prompt spécifique pour la suggestion de titre
+                        title_prompt = t("directpublish_suggest_title_prompt")
+                        if not title:
+                            title = remove_quotes(self.process_with_llm(
+                                title_prompt,
+                                config['llm']['llm_sys_prompt'],
+                                plain_transcript[:2000]  # Limiter à 2000 caractères pour éviter les dépassements
+                            )).split('\n')[0].strip()
+                    else:
+                        # Comportement existant
+                        title_prompt = t("directpublish_title_generator")
+                        if not title:
+                            title = remove_quotes(self.process_with_llm(
+                                title_prompt,
+                                config['llm']['llm_sys_prompt'],
+                                transcript
+                            )).split('\n')[0].strip()
+
                     st.code(title)
 
                     tag_prompt = t("directpublish_tag_generator")
@@ -447,5 +485,3 @@ class DirectpublishPlugin(Plugin):
                                     webhook=webhook_url, error=str(e)))
                     else:
                         st.info(t("directpublish_no_webhooks"))
-                # except Exception as e:
-                #    st.error(t("directpublish_error").format(error=str(e)))
