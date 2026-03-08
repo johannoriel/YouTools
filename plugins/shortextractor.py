@@ -486,233 +486,295 @@ class ShortextractorPlugin(Plugin):
 
         return output_file
 
-    def process_and_publish(self, video_path: str, work_directory: str, config: dict, with_subtitles: bool, custom_desc: str = ""):
-        """Fonction commune pour les deux types de publication (Short complet)."""
-        with st.spinner(t("directpublish_processing")):
-
-            # Récupérer les répertoires depuis la configuration
-            temp_directory = os.path.expanduser(config['common'].get('temp_directory', work_directory))
-            archive_directory = os.path.expanduser(config['common'].get('archive_directory', work_directory))
-
-            # Créer les répertoires s'ils n'existent pas
-            os.makedirs(temp_directory, exist_ok=True)
-            os.makedirs(archive_directory, exist_ok=True)
-
-            video_to_process = video_path
-
-            # 1. Suppression des silences
-            trimsilences_plugin = self.plugin_manager.get_plugin('trimsilences')
-            if trimsilences_plugin:
-                st.info(t("removing_silences"))
-                result, reduction, orig_dur, final_dur = trimsilences_plugin.remove_silence(
-                    video_to_process, work_directory)
-                if isinstance(result, str) and ("erreur" in result.lower() or "error" in result.lower()):
-                    st.error(result)
-                    return
-                video_to_process = result
-
-                # VÉRIFICATION DE LA DURÉE APRÈS SUPPRESSION DES SILENCES
-                try:
-                    clip = VideoFileClip(video_to_process)
-                    duration_after_silence_removal = clip.duration
-                    clip.close()
-
-                    MAX_DURATION = 180  # 3 minutes en secondes
-
-                    if duration_after_silence_removal > MAX_DURATION:
-                        st.warning(f"⚠️ **Attention : La durée de la vidéo après suppression des silences ({duration_after_silence_removal:.1f}s) dépasse la limite de 3 minutes ({MAX_DURATION}s).**")
-                        st.info("Pour publier un Short YouTube, la vidéo doit faire moins de 60 secondes. Pour une vidéo longue, utilisez plutôt le mode 'Extraire tout' avec un segment spécifique.")
-
-                        # Afficher la vidéo pour édition
-                        st.video(video_to_process)
-
-                        # Boutons pour continuer ou abandonner
-                        col_continue, col_cancel = st.columns(2)
-                        with col_continue:
-                            if st.button("⚠️ Publier quand même (risque de rejet YouTube)", type="secondary"):
-                                st.warning("Vous allez publier une vidéo trop longue pour un Short YouTube.")
-                                # Continuer le processus
-                                pass
-                            else:
-                                # Arrêter le processus ici
-                                st.stop()
-
-                        with col_cancel:
-                            if st.button("✋ Arrêter et éditer la vidéo", type="primary"):
-                                st.info("Le processus est arrêté. Vous pouvez:")
-                                st.info("1. Utiliser l'extracteur de shorts pour sélectionner un segment < 60s")
-                                st.info("2. Réduire manuellement la vidéo")
-                                st.info("3. Revenir ensuite pour publier")
-                                st.stop()
-
-                        # Si l'utilisateur clique sur "Publier quand même", on continue
-                        # Sinon, le processus s'arrête via st.stop()
-
-                except Exception as e:
-                    st.warning(f"Impossible de vérifier la durée de la vidéo: {e}")
-
-            # 2. Transcription automatique
-            st.info(t("auto_transcribing"))
-            transcript_plugin = self.plugin_manager.get_plugin('transcript')
-            st.session_state.transcript = transcript_plugin.transcribe_video(video_to_process, "srt")
-
-            # 3. Durée totale
-            clip = VideoFileClip(video_to_process)
-            total_duration = clip.duration
+    def detect_video_orientation(self, video_path):
+        """Détecte si une vidéo est en portrait (9:16), paysage (16:9) ou autre."""
+        try:
+            clip = VideoFileClip(video_path)
+            width, height = clip.size
             clip.close()
 
-            # Vérification finale de la durée (au cas où l'utilisateur a choisi de continuer malgré l'avertissement)
-            MAX_DURATION = 180  # 3 minutes en secondes
-            if total_duration > MAX_DURATION:
-                st.error(f"❌ **La vidéo est trop longue ({total_duration:.1f}s > {MAX_DURATION}s). Impossible de publier un Short YouTube.**")
-                st.info("Utilisez l'extracteur de shorts pour sélectionner un segment de moins de 60 secondes.")
-                return
+            ratio = width / height
 
-            start_time = "00:00:00,000"
-            end_time = self.seconds_to_srt_time(total_duration)
+            # Portrait (9:16) : hauteur > largeur, ratio proche de 0.5625
+            if height > width and abs(ratio - 9/16) < 0.1:
+                return "portrait"
+            # Paysage (16:9) : largeur > hauteur, ratio proche de 1.777
+            elif width > height and abs(ratio - 16/9) < 0.1:
+                return "landscape"
+            else:
+                return "other"
+        except Exception as e:
+            st.warning(f"Impossible de détecter l'orientation de la vidéo: {e}")
+            return "unknown"
 
-            # 3. Durée totale
-            clip = VideoFileClip(video_to_process)
-            total_duration = clip.duration
+    def remove_silences_from_video(self, video_path, work_directory):
+        """Supprime les silences d'une vidéo et retourne le chemin de la vidéo traitée."""
+        trimsilences_plugin = self.plugin_manager.get_plugin('trimsilences')
+        if not trimsilences_plugin:
+            return video_path
+
+        st.info(t("removing_silences"))
+        result, reduction, orig_dur, final_dur = trimsilences_plugin.remove_silence(
+            video_path, work_directory
+        )
+
+        if isinstance(result, str) and ("erreur" in result.lower() or "error" in result.lower()):
+            st.error(result)
+            return None
+
+        return result
+
+    def check_video_duration_for_short(self, video_path, max_duration=180):
+        """Vérifie si la durée de la vidéo est compatible avec un Short YouTube."""
+        try:
+            clip = VideoFileClip(video_path)
+            duration = clip.duration
             clip.close()
-            start_time = "00:00:00,000"
-            end_time = self.seconds_to_srt_time(total_duration)
 
-            # 4. Paramètres optimisés pour Short complet
+            if duration > max_duration:
+                st.warning(f"⚠️ **Attention : La durée de la vidéo ({duration:.1f}s) dépasse la limite de 3 minutes ({max_duration}s).**")
+                st.info("Pour publier un Short YouTube, la vidéo doit faire moins de 60 secondes. Pour une vidéo longue, utilisez plutôt le mode 'Extraire tout' avec un segment spécifique.")
+
+                st.video(video_path)
+
+                col_continue, col_cancel = st.columns(2)
+                with col_continue:
+                    if st.button("⚠️ Publier quand même (risque de rejet YouTube)", type="secondary"):
+                        return True  # Continuer malgré l'avertissement
+                with col_cancel:
+                    if st.button("✋ Arrêter et éditer la vidéo", type="primary"):
+                        st.info("Le processus est arrêté. Vous pouvez:")
+                        st.info("1. Utiliser l'extracteur de shorts pour sélectionner un segment < 60s")
+                        st.info("2. Réduire manuellement la vidéo")
+                        st.info("3. Revenir ensuite pour publier")
+                        return False  # Arrêter le processus
+                return False  # Par défaut, on arrête
+            return True  # Durée OK
+        except Exception as e:
+            st.warning(f"Impossible de vérifier la durée de la vidéo: {e}")
+            return True
+
+    def generate_video_metadata(self, transcript_text, config, custom_desc=""):
+        """Génère le titre, la description et les tags pour la vidéo."""
+        st.info(t("generating_content"))
+
+        parsed = self.parse_transcript(transcript_text)
+        plain_transcript = " ".join([e['text'].strip() for e in parsed if e['text'].strip()])
+
+        # Génération du titre
+        title_prompt = t("shortextractor_suggest_title_prompt").format(segment_text=plain_transcript[:1500])
+        title = self.process_with_llm(title_prompt, config['llm']['llm_sys_prompt'], plain_transcript).strip()
+
+        # Génération de la description
+        desc_prompt = t("directpublish_desc_prompt") + "\n\n" + plain_transcript[:2000]
+        description = self.process_with_llm(desc_prompt, config['llm']['llm_sys_prompt'], plain_transcript)
+
+        # Génération des tags
+        tag_prompt = t("directpublish_tag_generator")
+        tags = self.process_with_llm(tag_prompt, config['llm']['llm_sys_prompt'], plain_transcript)
+        extra_keywords = config.get('directpublish', {}).get('keywords', '').strip()
+        if extra_keywords:
+            tags = extra_keywords + ", " + tags
+
+        # Construction de la description complète
+        introduction = config.get('directpublish', {}).get('introduction', '')
+        signature = config.get('directpublish', {}).get('signature', '')
+        parts = [introduction, description, custom_desc, signature]
+        full_description = "\n\n".join([p for p in parts if p]).strip()
+
+        return title, full_description, tags
+
+    def format_video_for_short(self, video_path, start_time, end_time, output_file, with_subtitles,
+                              orientation, config):
+        """Formate la vidéo au format Short selon son orientation d'origine."""
+
+        # Paramètres de base
+        if orientation == "portrait":
+            # Pour une vidéo déjà en portrait, on garde le format original
+            st.info("Vidéo déjà au format portrait - conservation du format original")
+            zoom_factor = 1.0
+            center_x = 0.5
+            center_y = 0.5
+            use_old_mode = True
+            format_916 = False
+        else:
+            # Pour une vidéo paysage, on applique la conversion standard
+            st.info(t("formatting_short"))
             zoom_factor = 1.2
             center_x = 0.5
             center_y = 0.4
             use_old_mode = False
             format_916 = True
-            subtitle_position = "bottom"
-            subtitle_size = 80
-            subtitle_bold = True
-            use_old_subtitle = False
-            lang = config['common'].get('language', 'fr')
 
+        # Paramètres des sous-titres
+        subtitle_position = "bottom"
+        subtitle_size = 80
+        subtitle_bold = True
+        use_old_subtitle = False
+        lang = config['common'].get('language', 'fr')
+
+        # Extraction et formatage de la vidéo
+        return self.extract_short(
+            video_path, start_time, end_time, output_file,
+            zoom_factor, center_x, center_y, use_old_mode, format_916,
+            add_subtitles=with_subtitles,
+            subtitle_position=subtitle_position,
+            subtitle_size=subtitle_size,
+            subtitle_bold=subtitle_bold,
+            use_old_subtitle=use_old_subtitle,
+            lang=lang
+        )
+
+    def finalize_video_file(self, temp_output, title, with_subtitles, work_directory):
+        """Finalise le nom du fichier vidéo."""
+        if with_subtitles:
+            safe_title = re.sub(r'[\\/:*?"<>|]', '-', title.strip())
+            new_name = f"{safe_title}.mp4"
+            new_path = os.path.join(work_directory, new_name)
+            i = 1
+            while os.path.exists(new_path):
+                new_path = os.path.join(work_directory, f"{safe_title} ({i}).mp4")
+                i += 1
+            os.rename(temp_output, new_path)
+            return new_path
+        else:
+            base_name = os.path.splitext(os.path.basename(video_path))[0]  # Note: video_path non disponible ici
+            generic_path = os.path.join(work_directory, f"short_full_{base_name}.mp4")
+            os.rename(temp_output, generic_path)
+            return generic_path
+
+    def upload_to_youtube(self, video_path, title, description, tags, config):
+        """Télécharge la vidéo sur YouTube."""
+        st.info(t("uploading_youtube"))
+        category_id = "24"
+        tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+
+        try:
+            video_id = upload_video(
+                video_path, title, description, category_id, tags_list, "unlisted"
+            )
+        except Exception:
+            st.warning(t("directpublish_notags"))
+            video_id = upload_video(
+                video_path, title, description, category_id, [], "unlisted"
+            )
+
+        st.success(t("directpublish_success").format(video_id=video_id))
+        st.markdown(f"**Publication :** https://www.youtube.com/shorts/{video_id}")
+        return video_id
+
+    def organize_files(self, video_path, video_to_process, final_video, work_directory, config):
+        """Organise les fichiers dans les répertoires appropriés."""
+        st.info("Nettoyage et organisation des fichiers...")
+
+        temp_directory = os.path.expanduser(config['common'].get('temp_directory', work_directory))
+        archive_directory = os.path.expanduser(config['common'].get('archive_directory', work_directory))
+
+        os.makedirs(temp_directory, exist_ok=True)
+        os.makedirs(archive_directory, exist_ok=True)
+
+        # Déplacer la vidéo finale vers archive_directory
+        try:
+            archive_path = os.path.join(archive_directory, os.path.basename(final_video))
+            os.rename(final_video, archive_path)
+            st.success(f"Vidéo finale déplacée vers l'archive : {archive_path}")
+        except Exception as e:
+            st.warning(f"Impossible de déplacer la vidéo finale : {e}")
+
+        # Déplacer les vidéos intermédiaires vers temp_directory
+        videos_to_move = []
+
+        if os.path.exists(video_path):
+            videos_to_move.append(video_path)
+
+        if video_to_process != video_path and os.path.exists(video_to_process):
+            videos_to_move.append(video_to_process)
+
+        for file in os.listdir(work_directory):
+            if file.lower().endswith(('.mp4', '.mkv', '.mov', '.ogg')) and file.startswith('temp_'):
+                file_path = os.path.join(work_directory, file)
+                videos_to_move.append(file_path)
+
+        for video_file in videos_to_move:
+            try:
+                temp_path = os.path.join(temp_directory, os.path.basename(video_file))
+                os.rename(video_file, temp_path)
+                st.info(f"Déplacé vers temp : {os.path.basename(video_file)}")
+            except Exception as e:
+                st.warning(f"Impossible de déplacer {video_file} : {e}")
+
+    def trigger_webhooks(self, video_id, config):
+        """Déclenche les webhooks configurés."""
+        webhook_urls = config.get('directpublish', {}).get('webhook_urls', '').strip().split('\n')
+        webhook_urls = [u.strip() for u in webhook_urls if u.strip()]
+
+        if webhook_urls:
+            for webhook in webhook_urls:
+                try:
+                    response = requests.post(webhook, json={"video_id": video_id})
+                    if response.status_code == 200:
+                        st.success(t("directpublish_webhook_triggered").format(webhook=webhook))
+                    else:
+                        st.warning(t("directpublish_webhook_not_triggered").format(
+                            webhook=webhook, status_code=response.status_code))
+                except Exception as e:
+                    st.error(t("directpublish_webhook_error").format(webhook=webhook, error=str(e)))
+
+    def process_and_publish(self, video_path: str, work_directory: str, config: dict, with_subtitles: bool, custom_desc: str = ""):
+        """Fonction principale pour la publication en un clic."""
+        with st.spinner(t("directpublish_processing")):
+
+            # Étape 1 : Détection de l'orientation de la vidéo originale
+            orientation = self.detect_video_orientation(video_path)
+            st.info(f"Format vidéo détecté : {orientation}")
+
+            # Étape 2 : Suppression des silences
+            video_to_process = self.remove_silences_from_video(video_path, work_directory)
+            if video_to_process is None:
+                return
+
+            # Étape 3 : Vérification de la durée
+            if not self.check_video_duration_for_short(video_to_process):
+                return
+
+            # Étape 4 : Transcription automatique
+            st.info(t("auto_transcribing"))
+            transcript_plugin = self.plugin_manager.get_plugin('transcript')
+            st.session_state.transcript = transcript_plugin.transcribe_video(video_to_process, "srt")
+
+            # Étape 5 : Détermination des timecodes (vidéo complète)
+            clip = VideoFileClip(video_to_process)
+            total_duration = clip.duration
+            clip.close()
+
+            start_time = "00:00:00,000"
+            end_time = self.seconds_to_srt_time(total_duration)
+
+            # Étape 6 : Formatage au format Short (adapté à l'orientation)
             base_name = os.path.splitext(os.path.basename(video_path))[0]
             temp_output = os.path.join(work_directory, f"temp_short_full_{base_name}.mp4")
 
-            st.info(t("formatting_short"))
-            self.extract_short(
+            self.format_video_for_short(
                 video_to_process, start_time, end_time, temp_output,
-                zoom_factor, center_x, center_y, use_old_mode, format_916,
-                add_subtitles=with_subtitles,
-                subtitle_position=subtitle_position,
-                subtitle_size=subtitle_size,
-                subtitle_bold=subtitle_bold,
-                use_old_subtitle=use_old_subtitle,
-                lang=lang
+                with_subtitles, orientation, config
             )
 
-            # 5. Génération titre / description / tags
-            st.info(t("generating_content"))
-            parsed = self.parse_transcript(st.session_state.transcript)
-            plain_transcript = " ".join([e['text'].strip() for e in parsed if e['text'].strip()])
+            # Étape 7 : Génération des métadonnées
+            title, full_description, tags = self.generate_video_metadata(
+                st.session_state.transcript, config, custom_desc
+            )
 
-            title_prompt = t("shortextractor_suggest_title_prompt").format(segment_text=plain_transcript[:1500])
-            title = self.process_with_llm(title_prompt, config['llm']['llm_sys_prompt'], plain_transcript).strip()
+            # Étape 8 : Finalisation du fichier
+            final_video = self.finalize_video_file(temp_output, title, with_subtitles, work_directory)
 
-            desc_prompt = t("directpublish_desc_prompt") + "\n\n" + plain_transcript[:2000]
-            description = self.process_with_llm(desc_prompt, config['llm']['llm_sys_prompt'], plain_transcript)
+            # Étape 9 : Upload YouTube
+            video_id = self.upload_to_youtube(final_video, title, full_description, tags, config)
 
-            tag_prompt = t("directpublish_tag_generator")
-            tags = self.process_with_llm(tag_prompt, config['llm']['llm_sys_prompt'], plain_transcript)
-            extra_keywords = config.get('directpublish', {}).get('keywords', '').strip()
-            if extra_keywords:
-                tags = extra_keywords + ", " + tags
+            # Étape 10 : Organisation des fichiers
+            self.organize_files(video_path, video_to_process, final_video, work_directory, config)
 
-            introduction = config.get('directpublish', {}).get('introduction', '')
-            signature = config.get('directpublish', {}).get('signature', '')
-            parts = [introduction, description, custom_desc, signature]
-            full_description = "\n\n".join([p for p in parts if p]).strip()
-
-            # 6. Renommage final
-            final_video = temp_output
-            if with_subtitles:
-                # Sanitization minimale des caractères interdits, conservation des espaces et de la casse
-                safe_title = re.sub(r'[\\/:*?"<>|]', '-', title.strip())
-                new_name = f"{safe_title}.mp4"
-                new_path = os.path.join(work_directory, new_name)
-                i = 1
-                while os.path.exists(new_path):
-                    new_path = os.path.join(work_directory, f"{safe_title} ({i}).mp4")
-                    i += 1
-                os.rename(temp_output, new_path)
-                final_video = new_path
-            else:
-                generic_path = os.path.join(work_directory, f"short_full_{base_name}.mp4")
-                os.rename(temp_output, generic_path)
-                final_video = generic_path
-
-            # 7. Upload YouTube
-            st.info(t("uploading_youtube"))
-            category_id = "24"
-            tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
-
-            try:
-                video_id = upload_video(
-                    final_video, title, full_description, category_id, tags_list, "unlisted")
-            except Exception:
-                st.warning(t("directpublish_notags"))
-                video_id = upload_video(
-                    final_video, title, full_description, category_id, [], "unlisted")
-
-            st.success(t("directpublish_success").format(
-                video_id=video_id))
-            st.markdown(f"**Publication :** https://www.youtube.com/shorts/{video_id}")
-
-            # 8. GESTION DES FICHIERS - Déplacer les fichiers dans les répertoires appropriés
-            st.info("Nettoyage et organisation des fichiers...")
-
-            # Déplacer la vidéo finale uploadée vers archive_directory
-            try:
-                archive_path = os.path.join(archive_directory, os.path.basename(final_video))
-                os.rename(final_video, archive_path)
-                st.success(f"Vidéo finale déplacée vers l'archive : {archive_path}")
-            except Exception as e:
-                st.warning(f"Impossible de déplacer la vidéo finale : {e}")
-
-            # Déplacer toutes les vidéos intermédiaires et la vidéo originale vers temp_directory
-            videos_to_move = []
-
-            # Vérifier et ajouter la vidéo originale si elle existe encore
-            if os.path.exists(video_path):
-                videos_to_move.append(video_path)
-
-            # Vérifier et ajouter la vidéo après suppression des silences si différente
-            if video_to_process != video_path and os.path.exists(video_to_process):
-                videos_to_move.append(video_to_process)
-
-            # Déplacer toutes les vidéos du répertoire de travail qui commencent par "temp_"
-            for file in os.listdir(work_directory):
-                if file.lower().endswith(('.mp4', '.mkv', '.mov', '.ogg')) and file.startswith('temp_'):
-                    file_path = os.path.join(work_directory, file)
-                    videos_to_move.append(file_path)
-
-            # Déplacer les fichiers vers temp_directory
-            for video_file in videos_to_move:
-                try:
-                    temp_path = os.path.join(temp_directory, os.path.basename(video_file))
-                    os.rename(video_file, temp_path)
-                    st.info(f"Déplacé vers temp : {os.path.basename(video_file)}")
-                except Exception as e:
-                    st.warning(f"Impossible de déplacer {video_file} : {e}")
-
-            # 9. Webhooks
-            webhook_urls = config.get('directpublish', {}).get('webhook_urls', '').strip().split('\n')
-            webhook_urls = [u.strip() for u in webhook_urls if u.strip()]
-            if webhook_urls:
-                for webhook in webhook_urls:
-                    try:
-                        response = requests.post(webhook, json={"video_id": video_id})
-                        if response.status_code == 200:
-                            st.success(t("directpublish_webhook_triggered").format(webhook=webhook))
-                        else:
-                            st.warning(t("directpublish_webhook_not_triggered").format(
-                                webhook=webhook, status_code=response.status_code))
-                    except Exception as e:
-                        st.error(t("directpublish_webhook_error").format(webhook=webhook, error=str(e)))
+            # Étape 11 : Webhooks
+            self.trigger_webhooks(video_id, config)
 
     def run(self, config):
         st.header(t("shortextractor_header"))
