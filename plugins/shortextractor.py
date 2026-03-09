@@ -98,6 +98,22 @@ The title should be concise, click-optimized, with Title Case and spaces (exampl
     "uploading_youtube": "Uploading to YouTube...",
     "directpublish_desc_prompt": "Generate an engaging and optimized description for a YouTube Short based on the following transcript. Add relevant hashtags at the end.",
     "shortextractor_custom_desc": "Custom description to insert:",
+    "video_orientation_detected": "Video format detected: {orientation}",
+    "orientation_portrait": "portrait",
+    "orientation_landscape": "landscape",
+    "orientation_other": "other",
+    "orientation_unknown": "unknown",
+    "video_already_portrait": "Video already in portrait format - keeping original format",
+
+    # Traductions pour l'organisation des fichiers
+    "organizing_files": "Cleaning up and organizing files...",
+    "final_video_moved": "Final video moved to archive: {path}",
+    "temp_file_moved": "Moved to temp: {filename}",
+
+    # Message de publication amélioré
+    "publication_success": "✅ Video published successfully!",
+    "youtube_studio_link": "📊 YouTube Studio: https://studio.youtube.com/video/{video_id}/edit",
+    "youtube_short_link": "📱 YouTube Shorts: https://www.youtube.com/shorts/{video_id}",
 })
 
 translations["fr"].update({
@@ -182,6 +198,22 @@ Le titre doit être concis, optimisé pour les clics, en français, avec des maj
     "uploading_youtube": "Téléversement sur YouTube...",
     "directpublish_desc_prompt": "Génère une description engageante et optimisée pour un YouTube Short basée sur cette transcription. Ajoute des hashtags pertinents à la fin.",
     "shortextractor_custom_desc": "Description personnalisée à insérer :",
+    "video_orientation_detected": "Format vidéo détecté : {orientation}",
+    "orientation_portrait": "portrait",
+    "orientation_landscape": "paysage",
+    "orientation_other": "autre",
+    "orientation_unknown": "inconnu",
+    "video_already_portrait": "Vidéo déjà au format portrait - conservation du format original",
+
+    # Traductions pour l'organisation des fichiers
+    "organizing_files": "Nettoyage et organisation des fichiers...",
+    "final_video_moved": "Vidéo finale déplacée vers l'archive : {path}",
+    "temp_file_moved": "Déplacé vers temp : {filename}",
+
+    # Message de publication amélioré
+    "publication_success": "✅ Vidéo publiée avec succès !",
+    "youtube_studio_link": "📊 YouTube Studio : https://studio.youtube.com/video/{video_id}/edit",
+    "youtube_short_link": "📱 YouTube Shorts : https://www.youtube.com/shorts/{video_id}",
 })
 
 
@@ -497,12 +529,24 @@ class ShortextractorPlugin(Plugin):
 
             # Portrait (9:16) : hauteur > largeur, ratio proche de 0.5625
             if height > width and abs(ratio - 9/16) < 0.1:
-                return "portrait"
+                orientation = "portrait"
             # Paysage (16:9) : largeur > hauteur, ratio proche de 1.777
             elif width > height and abs(ratio - 16/9) < 0.1:
-                return "landscape"
+                orientation = "landscape"
             else:
-                return "other"
+                orientation = "other"
+
+            # Afficher le message avec la traduction appropriée
+            orientation_text = {
+                "portrait": t("orientation_portrait"),
+                "landscape": t("orientation_landscape"),
+                "other": t("orientation_other"),
+                "unknown": t("orientation_unknown")
+            }.get(orientation, orientation)
+
+            st.info(t("video_orientation_detected").format(orientation=orientation_text))
+            return orientation
+
         except Exception as e:
             st.warning(f"Impossible de détecter l'orientation de la vidéo: {e}")
             return "unknown"
@@ -591,7 +635,7 @@ class ShortextractorPlugin(Plugin):
         # Paramètres de base
         if orientation == "portrait":
             # Pour une vidéo déjà en portrait, on garde le format original
-            st.info("Vidéo déjà au format portrait - conservation du format original")
+            st.info(t("video_already_portrait"))
             zoom_factor = 1.0
             center_x = 0.5
             center_y = 0.5
@@ -644,7 +688,7 @@ class ShortextractorPlugin(Plugin):
             return generic_path
 
     def upload_to_youtube(self, video_path, title, description, tags, config):
-        """Télécharge la vidéo sur YouTube."""
+        """Télécharge la vidéo sur YouTube et affiche les liens de publication."""
         st.info(t("uploading_youtube"))
         category_id = "24"
         tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
@@ -659,13 +703,36 @@ class ShortextractorPlugin(Plugin):
                 video_path, title, description, category_id, [], "unlisted"
             )
 
-        st.success(t("directpublish_success").format(video_id=video_id))
-        st.markdown(f"**Publication :** https://www.youtube.com/shorts/{video_id}")
+        # Message de succès avec les deux liens importants
+        st.success(t("publication_success"))
+
+        # Affichage des liens dans un cadre stylisé
+        st.markdown("---")
+        st.markdown(f"""
+        <div style="padding: 10px; border-radius: 5px; background-color: #f0f2f6;">
+            <b>{t('youtube_short_link').split(':')[0]}:</b><br>
+            <a href="https://www.youtube.com/shorts/{video_id}" target="_blank">
+                https://www.youtube.com/shorts/{video_id}
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div style="padding: 10px; border-radius: 5px; background-color: #f0f2f6;">
+            <b>{t('youtube_studio_link').split(':')[0]}:</b><br>
+            <a href="https://studio.youtube.com/video/{video_id}/edit" target="_blank">
+                https://studio.youtube.com/video/{video_id}/edit
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("---")
+
         return video_id
 
     def organize_files(self, video_path, video_to_process, final_video, work_directory, config):
         """Organise les fichiers dans les répertoires appropriés."""
-        st.info("Nettoyage et organisation des fichiers...")
+        st.info(t("organizing_files"))
 
         temp_directory = os.path.expanduser(config['common'].get('temp_directory', work_directory))
         archive_directory = os.path.expanduser(config['common'].get('archive_directory', work_directory))
@@ -677,7 +744,7 @@ class ShortextractorPlugin(Plugin):
         try:
             archive_path = os.path.join(archive_directory, os.path.basename(final_video))
             os.rename(final_video, archive_path)
-            st.success(f"Vidéo finale déplacée vers l'archive : {archive_path}")
+            st.success(t("final_video_moved").format(path=archive_path))
         except Exception as e:
             st.warning(f"Impossible de déplacer la vidéo finale : {e}")
 
@@ -699,7 +766,7 @@ class ShortextractorPlugin(Plugin):
             try:
                 temp_path = os.path.join(temp_directory, os.path.basename(video_file))
                 os.rename(video_file, temp_path)
-                st.info(f"Déplacé vers temp : {os.path.basename(video_file)}")
+                st.info(t("temp_file_moved").format(filename=os.path.basename(video_file)))
             except Exception as e:
                 st.warning(f"Impossible de déplacer {video_file} : {e}")
 
