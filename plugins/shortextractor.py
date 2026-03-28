@@ -1052,13 +1052,16 @@ class ShortextractorPlugin(Plugin):
             )
 
             # Affichage des métadonnées pour copie
+            tags_list = (
+                [t.strip() for t in tags.split(",")] if isinstance(tags, str) else tags
+            )
             st.markdown("### 📋 Métadonnées générées")
             with st.expander("Voir/Copier les métadonnées", expanded=True):
                 st.text_input("Titre", value=title, key="meta_title")
                 st.text_area(
                     "Description", value=full_description, key="meta_desc", height=150
                 )
-                st.text_input("Tags", value=", ".join(tags), key="meta_tags")
+                st.text_input("Tags", value=", ".join(tags_list), key="meta_tags")
 
             # Étape 8 : Finalisation du fichier
             final_video = self.finalize_video_file(
