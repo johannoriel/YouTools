@@ -867,6 +867,10 @@ class ShortextractorPlugin(Plugin):
         category_id = "24"
         tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
 
+        MAX_TAGS = 35
+        if len(tags_list) > MAX_TAGS:
+            tags_list = tags_list[:MAX_TAGS]
+
         try:
             video_id = upload_video(
                 video_path, title, description, category_id, tags_list, "unlisted"
