@@ -15,109 +15,113 @@ from lib.video_utils import normalize_full_audio
 
 
 # Ajout des traductions spécifiques à ce plugin
-translations["en"].update({
-    "directpublish_tab": "Direct Publish",
-    "directpublish_header": "Publish Video to YouTube",
-    "directpublish_select_video": "Select a video to publish",
-    "directpublish_remove_silences": "Remove silences before publishing",
-    "directpublish_video_category": "Video category",
-    "directpublish_publish_button": "Process",
-    "directpublish_processing": "Processing video...",
-    "directpublish_success": "Video successfully published! Video URL: https://www.youtube.com/watch?v={video_id}, Edition : https://studio.youtube.com/video/{video_id}/edit",
-    "directpublish_error": "An error occurred during publication: {error}",
-    "directpublish_generating_title": "Generating video title...",
-    "directpublish_generating_description": "Generating video description...",
-    "directpublish_generating_transcription": "Generating video transcription...",
-    "directpublish_silence_trim": "Suppression of silences...",
-    "directpublish_upload": "Uploading...",
-    "publish_signature": "Signature to add in video description",
-    "publish_signature_default": "",
-    "publish_introduction": "Introduction to add in video description",
-    "publish_introduction_default": "",
-    "directpublish_replace_green_screen": "Replace green screen background",
-    "directpublish_select_background": "Select a background video",
-    "directpublish_replacing_background": "Replacing green screen background...",
-    "directpublish_preprompt": "Change prompt is you wish (be specific):",
-    "directpublish_title_generator": "Generate a catchy title for a YouTube video based on this summary, not exceeding 100 characters, without commenting, just the title, without quotation marks.",
-    "directpublish_tag_generator": "Generate a comma list of keywords describing the subject, without any comment or adding, just a raw list of comma seaparated keywords",
-    "directpublish_addings": "Add any text to your description (will not be modified)",
-    "directpublish_notags": "Invalid tags - upload without them",
-    "directpublish_dopublish": "Publish to YouTube",
-    "directpublish_triggering_webhook": "Triggering webhook: {webhook}",
-    "directpublish_webhook_triggered": "Webhook {webhook} triggered successfully",
-    "directpublish_webhook_not_triggered": "Failed to trigger webhook {webhook}. Status code: {status_code}",
-    "directpublish_webhook_error": "Error triggering webhook {webhook}: {error}",
-    "webhook_urls": "Webhook URLs (one per line, optional)",
-    "directpublish_no_webhooks": "No webhooks configured",
-    "directpublish_do_llm": "Use LLM to summerize",
-    "directpublish_title": "Title of the video",
-    "directpublish_keywords": "Keywords to add to the video (comma-separated)",
-    "directpublish_custom_thumbnail": "Use custom thumbnail",
-    "directpublish_select_thumbnail": "Select a thumbnail image",
-    "directpublish_uploading_thumbnail": "Uploading thumbnail...",
-    "directpublish_thumbnail_success": "Thumbnail successfully uploaded!",
-    "directpublish_thumbnail_error": "Error uploading thumbnail: {error}",
-    "directpublish_run_editing": "Run editing operations",
-    "directpublish_edit_operations": "Edit Operations",
-    "directpublish_performing_editing": "Performing editing operations...",
-    "directpublish_normalize_audio": "Normalize audio before publishing",
-    "directpublish_normalizing_audio": "Normalizing audio...",
-    # Nouveaux ajouts
-    "directpublish_suggest_title": "Suggest title",
-    "directpublish_suggest_title_prompt": """Suggest a catchy, engaging title for a YouTube video based on the following transcript. The title should be concise, click-optimized, with Title Case (example: Amazing AI Trick You Need To Try!). Respond only with the title, no extra text.""",
-})
+translations["en"].update(
+    {
+        "directpublish_tab": "Direct Publish",
+        "directpublish_header": "Publish Video to YouTube",
+        "directpublish_select_video": "Select a video to publish",
+        "directpublish_remove_silences": "Remove silences before publishing",
+        "directpublish_video_category": "Video category",
+        "directpublish_publish_button": "Process",
+        "directpublish_processing": "Processing video...",
+        "directpublish_success": "Video successfully published! Video URL: https://www.youtube.com/watch?v={video_id}, Edition : https://studio.youtube.com/video/{video_id}/edit",
+        "directpublish_error": "An error occurred during publication: {error}",
+        "directpublish_generating_title": "Generating video title...",
+        "directpublish_generating_description": "Generating video description...",
+        "directpublish_generating_transcription": "Generating video transcription...",
+        "directpublish_silence_trim": "Suppression of silences...",
+        "directpublish_upload": "Uploading...",
+        "publish_signature": "Signature to add in video description",
+        "publish_signature_default": "",
+        "publish_introduction": "Introduction to add in video description",
+        "publish_introduction_default": "",
+        "directpublish_replace_green_screen": "Replace green screen background",
+        "directpublish_select_background": "Select a background video",
+        "directpublish_replacing_background": "Replacing green screen background...",
+        "directpublish_preprompt": "Change prompt is you wish (be specific):",
+        "directpublish_title_generator": "Generate a catchy title for a YouTube video based on this summary, not exceeding 100 characters, without commenting, just the title, without quotation marks.",
+        "directpublish_tag_generator": "Generate a comma list of keywords describing the subject, without any comment or adding, just a raw list of comma seaparated keywords",
+        "directpublish_addings": "Add any text to your description (will not be modified)",
+        "directpublish_notags": "Invalid tags - upload without them",
+        "directpublish_dopublish": "Publish to YouTube",
+        "directpublish_triggering_webhook": "Triggering webhook: {webhook}",
+        "directpublish_webhook_triggered": "Webhook {webhook} triggered successfully",
+        "directpublish_webhook_not_triggered": "Failed to trigger webhook {webhook}. Status code: {status_code}",
+        "directpublish_webhook_error": "Error triggering webhook {webhook}: {error}",
+        "webhook_urls": "Webhook URLs (one per line, optional)",
+        "directpublish_no_webhooks": "No webhooks configured",
+        "directpublish_do_llm": "Use LLM to summerize",
+        "directpublish_title": "Title of the video",
+        "directpublish_keywords": "Keywords to add to the video (comma-separated)",
+        "directpublish_custom_thumbnail": "Use custom thumbnail",
+        "directpublish_select_thumbnail": "Select a thumbnail image",
+        "directpublish_uploading_thumbnail": "Uploading thumbnail...",
+        "directpublish_thumbnail_success": "Thumbnail successfully uploaded!",
+        "directpublish_thumbnail_error": "Error uploading thumbnail: {error}",
+        "directpublish_run_editing": "Run editing operations",
+        "directpublish_edit_operations": "Edit Operations",
+        "directpublish_performing_editing": "Performing editing operations...",
+        "directpublish_normalize_audio": "Normalize audio before publishing",
+        "directpublish_normalizing_audio": "Normalizing audio...",
+        # Nouveaux ajouts
+        "directpublish_suggest_title": "Suggest title",
+        "directpublish_suggest_title_prompt": """Suggest a catchy, engaging title for a YouTube video based on the following transcript. The title should be concise, click-optimized, with Title Case (example: Amazing AI Trick You Need To Try!). Respond only with the title, no extra text.""",
+    }
+)
 
-translations["fr"].update({
-    "directpublish_tab": "Publication Directe",
-    "directpublish_header": "Publier une Vidéo sur YouTube",
-    "directpublish_select_video": "Sélectionner une vidéo à publier",
-    "directpublish_remove_silences": "Retirer les silences avant la publication",
-    "directpublish_video_category": "Catégorie de la vidéo",
-    "directpublish_publish_button": "Lancer le traitement",
-    "directpublish_processing": "Traitement de la vidéo en cours...",
-    "directpublish_success": "Vidéo publiée avec succès ! URL de la vidéo : https://www.youtube.com/watch?v={video_id}, édition : https://studio.youtube.com/video/{video_id}/edit",
-    "directpublish_error": "Une erreur s'est produite lors de la publication : {error}",
-    "directpublish_generating_title": "Génération du titre de la vidéo...",
-    "directpublish_generating_description": "Génération de la description de la vidéo...",
-    "directpublish_generating_transcription": "Génération de la transcription...",
-    "directpublish_silence_trim": "Suppression des silences...",
-    "directpublish_upload": "Téléversement...",
-    "publish_signature": "Signature à ajouter à la description de la vidéo",
-    "publish_signature_default": "",
-    "publish_introduction": "Introduction à ajouter à la description de la vidéo",
-    "publish_introduction_default": "",
-    "directpublish_replace_green_screen": "Remplacer le fond vert",
-    "directpublish_select_background": "Sélectionner une vidéo de fond",
-    "directpublish_replacing_background": "Remplacement du fond vert...",
-    "directpublish_preprompt": "Modifiez le prompt si besoin (rajoutez des éléments spécifiques):",
-    "directpublish_title_generator": "Génère un titre accrocheur pour une vidéo YouTube basée sur ce résumé, sans dépasser 100 caractères, sans commenter, juste le titre, sans guillemets.",
-    "directpublish_tag_generator": "Génère une liste de mots-clés décrivant le sujet, sans commentaire ni ajout, juste une liste brute séparée par des virgules",
-    "directpublish_addings": "Rajoutez du texte à votre description (ne sera pas modifié)",
-    "directpublish_notags": "Tags invalides - upload sans eux",
-    "directpublish_dopublish": "Publier sur YouTube",
-    "directpublish_triggering_webhook": "Déclenchement du webhook : {webhook}",
-    "directpublish_webhook_triggered": "Webhook {webhook} déclenché avec succès",
-    "directpublish_webhook_not_triggered": "Échec du déclenchement du webhook {webhook}. Code de statut : {status_code}",
-    "directpublish_webhook_error": "Erreur lors du déclenchement du webhook {webhook} : {error}",
-    "webhook_urls": "URLs des Webhooks (une par ligne, optionnel)",
-    "directpublish_no_webhooks": "Aucun webhook configuré",
-    "directpublish_do_llm": "Utiliser le LLM pour résumer",
-    "directpublish_title": "Titre de la vidéo",
-    "directpublish_keywords": "Mots-clés à ajouter à la vidéo (séparés par des virgules)",
-    "directpublish_custom_thumbnail": "Utiliser une miniature personnalisée",
-    "directpublish_select_thumbnail": "Sélectionner une image pour la miniature",
-    "directpublish_uploading_thumbnail": "Téléversement de la miniature...",
-    "directpublish_thumbnail_success": "Miniature téléversée avec succès !",
-    "directpublish_thumbnail_error": "Erreur lors du téléversement de la miniature : {error}",
-    "directpublish_run_editing": "Lancer les opérations d'édition",
-    "directpublish_edit_operations": "Opérations d'édition",
-    "directpublish_performing_editing": "Exécution des opérations d'édition...",
-    "directpublish_normalize_audio": "Normaliser le son avant publication",
-    "directpublish_normalizing_audio": "Normalisation du son en cours...",
-    # Nouveaux ajouts
-    "directpublish_suggest_title": "Suggérer un titre",
-    "directpublish_suggest_title_prompt": """Suggérez un titre accrocheur et engageant pour une vidéo YouTube basée sur la transcription suivante. Le titre doit être concis, optimisé pour les clics, en français, avec des majuscules (exemple : Astuce IA Incroyable à Essayer !). Répondez uniquement avec le titre, sans texte supplémentaire.""",
-})
+translations["fr"].update(
+    {
+        "directpublish_tab": "Publication Directe",
+        "directpublish_header": "Publier une Vidéo sur YouTube",
+        "directpublish_select_video": "Sélectionner une vidéo à publier",
+        "directpublish_remove_silences": "Retirer les silences avant la publication",
+        "directpublish_video_category": "Catégorie de la vidéo",
+        "directpublish_publish_button": "Lancer le traitement",
+        "directpublish_processing": "Traitement de la vidéo en cours...",
+        "directpublish_success": "Vidéo publiée avec succès ! URL de la vidéo : https://www.youtube.com/watch?v={video_id}, édition : https://studio.youtube.com/video/{video_id}/edit",
+        "directpublish_error": "Une erreur s'est produite lors de la publication : {error}",
+        "directpublish_generating_title": "Génération du titre de la vidéo...",
+        "directpublish_generating_description": "Génération de la description de la vidéo...",
+        "directpublish_generating_transcription": "Génération de la transcription...",
+        "directpublish_silence_trim": "Suppression des silences...",
+        "directpublish_upload": "Téléversement...",
+        "publish_signature": "Signature à ajouter à la description de la vidéo",
+        "publish_signature_default": "",
+        "publish_introduction": "Introduction à ajouter à la description de la vidéo",
+        "publish_introduction_default": "",
+        "directpublish_replace_green_screen": "Remplacer le fond vert",
+        "directpublish_select_background": "Sélectionner une vidéo de fond",
+        "directpublish_replacing_background": "Remplacement du fond vert...",
+        "directpublish_preprompt": "Modifiez le prompt si besoin (rajoutez des éléments spécifiques):",
+        "directpublish_title_generator": "Génère un titre accrocheur pour une vidéo YouTube basée sur ce résumé, sans dépasser 100 caractères, sans commenter, juste le titre, sans guillemets.",
+        "directpublish_tag_generator": "Génère une liste de mots-clés décrivant le sujet, sans commentaire ni ajout, juste une liste brute séparée par des virgules",
+        "directpublish_addings": "Rajoutez du texte à votre description (ne sera pas modifié)",
+        "directpublish_notags": "Tags invalides - upload sans eux",
+        "directpublish_dopublish": "Publier sur YouTube",
+        "directpublish_triggering_webhook": "Déclenchement du webhook : {webhook}",
+        "directpublish_webhook_triggered": "Webhook {webhook} déclenché avec succès",
+        "directpublish_webhook_not_triggered": "Échec du déclenchement du webhook {webhook}. Code de statut : {status_code}",
+        "directpublish_webhook_error": "Erreur lors du déclenchement du webhook {webhook} : {error}",
+        "webhook_urls": "URLs des Webhooks (une par ligne, optionnel)",
+        "directpublish_no_webhooks": "Aucun webhook configuré",
+        "directpublish_do_llm": "Utiliser le LLM pour résumer",
+        "directpublish_title": "Titre de la vidéo",
+        "directpublish_keywords": "Mots-clés à ajouter à la vidéo (séparés par des virgules)",
+        "directpublish_custom_thumbnail": "Utiliser une miniature personnalisée",
+        "directpublish_select_thumbnail": "Sélectionner une image pour la miniature",
+        "directpublish_uploading_thumbnail": "Téléversement de la miniature...",
+        "directpublish_thumbnail_success": "Miniature téléversée avec succès !",
+        "directpublish_thumbnail_error": "Erreur lors du téléversement de la miniature : {error}",
+        "directpublish_run_editing": "Lancer les opérations d'édition",
+        "directpublish_edit_operations": "Opérations d'édition",
+        "directpublish_performing_editing": "Exécution des opérations d'édition...",
+        "directpublish_normalize_audio": "Normaliser le son avant publication",
+        "directpublish_normalizing_audio": "Normalisation du son en cours...",
+        # Nouveaux ajouts
+        "directpublish_suggest_title": "Suggérer un titre",
+        "directpublish_suggest_title_prompt": """Suggérez un titre accrocheur et engageant pour une vidéo YouTube basée sur la transcription suivante. Le titre doit être concis, optimisé pour les clics, en français, avec des majuscules (exemple : Astuce IA Incroyable à Essayer !). Répondez uniquement avec le titre, sans texte supplémentaire.""",
+    }
+)
 
 
 def cut_string(text, limit=500):
@@ -129,7 +133,7 @@ def cut_string(text, limit=500):
     cut_text = text[:limit]
 
     # Find the last position of a space to avoid cutting in the middle of a word
-    last_space = cut_text.rfind(' ')
+    last_space = cut_text.rfind(" ")
 
     # Return the text up to the last space
     return cut_text[:last_space]
@@ -138,33 +142,33 @@ def cut_string(text, limit=500):
 class DirectpublishPlugin(Plugin):
     def __init__(self, name: str, plugin_manager):
         super().__init__(name, plugin_manager)
-        self.trimsilences_plugin = self.plugin_manager.get_plugin(
-            'trimsilences')
-        self.transcript_plugin = self.plugin_manager.get_plugin('transcript')
-        self.chromakey_plugin = self.plugin_manager.get_plugin('chromakey')
+        self.trimsilences_plugin = self.plugin_manager.get_plugin("trimsilences")
+        self.transcript_plugin = self.plugin_manager.get_plugin("transcript")
+        self.chromakey_plugin = self.plugin_manager.get_plugin("chromakey")
 
     def get_config_fields(self):
         return {
             "introduction": {
                 "type": "textarea",
                 "label": t("publish_introduction"),
-                "default": t("publish_introduction_default")
+                "default": t("publish_introduction_default"),
             },
             "signature": {
                 "type": "textarea",
                 "label": t("publish_signature"),
-                "default": t("publish_signature_default")
+                "default": t("publish_signature_default"),
             },
             "webhook_urls": {
                 "type": "textarea",
                 "label": t("webhook_urls"),
-                "default": ""
+                "default": "",
             },
             "keywords": {
                 "type": "textarea",
                 "label": t("directpublish_keywords"),
-                "default": ""
-            }, }
+                "default": "",
+            },
+        }
 
     def get_tabs(self):
         return [{"name": t("directpublish_tab"), "plugin": "directpublish"}]
@@ -173,11 +177,11 @@ class DirectpublishPlugin(Plugin):
         """Parse SRT transcript to extract plain text."""
         if not transcript:
             return ""
-        lines = transcript.split('\n')
+        lines = transcript.split("\n")
         text_parts = []
         for line in lines:
             # Skip lines with timecodes and numbers
-            if ' --> ' not in line and not line.strip().isdigit() and line.strip():
+            if " --> " not in line and not line.strip().isdigit() and line.strip():
                 text_parts.append(line.strip())
         return " ".join(text_parts)
 
@@ -185,7 +189,7 @@ class DirectpublishPlugin(Plugin):
         st.header(t("directpublish_header"))
 
         # Sélection de la vidéo
-        work_directory = config['common']['work_directory']
+        work_directory = config["common"]["work_directory"]
         video_files = list_all_video_files(work_directory)
         if not video_files:
             st.warning(t("transcript_no_videos"))
@@ -194,17 +198,15 @@ class DirectpublishPlugin(Plugin):
         selected_video = st.selectbox(
             t("directpublish_select_video"),
             options=[v[0] for v in video_files],
-            index=0  # Sélectionne par défaut la vidéo la plus récente
+            index=0,  # Sélectionne par défaut la vidéo la plus récente
         )
-        selected_video_path = next(
-            v[1] for v in video_files if v[0] == selected_video)
+        selected_video_path = next(v[1] for v in video_files if v[0] == selected_video)
 
         # Option pour retirer les silences
         run_editing = st.checkbox(t("directpublish_run_editing"))
         operations = ""
         if run_editing:
-            video_name = os.path.splitext(
-                os.path.basename(selected_video_path))[0]
+            video_name = os.path.splitext(os.path.basename(selected_video_path))[0]
             export_dir = work_directory
             pattern = os.path.join(work_directory, f"{video_name} - *.json")
             json_files = glob.glob(pattern)
@@ -213,34 +215,39 @@ class DirectpublishPlugin(Plugin):
             else:
                 export_file = max(json_files, key=os.path.getctime)
                 if os.path.exists(export_file):
-                    with open(export_file, 'r', encoding='utf-8') as f:
+                    with open(export_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        operations = data.get('operations', '')
+                        operations = data.get("operations", "")
                         operations = "\n".join(operations)
             operations = st.text_area(
                 t("directpublish_edit_operations"),
                 value=operations,
                 height=150,
-                key="edit_operations_area"
+                key="edit_operations_area",
             )
 
         remove_silences = st.checkbox(t("directpublish_remove_silences"))
         normalize_audio = st.checkbox(t("directpublish_normalize_audio"))
-        replace_green_screen = st.checkbox(
-            t("directpublish_replace_green_screen"))
+        replace_green_screen = st.checkbox(t("directpublish_replace_green_screen"))
 
         # Sélection du fond si le remplacement du fond vert est activé
         background_video = None
         if replace_green_screen:
-            default_background = config['chromakey'].get(
-                "default_background", "")  # Récupérer le fond par défaut
-            background_directory = config['chromakey']['background_directory']
-            background_files = [f for f in os.listdir(
-                background_directory) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+            default_background = config["chromakey"].get(
+                "default_background", ""
+            )  # Récupérer le fond par défaut
+            background_directory = config["chromakey"]["background_directory"]
+            background_files = [
+                f
+                for f in os.listdir(background_directory)
+                if f.lower().endswith((".mp4", ".avi", ".mov"))
+            ]
             background_video = st.selectbox(
-                t("directpublish_select_background"), background_files,
-                index=background_files.index(
-                    default_background) if default_background in background_files else 0
+                t("directpublish_select_background"),
+                background_files,
+                index=background_files.index(default_background)
+                if default_background in background_files
+                else 0,
             )
 
         do_llm = st.checkbox(t("directpublish_do_llm"), value=False)
@@ -250,7 +257,10 @@ class DirectpublishPlugin(Plugin):
         if do_llm:
             suggest_title = st.checkbox(t("directpublish_suggest_title"), value=True)
             user_prompt = st.text_area(
-                t("directpublish_preprompt"), value=st.session_state.rag_question, key="rag_prompt_key")
+                t("directpublish_preprompt"),
+                value=st.session_state.rag_question,
+                key="rag_prompt_key",
+            )
             st.session_state.rag_question = user_prompt
 
         title = st.text_input(t("directpublish_title"), max_chars=99)
@@ -260,17 +270,19 @@ class DirectpublishPlugin(Plugin):
         if use_custom_thumbnail:
             thumbnail_dir = work_directory
             thumbnail_files = sorted(
-                [f for f in os.listdir(thumbnail_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))],
+                [
+                    f
+                    for f in os.listdir(thumbnail_dir)
+                    if f.lower().endswith((".png", ".jpg", ".jpeg"))
+                ],
                 key=lambda x: os.path.getmtime(os.path.join(thumbnail_dir, x)),
-                reverse=True  # Pour avoir les plus récentes en premier
+                reverse=True,  # Pour avoir les plus récentes en premier
             )
             if thumbnail_files:
                 selected_thumbnail = st.selectbox(
-                    t("directpublish_select_thumbnail"),
-                    thumbnail_files
+                    t("directpublish_select_thumbnail"), thumbnail_files
                 )
-                thumbnail_path = os.path.join(
-                    thumbnail_dir, selected_thumbnail)
+                thumbnail_path = os.path.join(thumbnail_dir, selected_thumbnail)
             else:
                 st.warning("No thumbnail images found in directory")
 
@@ -281,16 +293,19 @@ class DirectpublishPlugin(Plugin):
             t("directpublish_video_category"),
             options=list(yt_categories.keys()),
             index=category_keys.index("28"),
-            format_func=lambda x: yt_categories[x]
+            format_func=lambda x: yt_categories[x],
         )
 
-        if 'rag_question' not in st.session_state:
-            st.session_state.rag_question = config['ragllm']['llm_prompt']
+        if "rag_question" not in st.session_state:
+            st.session_state.rag_question = config["ragllm"]["llm_prompt"]
 
-        if 'addings' not in st.session_state:
+        if "addings" not in st.session_state:
             st.session_state.addings = ""
-        addings = st.text_area(t('directpublish_addings'),
-                               value=st.session_state.addings, key="directpublish_addings")
+        addings = st.text_area(
+            t("directpublish_addings"),
+            value=st.session_state.addings,
+            key="directpublish_addings",
+        )
         st.session_state.addings = addings
 
         if st.button(t("directpublish_publish_button")):
@@ -298,35 +313,52 @@ class DirectpublishPlugin(Plugin):
                 # try:
                 video_to_process = selected_video_path
 
-                if run_editing and 'edit_operations_area' in st.session_state:
+                if run_editing and "edit_operations_area" in st.session_state:
                     st.text(t("directpublish_performing_editing"))
-                    font = config.get('movied', {}).get('font', 'Arial')
-                    font_size = config.get('movied', {}).get('font_size', 100)
-                    movied_plugin = self.plugin_manager.get_plugin('movied')
+                    font = config.get("movied", {}).get("font", "Arial")
+                    font_size = config.get("movied", {}).get("font_size", 100)
+                    movied_plugin = self.plugin_manager.get_plugin("movied")
                     if replace_green_screen and background_video:
                         movied_plugin.execute_operations(
-                            video_to_process, st.session_state.edit_operations_area, font, font_size, t("movied_green_background"))
+                            video_to_process,
+                            st.session_state.edit_operations_area,
+                            font,
+                            font_size,
+                            t("movied_green_background"),
+                        )
                     else:
                         movied_plugin.execute_operations(
-                            video_to_process, st.session_state.edit_operations_area, font, font_size, t("movied_original_video") )
+                            video_to_process,
+                            st.session_state.edit_operations_area,
+                            font,
+                            font_size,
+                            t("movied_original_video"),
+                        )
 
-                    video_to_process = os.path.splitext(video_to_process)[
-                        0] + "_edited.mp4"
+                    video_to_process = (
+                        os.path.splitext(video_to_process)[0] + "_edited.mp4"
+                    )
                     st.text(video_to_process)
 
                 # 1. Retirer les silences si demandé
                 if remove_silences:
                     st.text(t("directpublish_silence_trim"))
-                    result, reduction, original_duration, final_duration = self.trimsilences_plugin.remove_silence(
-                        video_to_process,
-                        work_directory
+                    result, reduction, original_duration, final_duration = (
+                        self.trimsilences_plugin.remove_silence(
+                            video_to_process, work_directory
+                        )
                     )
-                    if isinstance(result, str) and (result.startswith("Erreur") or result.startswith("Une erreur")):
+                    if isinstance(result, str) and (
+                        result.startswith("Erreur") or result.startswith("Une erreur")
+                    ):
                         st.error(result)
                         return
                     else:
+
                         def format_duration(seconds):
-                            seconds = float(seconds)  # Convertir en float pour gérer les chaînes
+                            seconds = float(
+                                seconds
+                            )  # Convertir en float pour gérer les chaînes
                             hours = int(seconds // 3600)
                             minutes = int((seconds % 3600) // 60)
                             secs = int(seconds % 60)
@@ -335,52 +367,71 @@ class DirectpublishPlugin(Plugin):
                             return f"{minutes:02d}:{secs:02d}"
 
                         st.info(
-                            f"Reduction: {reduction} | Initial duration: {format_duration(original_duration)} | Final duration: {format_duration(final_duration)}")
+                            f"Reduction: {reduction} | Initial duration: {format_duration(original_duration)} | Final duration: {format_duration(final_duration)}"
+                        )
                     video_to_process = result
                     st.text(video_to_process)
 
                 if normalize_audio:
                     st.text(t("directpublish_normalizing_audio"))
-                    reference_audio_path = config.get("movied", {}).get("movied_reference_audio", "")
+                    reference_audio_path = config.get("movied", {}).get(
+                        "movied_reference_audio", ""
+                    )
                     try:
-                        normalize_full_audio(video_to_process, reference_audio_path, make_backup=True)
+                        normalize_full_audio(
+                            video_to_process, reference_audio_path, make_backup=True
+                        )
                         st.info("Audio normalized successfully")
                     except Exception as e:
-                        st.error(t("directpublish_error").format(error=f"Audio normalization failed: {str(e)}"))
+                        st.error(
+                            t("directpublish_error").format(
+                                error=f"Audio normalization failed: {str(e)}"
+                            )
+                        )
 
                 # 2. Remplacer le fond vert si demandé
                 if replace_green_screen and background_video:
                     st.text(t("directpublish_replacing_background"))
                     background_path = os.path.join(
-                        config['chromakey']['background_directory'], background_video)
+                        config["chromakey"]["background_directory"], background_video
+                    )
                     result_filename = f"chroma_{os.path.basename(video_to_process)}"
                     result_path = os.path.join(work_directory, result_filename)
-                    target_color_rgb = config['chromakey']["default_target_color"]
-                    target_color_rgb = [int(target_color_rgb.lstrip('#')[
-                                            i:i+2], 16) for i in (0, 2, 4)]
+                    target_color_rgb = config["chromakey"]["default_target_color"]
+                    target_color_rgb = [
+                        int(target_color_rgb.lstrip("#")[i : i + 2], 16)
+                        for i in (0, 2, 4)
+                    ]
                     replace_background(
-                        video_to_process, background_path, result_path, target_color_rgb)
+                        video_to_process, background_path, result_path, target_color_rgb
+                    )
                     video_to_process = result_path
                     st.text(video_to_process)
 
                 # 3. Transcrire la vidéo
-                signature = config['directpublish']['signature']
-                introduction = config['directpublish']['introduction']
-                tags = config['directpublish'].get('keywords', '').strip()
+                signature = config["directpublish"]["signature"]
+                introduction = config["directpublish"]["introduction"]
+                tags = config["directpublish"].get("keywords", "").strip()
                 if do_llm:
                     st.text(t("directpublish_generating_transcription"))
-                    transcript = self.transcript_plugin.transcribe_video(video_to_process,"txt")
+                    transcript = self.transcript_plugin.transcribe_video(
+                        video_to_process, "txt"
+                    )
                     st.code(transcript)
-                    st.session_state.transcript = transcript  # May bu used by other plugins
-                    with open(os.path.join(work_directory, "transcript.txt"), "w", encoding="utf-8") as f:
+                    st.session_state.transcript = (
+                        transcript  # May bu used by other plugins
+                    )
+                    with open(
+                        os.path.join(work_directory, "transcript.txt"),
+                        "w",
+                        encoding="utf-8",
+                    ) as f:
                         f.write(transcript)
 
                     # 4. Générer un résumé du transcript
                     st.text(t("directpublish_generating_description"))
                     description = self.process_with_llm(
-                        user_prompt,
-                        config['llm']['llm_sys_prompt'],
-                        transcript
+                        user_prompt, config["llm"]["llm_sys_prompt"], transcript
                     )
                     st.code(description)
 
@@ -394,28 +445,40 @@ class DirectpublishPlugin(Plugin):
                         # Utiliser le prompt spécifique pour la suggestion de titre
                         title_prompt = t("directpublish_suggest_title_prompt")
                         if not title:
-                            title = remove_quotes(self.process_with_llm(
-                                title_prompt,
-                                config['llm']['llm_sys_prompt'],
-                                plain_transcript[:2000]  # Limiter à 2000 caractères pour éviter les dépassements
-                            )).split('\n')[0].strip()
+                            title = (
+                                remove_quotes(
+                                    self.process_with_llm(
+                                        title_prompt,
+                                        config["llm"]["llm_sys_prompt"],
+                                        plain_transcript[
+                                            :2000
+                                        ],  # Limiter à 2000 caractères pour éviter les dépassements
+                                    )
+                                )
+                                .split("\n")[0]
+                                .strip()
+                            )
                     else:
                         # Comportement existant
                         title_prompt = t("directpublish_title_generator")
                         if not title:
-                            title = remove_quotes(self.process_with_llm(
-                                title_prompt,
-                                config['llm']['llm_sys_prompt'],
-                                transcript
-                            )).split('\n')[0].strip()
+                            title = (
+                                remove_quotes(
+                                    self.process_with_llm(
+                                        title_prompt,
+                                        config["llm"]["llm_sys_prompt"],
+                                        transcript,
+                                    )
+                                )
+                                .split("\n")[0]
+                                .strip()
+                            )
 
                     st.code(title)
 
                     tag_prompt = t("directpublish_tag_generator")
-                    tags += ", "+self.process_with_llm(
-                        tag_prompt,
-                        config['llm']['llm_sys_prompt'],
-                        transcript
+                    tags += ", " + self.process_with_llm(
+                        tag_prompt, config["llm"]["llm_sys_prompt"], transcript
                     )
                 else:
                     description = ""
@@ -425,6 +488,10 @@ class DirectpublishPlugin(Plugin):
                     st.text(t("directpublish_upload"))
                     print(title)
                     tags = remove_quotes(cut_string(tags))
+                    tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+                    MAX_TAGS = 35
+                    if len(tags_list) > MAX_TAGS:
+                        tags_list = tags_list[:MAX_TAGS]
                     st.code(tags)
                     st.info("Uploading...")
                     try:
@@ -433,19 +500,21 @@ class DirectpublishPlugin(Plugin):
                             title,
                             f"{introduction}\n{description}\n{addings}\n{signature}",
                             selected_category,
-                            tags.split(','),  # keywords (optionnel)
-                            "unlisted"
+                            tags_list,
+                            "unlisted",
                         )
-                    except:
+                    except Exception as e:
                         video_id = upload_video(
                             video_to_process,
                             title,
                             f"{description}\n{addings}\n{signature}",
                             selected_category,
                             [],
-                            "unlisted"
+                            "unlisted",
                         )
                         st.success(t("directpublish_notags"))
+                        st.write(f"**Debug - Tags utilisés:** `{tags_list}`")
+                        st.write(f"**Debug - Erreur:** {e}")
 
                     if use_custom_thumbnail and thumbnail_path and video_id:
                         st.text(t("directpublish_uploading_thumbnail"))
@@ -453,35 +522,56 @@ class DirectpublishPlugin(Plugin):
                         if yt.upload_thumbnail(video_id, thumbnail_path):
                             st.success(t("directpublish_thumbnail_success"))
                         else:
-                            st.error(t("directpublish_thumbnail_error").format(
-                                error="Check console for details"))
+                            st.error(
+                                t("directpublish_thumbnail_error").format(
+                                    error="Check console for details"
+                                )
+                            )
 
-                    st.success(t("directpublish_success").format(
-                        video_id=video_id))
+                    st.success(t("directpublish_success").format(video_id=video_id))
                     print("Upload finished")
 
-                    webhook_urls = config['directpublish'].get(
-                        'webhook_urls', '').strip().split('\n')
-                    webhook_urls = [url.strip()
-                                    for url in webhook_urls if url.strip()]
-                    with open(os.path.join(work_directory, "url.txt"), "w", encoding="utf-8") as f:
+                    webhook_urls = (
+                        config["directpublish"]
+                        .get("webhook_urls", "")
+                        .strip()
+                        .split("\n")
+                    )
+                    webhook_urls = [url.strip() for url in webhook_urls if url.strip()]
+                    with open(
+                        os.path.join(work_directory, "url.txt"), "w", encoding="utf-8"
+                    ) as f:
                         f.write(f"https://www.youtube.com/watch?v={video_id}")
 
                     if webhook_urls:
                         for webhook_url in webhook_urls:
-                            st.text(t("directpublish_triggering_webhook").format(
-                                webhook=webhook_url))
+                            st.text(
+                                t("directpublish_triggering_webhook").format(
+                                    webhook=webhook_url
+                                )
+                            )
                             try:
                                 response = requests.post(
-                                    webhook_url, json={"video_id": video_id})
+                                    webhook_url, json={"video_id": video_id}
+                                )
                                 if response.status_code == 200:
-                                    st.success(t("directpublish_webhook_triggered").format(
-                                        webhook=webhook_url))
+                                    st.success(
+                                        t("directpublish_webhook_triggered").format(
+                                            webhook=webhook_url
+                                        )
+                                    )
                                 else:
-                                    st.error(t("directpublish_webhook_not_triggered").format(
-                                        webhook=webhook_url, status_code=response.status_code))
+                                    st.error(
+                                        t("directpublish_webhook_not_triggered").format(
+                                            webhook=webhook_url,
+                                            status_code=response.status_code,
+                                        )
+                                    )
                             except Exception as e:
-                                st.error(t("directpublish_webhook_error").format(
-                                    webhook=webhook_url, error=str(e)))
+                                st.error(
+                                    t("directpublish_webhook_error").format(
+                                        webhook=webhook_url, error=str(e)
+                                    )
+                                )
                     else:
                         st.info(t("directpublish_no_webhooks"))
