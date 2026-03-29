@@ -871,8 +871,10 @@ class ShortextractorPlugin(Plugin):
             video_id = upload_video(
                 video_path, title, description, category_id, tags_list, "unlisted"
             )
-        except Exception:
+        except Exception as e:
             st.warning(t("directpublish_notags"))
+            st.write(f"**Debug - Tags utilisés:** `{tags_list}`")
+            st.write(f"**Debug - Erreur:** {e}")
             video_id = upload_video(
                 video_path, title, description, category_id, [], "unlisted"
             )
