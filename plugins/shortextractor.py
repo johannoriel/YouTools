@@ -868,8 +868,15 @@ class ShortextractorPlugin(Plugin):
         tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
 
         MAX_TAGS = 35
+        MAX_TAGS_CHARS = 500
         if len(tags_list) > MAX_TAGS:
             tags_list = tags_list[:MAX_TAGS]
+
+        total_chars = sum(len(tag) for tag in tags_list)
+        if total_chars > MAX_TAGS_CHARS:
+            tags_list = tags_list[:MAX_TAGS]
+            while sum(len(tag) for tag in tags_list) > MAX_TAGS_CHARS and tags_list:
+                tags_list.pop()
 
         try:
             video_id = upload_video(
