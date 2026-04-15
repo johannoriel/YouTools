@@ -117,6 +117,8 @@ The title should be concise, click-optimized, with Title Case and spaces (exampl
         "publication_success": "✅ Video published successfully!",
         "youtube_studio_link": "📊 YouTube Studio: https://studio.youtube.com/video/{video_id}/edit",
         "youtube_short_link": "📱 YouTube Shorts: https://www.youtube.com/shorts/{video_id}",
+        "resume_publication": "Resume publication",
+        "resume_publication_desc": "Regenerate title, tags, description and republish",
     }
 )
 
@@ -217,6 +219,8 @@ Le titre doit être concis, optimisé pour les clics, en français, avec des maj
         "publication_success": "✅ Vidéo publiée avec succès !",
         "youtube_studio_link": "📊 YouTube Studio : https://studio.youtube.com/video/{video_id}/edit",
         "youtube_short_link": "📱 YouTube Shorts : https://www.youtube.com/shorts/{video_id}",
+        "resume_publication": "Reprendre la publication",
+        "resume_publication_desc": "Régénérer le titre, les tags, la description et republier",
     }
 )
 
@@ -1094,6 +1098,104 @@ class ShortextractorPlugin(Plugin):
             # Étape 11 : Webhooks
             self.trigger_webhooks(video_id, config)
 
+def resume_publication(
+        self,
+        video_path: str,
+        work_directory: str,
+        config: dict,
+        custom_desc: str = "",
+    ):
+        """Reprendre la publication avec un autre LLM (modèle sélectionné manuellement par l'utilisateur)."""
+        st.info(t("resume_publication_desc"))
+
+        final_video = None
+
+        # Chercher les fichiers vidéo traités dans le work_directory
+        existing_files = [
+            f for f in os.listdir(work_directory)
+            if f.endswith(".mp4") and not f.startswith("temp_")
+        ]
+
+        if existing_files:
+            final_video = os.path.join(work_directory, existing_files[0])
+            st.info(f"Found existing processed video: {final_video}")
+        else:
+            # Chercher dans archive_directory
+            archive_directory = os.path.expanduser(
+                config["common"].get("archive_directory", work_directory)
+            )
+            if os.path.exists(archive_directory):
+                existing_files = [
+                    f for f in os.listdir(archive_directory)
+                    if f.endswith(".mp4")
+                ]
+                if existing_files:
+                    final_video = os.path.join(archive_directory, existing_files[0])
+                    st.info(f"Found existing processed video in archive: {final_video}")
+
+        if not final_video or not os.path.exists(final_video):
+            st.error("No processed video found. Please run 'Publish with subtitles' first.")
+            return
+
+        # Check if we have a transcript
+        if not st.session_state.transcript:
+            st.warning("No transcript found. Running transcription on processed video...")
+            # Transcribe the processed video (with silences removed)
+            transcript_plugin = self.plugin_manager.get_plugin("transcript")
+            st.session_state.transcript = transcript_plugin.transcribe_video(
+                final_video, "srt"
+            )
+
+        if not st.session_state.transcript:
+            st.error("Cannot resume publication without transcript.")
+            return
+
+        try:
+            # Regenerate metadata with current model (user should switch model manually before)
+            title, full_description, tags = self.generate_video_metadata(
+                st.session_state.transcript, config, custom_desc
+            )
+
+            # Affichage des métadonnées pour copie
+            tags_list = (
+                [t.strip() for t in tags.split(",")] if isinstance(tags, str) else tags
+            )
+            st.markdown("### 📋 Métadonnées générées (Nouveau modèle)")
+            with st.expander("Voir/Copier les métadonnées", expanded=True):
+                st.text_input("Titre", value=title, key="meta_title_resume")
+                st.text_area(
+                    "Description", value=full_description, key="meta_desc_resume", height=150
+                )
+                st.text_input("Tags", value=", ".join(tags_list), key="meta_tags_resume")
+
+            # Renommer le fichier avec le nouveau titre
+            with_subtitles = True  # Assume we used subtitles
+            safe_title = re.sub(r'[\\/:*?"<>|]', "-", title.strip())
+            new_name = f"{safe_title}.mp4"
+            new_path = os.path.join(work_directory, new_name)
+            i = 1
+            while os.path.exists(new_path):
+                new_path = os.path.join(work_directory, f"{safe_title} ({i}).mp4")
+                i += 1
+
+            # Copier le fichier existant avec le nouveau nom
+            import shutil
+            shutil.copy2(final_video, new_path)
+            final_video = new_path
+
+            st.success(f"File renamed to: {new_path}")
+
+            # Upload to YouTube
+            video_id = self.upload_to_youtube(
+                final_video, title, full_description, tags, config
+            )
+
+            # Trigger webhooks
+            self.trigger_webhooks(video_id, config)
+
+        except Exception as e:
+            st.error(f"Error during resume publication: {str(e)}")
+
     def run(self, config):
         st.header(t("shortextractor_header"))
 
@@ -1150,7 +1252,7 @@ class ShortextractorPlugin(Plugin):
 
         custom_desc = st.text_area(t("shortextractor_custom_desc"), "")
 
-        col_transcribe, col_pub_no_sub, col_pub_sub = st.columns(3)
+        col_transcribe, col_pub_no_sub, col_pub_sub, col_resume = st.columns(4)
 
         with col_transcribe:
             if st.button(t("shortextractor_transcribe")):
@@ -1179,6 +1281,15 @@ class ShortextractorPlugin(Plugin):
                     work_directory,
                     config,
                     with_subtitles=True,
+                    custom_desc=custom_desc,
+                )
+
+        with col_resume:
+            if st.button(t("resume_publication")):
+                self.resume_publication(
+                    selected_video_path,
+                    work_directory,
+                    config,
                     custom_desc=custom_desc,
                 )
 
